@@ -1,6 +1,6 @@
 # 快速开始
 1. 先安装 [DSH Desktop](https://deepseek.com/harness/)，运行一次后关闭。
-2. 下载 Release 中的 Windows ZIP，右键解压全部，双击“开始使用.cmd”，选择安装。
+2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.1/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择安装。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.1) 提供备用下载。
 3. 重启 DSH，再选择“打开设置”。不要在 ZIP 压缩预览窗口里运行安装。
 4. 配置自己的模型 Key；或在电脑输入管理员提供的激活码，使用已开通的金宝云端额度，无需安装金宝 App。已有 App 账号仍可使用配对登录。
 5. 启动 LoL 或王者日志采集，保持设置页打开查看实时策略。

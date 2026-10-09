@@ -1,6 +1,6 @@
 # 快速开始
 1. 先安装 [DSH Desktop](https://deepseek.com/harness/)，运行一次后关闭。
-2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.2/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择安装。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.2) 提供备用下载。
+2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.3/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择安装。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.3) 提供备用下载。
 3. 重启 DSH，再选择“打开设置”。不要在 ZIP 压缩预览窗口里运行安装。
 4. 配置自己的模型 Key；或在电脑输入管理员提供的激活码，使用已开通的金宝云端额度，无需安装金宝 App。已有 App 账号仍可使用配对登录。
 5. 启动 LoL 或王者日志采集，策略悬浮窗会自动弹出。也可单独双击 overlay.cmd，或在「开始使用」菜单选择 6。按 Ctrl+Alt+J 切换鼠标穿透与交互，交互时可拖动、缩放和关闭。
@@ -21,3 +21,5 @@
 
 ## 回退
 关闭 DSH，将用户目录/.dsh/profiles/desktop 下安装器生成的 cordis.patch.yml.jinbao-时间戳.bak 恢复为 cordis.patch.yml，再启动 DSH。
+
+如果双击「开始使用」闪退，请下载 v0.1.3 或更新版本，先完整解压 ZIP，再运行「开始使用.cmd」。菜单改用 PowerShell，操作失败会显示错误并返回菜单；不要只从压缩包里打开单个启动文件。

@@ -1,0 +1,33 @@
+# 合并到 Desktop 已有 llm-pi-ai providers 配置；不要覆盖其他模型。
+# API key/服务 token 放到 DSH 凭据管理器或进程环境，配置只保存变量名称。
+# 两条路由都直接接入 DSH 原生 agent 模型循环和工具调用。
+- id: llm-pi-ai
+  config:
+    providers:
+      user-model:
+        displayName: 自带模型 API key
+        apiKeyEnv: USER_MODEL_API_KEY
+        api: openai-completions
+        baseURL: https://your-model-provider.example/v1
+        models:
+          - id: your-model-id
+            name: 自带模型
+            contextWindow: 32768
+            maxTokens: 4096
+      jinbao-cloud:
+        displayName: 金宝云端模型
+        apiKeyEnv: JINBAO_SERVICE_TOKEN
+        api: openai-completions
+        baseURL: https://your-game-service.example/v1
+        defaultInput: [text]
+        compat:
+          supportsStore: false
+          supportsDeveloperRole: false
+          supportsReasoningEffort: false
+          supportsUsageInStreaming: true
+          maxTokensField: max_tokens
+        models:
+          - id: game-fast
+            name: 游戏策略模型
+            contextWindow: 32768
+            maxTokens: 4096

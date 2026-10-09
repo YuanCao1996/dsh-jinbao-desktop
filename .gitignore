@@ -1,0 +1,11 @@
+node_modules/
+workspace/
+.env
+.env.*
+!.env.example
+.credentials.yaml
+*.apk
+*.zip
+*.bak
+*.log
+*.jsonl

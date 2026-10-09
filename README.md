@@ -2,7 +2,7 @@
 
 读取游戏日志，生成策略建议。当前支持 Windows 上的 LoL 和王者日志流。
 
-**[下载 Windows 安装包](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.1.0/jinbao-desktop-windows.zip)** · **[下载手机配对 App](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.1.0/jinbao-app-desktop-pairing.apk)** · **[所有下载与版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.0)**
+**[下载 Windows 安装包](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.1.1/jinbao-desktop-windows.zip)** · **[下载手机配对 App](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.1.1/jinbao-app-desktop-pairing.apk)** · **[所有下载与版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.1)**
 
 普通用户下载上面的安装包即可，不需要克隆源码，也不需要安装 Node、Python 或下载攻略数据库。
 
@@ -13,7 +13,7 @@
 3. 重启 DSH Desktop；再次打开 `开始使用.cmd`，选择“打开设置”。
 4. 在设置页选择模型方式并保存：
    - **自带 API Key**：填写 OpenAI 兼容 API 地址、模型 ID 和 Key。模型调用无需微信登录。
-   - **金宝云端**：安装本页手机 App 并微信登录；电脑生成配对码，在手机「我 → 连接电脑」核对电脑名称后确认，再选择云端模型。账号需要开通云端额度。
+   - **金宝云端**：在电脑设置页输入管理员提供的激活码，登录后选择云端模型，无需安装金宝 App。已有 App 账号也可使用配对码登录。账号需要开通云端额度。
 5. 选择游戏采集：
    - **LoL**：打开英雄联盟客户端，选择“启动 LoL 采集”。
    - **王者**：手机通过 USB 连接，开启 USB 调试并授权电脑；在金宝 App 中开启游戏采集，再选择“启动王者采集”。
@@ -34,15 +34,17 @@
 | `manifest.json` | 每个文件的 SHA-256 清单 |
 | `jinbao-app-desktop-pairing.apk` | 在 Release 单独下载，安装在手机 |
 
+激活码是单次使用的账号凭据，24 小时内兑换；电脑会话最长 7 天。退出或丢失会话后需要管理员重新发码。独立电脑账号不按昵称自动合并微信账号，微信网站扫码登录尚未接入。
+
 攻略检索与模型权限独立。自带模型 Key 不会自动获得商业检索权限；新账号的云端模型和检索需要开通。BYOK 请求从电脑直接发往用户配置的模型厂商，密钥由本机 DSH 凭据管理保存。
 
 ## 当前范围
 
 - 王者和 LoL 日志流分析、策略建议、Agent 工具调用、SSE 输出。
-- 电脑配对、会话退出、两种模型方案、首次启动诊断。
+- 独立电脑激活码登录、可选 App 配对、会话退出、两种模型方案、首次启动诊断。
 - LoL 轻量采集读取 LCU/Live API；此下载包不包含海克斯画面 OCR 服务、旧悬浮窗或全部旧 companion 功能。
 - 任意游戏自动识别和所有游戏适配尚未实现。Go 云端延续 App 的完整回复后转换 SSE。
-- 真实手机微信确认与对局日志质量需要实机验证。
+- 独立电脑登录已做线上验证；可选的手机微信确认与对局日志质量需要实机验证。
 
 [快速开始与排障](docs/QUICKSTART.md) · [结构与开发](docs/DEVELOPMENT.md)
 

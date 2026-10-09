@@ -45,5 +45,5 @@ copyFileSync(join(root,'LICENSE'),join(out,'LICENSE'));
 copyFileSync(join(root,'tools/desktop-release/menu.cmd'),join(out,'开始使用.cmd'));
 copyFileSync(join(root,'README.md'),join(out,'README.md'));
 const files=walk(out,true).map(f=>({path:f.slice(out.length+1).replaceAll('\\','/'),bytes:statSync(f).size,sha256:createHash('sha256').update(readFileSync(f)).digest('hex')}));
-writeFileSync(join(out,'manifest.json'),JSON.stringify({version:'0.1.0',node:process.version,packages:[...packages],files},null,2));
+writeFileSync(join(out,'manifest.json'),JSON.stringify({version:JSON.parse(readFileSync(join(root,'package.json'))).version,node:process.version,packages:[...packages],files},null,2));
 console.log(JSON.stringify({out,files:files.length,packages:packages.size,bytes:files.reduce((n,f)=>n+f.bytes,0)}));

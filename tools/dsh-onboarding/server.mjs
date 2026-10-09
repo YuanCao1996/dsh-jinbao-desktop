@@ -89,6 +89,14 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
      if(b.mode==='cloud'&&!await resolve('cloud'))throw error(401);
      await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;return {saved:true};
     }
+    if(req.url==='/api/login/code'){
+     if(typeof b.activationCode!=='string')throw error(400);
+     const activationCode=b.activationCode.trim().toUpperCase();
+     if(!/^JB-[A-F0-9]{32}$/.test(activationCode))throw error(400);
+     const result=await remote('/desktop/auth/code/redeem',null,{activationCode});
+     if(typeof result.sessionToken!=='string'||!/^jc_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
+     await credentials.set(refs.cloud,result.sessionToken);pairing=null;return {status:'approved'};
+    }
     if(req.url==='/api/login/start'){
      pairing=await remote('/desktop/auth/device/start',null,{deviceName:hostname().slice(0,80)});
      return {userCode:pairing.userCode,expiresIn:pairing.expiresIn};

@@ -1,5 +1,5 @@
 # 开发与结构
-tools/dsh-onboarding：本机设置、电脑配对、诊断、实时建议、模型路由。
+tools/dsh-onboarding：本机设置、独立激活码登录、可选电脑配对、诊断、实时建议、模型路由。
 tools/dsh-game-services：site_datasets/site_query，商业服务只返回有界的 rows 数组。
 tools/dsh-coach-server：日志尾读、王者/LoL 适配、原生 Agent 循环和回复工具。
 tools/lol-companion：只读本机游戏接口的轻量采集器。

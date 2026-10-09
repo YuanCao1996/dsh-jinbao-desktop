@@ -8,6 +8,8 @@ GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处�
 
 普通用户下载上面的安装包即可，不需要克隆源码，也不需要安装 Node、Python 或下载攻略数据库。
 
+**[申请免费电脑试用](https://api.jinbaoai.top/desktop/trial)**：提交申请并保存私密领取凭证；人工审核后领取专属激活码，每人单独计量。[申请与领取说明](docs/TRIAL.md)。
+
 ## 第一次使用
 
 1. 安装并运行过一次 [DSH Desktop](https://deepseek.com/harness/)，然后关闭它。

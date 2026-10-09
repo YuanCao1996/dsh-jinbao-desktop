@@ -1,12 +1,12 @@
 # 快速开始
 1. 先安装 [DSH Desktop](https://deepseek.com/harness/)，运行一次后关闭。
-2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.3/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择安装。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.3) 提供备用下载。
+2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.4/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择安装。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.4) 提供备用下载。
 3. 重启 DSH，再选择“打开设置”。不要在 ZIP 压缩预览窗口里运行安装。
 4. 配置自己的模型 Key；或在电脑输入管理员提供的激活码，使用已开通的金宝云端额度，无需安装金宝 App。已有 App 账号仍可使用配对登录。
 5. 启动 LoL 或王者日志采集，策略悬浮窗会自动弹出。也可单独双击 overlay.cmd，或在「开始使用」菜单选择 6。按 Ctrl+Alt+J 切换鼠标穿透与交互，交互时可拖动、缩放和关闭。
 6. 游戏遮住悬浮窗时，切换游戏的无边框或窗口模式。
 
-王者需要金宝 App 的游戏采集功能、USB 连接及 USB 调试授权。ADB 已在 ZIP 中提供。手机配对 APK 为 arm64-v8a。
+王者需要金宝 App 的游戏采集功能、USB 连接及 USB 调试授权。ADB 已在 ZIP 中提供。手机 App 请从[金宝官网](https://www.jinbaoai.top/#download)下载统一 APK（arm64-v8a），无需另装配对专用版。
 独立电脑激活码只可使用一次，24 小时内兑换，会话最长 7 天；退出后需要管理员重新发码。
 新用户仅用 BYOK 进行模型调用不需要微信登录；云端模型和攻略检索需要独立开通权限。
 
@@ -22,4 +22,4 @@
 ## 回退
 关闭 DSH，将用户目录/.dsh/profiles/desktop 下安装器生成的 cordis.patch.yml.jinbao-时间戳.bak 恢复为 cordis.patch.yml，再启动 DSH。
 
-如果双击「开始使用」闪退，请下载 v0.1.3 或更新版本，先完整解压 ZIP，再运行「开始使用.cmd」。菜单改用 PowerShell，操作失败会显示错误并返回菜单；不要只从压缩包里打开单个启动文件。
+如果双击「开始使用」闪退，请下载 v0.1.4 或更新版本，先完整解压 ZIP，再运行「开始使用.cmd」。菜单改用 PowerShell，操作失败会显示错误并返回菜单；不要只从压缩包里打开单个启动文件。

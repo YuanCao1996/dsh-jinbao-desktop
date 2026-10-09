@@ -2,9 +2,9 @@
 
 读取游戏日志，生成策略建议。当前支持 Windows 上的 LoL 和王者日志流。
 
-**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.3/jinbao-desktop-windows.zip)** · **[服务器直链：可选手机 App](https://api.jinbaoai.top/downloads/dsh/v0.1.3/jinbao-app-desktop-pairing.apk)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.3)**
+**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.4/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.4)**
 
-GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处发布文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.3/SHA256SUMS.txt)。
+GitHub 下载缓慢时优先使用服务器直链，支持断点续传。Windows 包的服务器与 GitHub 文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.4/SHA256SUMS.txt)。
 
 普通用户下载上面的安装包即可，不需要克隆源码，也不需要安装 Node、Python 或下载攻略数据库。
 
@@ -40,7 +40,7 @@ GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处�
 | `runtime/` | Node 和 ADB 运行文件 |
 | `tools/` | 设置、模型路由、检索和游戏教练插件 |
 | `manifest.json` | 每个文件的 SHA-256 清单 |
-| `jinbao-app-desktop-pairing.apk` | 在 Release 单独下载，安装在手机 |
+| 手机 App | 从金宝官网下载安装统一 APK，包含电脑配对功能 |
 
 激活码是单次使用的账号凭据，24 小时内兑换；电脑会话最长 7 天。退出或丢失会话后需要管理员重新发码。独立电脑账号不按昵称自动合并微信账号，微信网站扫码登录尚未接入。
 

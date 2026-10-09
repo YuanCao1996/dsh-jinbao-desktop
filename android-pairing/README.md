@@ -1,6 +1,6 @@
 # App 配对模块
 这里公开本次新增的 DesktopLoginActivity.java，便于独立维护电脑配对。
-完整手机 App 安装包在 Release 下载。此目录不是完整 Android 工程。
+电脑配对已纳入现有金宝 App 工程，通过[金宝官网](https://www.jinbaoai.top/#download)统一发布。此目录仅供源码参考，不是独立 Android 工程，不构建或分发专用 APK。
 
 集成到现有 com.example.jinbao App：
 1. 将类放在 desktoplogin 包下。

@@ -2,9 +2,9 @@
 
 读取游戏日志，生成策略建议。当前支持 Windows 上的 LoL 和王者日志流。
 
-**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.1/jinbao-desktop-windows.zip)** · **[服务器直链：可选手机 App](https://api.jinbaoai.top/downloads/dsh/v0.1.1/jinbao-app-desktop-pairing.apk)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.1)**
+**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.2/jinbao-desktop-windows.zip)** · **[服务器直链：可选手机 App](https://api.jinbaoai.top/downloads/dsh/v0.1.2/jinbao-app-desktop-pairing.apk)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.2)**
 
-GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处发布文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.1/SHA256SUMS.txt)。
+GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处发布文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.2/SHA256SUMS.txt)。
 
 普通用户下载上面的安装包即可，不需要克隆源码，也不需要安装 Node、Python 或下载攻略数据库。
 
@@ -21,7 +21,10 @@ GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处�
 5. 选择游戏采集：
    - **LoL**：打开英雄联盟客户端，选择“启动 LoL 采集”。
    - **王者**：手机通过 USB 连接，开启 USB 调试并授权电脑；在金宝 App 中开启游戏采集，再选择“启动王者采集”。
-6. 设置页点击“刷新检测”，确认教练服务正常、日志持续更新。保持设置页打开即可查看实时策略。
+6. 设置页点击“刷新检测”，确认教练服务正常、日志持续更新。启动采集时会自动打开置顶策略悬浮窗，也可单独双击 `overlay.cmd`。
+7. 悬浮窗默认鼠标穿透；按 `Ctrl+Alt+J` 切换交互后可拖动、缩放、滚动、打开设置或关闭，再按一次恢复穿透。位置和尺寸会保存。
+
+如果游戏遮住窗口，请切换游戏的无边框或窗口模式。悬浮窗显示最新策略文字和更新时间；英雄、海克斯等旧 companion 完整面板不在此版本中。
 
 已验证宿主：DSH 0.1.5-rc.2。其他版本尚未完成兼容测试。安装器保留其他插件与模型配置；共享依赖版本不一致时会停止安装。
 
@@ -32,7 +35,8 @@ GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处�
 | `开始使用.cmd` | 统一安装、设置、采集入口 |
 | `install.cmd` | 安装扩展到当前用户的 DSH 配置 |
 | `settings.cmd` | 打开本机模型、登录和诊断页面 |
-| `lol.cmd` / `wzry.cmd` | 启动日志采集 |
+| `lol.cmd` / `wzry.cmd` | 启动日志采集并打开悬浮窗 |
+| `overlay.cmd` | 单独打开置顶策略悬浮窗 |
 | `runtime/` | Node 和 ADB 运行文件 |
 | `tools/` | 设置、模型路由、检索和游戏教练插件 |
 | `manifest.json` | 每个文件的 SHA-256 清单 |
@@ -45,7 +49,7 @@ GitHub 下载缓慢时优先使用服务器直链，支持断点续传。两处�
 ## 当前范围
 
 - 王者和 LoL 日志流分析、策略建议、Agent 工具调用、SSE 输出。
-- 独立电脑激活码登录、可选 App 配对、会话退出、两种模型方案、首次启动诊断。
+- 独立电脑激活码登录、可选 App 配对、策略悬浮窗、会话退出、两种模型方案、首次启动诊断。
 - LoL 轻量采集读取 LCU/Live API；此下载包不包含海克斯画面 OCR 服务、旧悬浮窗或全部旧 companion 功能。
 - 任意游戏自动识别和所有游戏适配尚未实现。Go 云端延续 App 的完整回复后转换 SSE。
 - 独立电脑登录已做线上验证；可选的手机微信确认与对局日志质量需要实机验证。

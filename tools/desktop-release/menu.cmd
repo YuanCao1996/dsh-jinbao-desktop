@@ -4,12 +4,17 @@ echo 金宝 DSH 游戏扩展
 echo.
 echo 1. 安装扩展（先关闭 DSH Desktop）
 echo 2. 打开设置和实时策略（先启动 DSH Desktop）
-echo 3. 启动 LoL 日志采集
-echo 4. 启动王者日志采集
+echo 3. 启动 LoL 采集和策略悬浮窗
+echo 4. 启动王者采集和策略悬浮窗
 echo 5. 打开 DSH Desktop 官方下载页
+echo 6. 单独打开策略悬浮窗
 echo Q. 退出
-choice /c 12345Q /n /m "请选择："
-if errorlevel 6 exit /b
+choice /c 123456Q /n /m "请选择："
+if errorlevel 7 exit /b
+if errorlevel 6 (
+call "%~dp0overlay.cmd"
+exit /b
+)
 if errorlevel 5 (
 start "" "https://deepseek.com/harness/"
 exit /b

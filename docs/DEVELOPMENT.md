@@ -3,7 +3,7 @@ tools/dsh-onboarding：本机设置、独立激活码登录、可选电脑配对
 tools/dsh-game-services：site_datasets/site_query，商业服务只返回有界的 rows 数组。
 tools/dsh-coach-server：日志尾读、王者/LoL 适配、原生 Agent 循环和回复工具。
 tools/lol-companion：只读本机游戏接口的轻量采集器。
-tools/desktop-release：安装与运行时打包。
+tools/desktop-release：安装与运行时打包，独立 WPF 策略悬浮窗及启动器。悬浮窗只读取用户状态目录的 coach_live_state.json，不依赖旧 LoL companion 或完整攻略库。
 android-pairing：App 电脑配对 Activity 的独立源码及集成说明。
 
 npm ci --ignore-scripts --legacy-peer-deps
@@ -14,4 +14,5 @@ Windows 构建时设置 JINBAO_BUILD_ADB_DIR 为已安装的 Android platform-to
 云端服务复用 App 的 OpenCode Go。所有 API Key 留在各自凭据边界，客户端服务凭据由 DSH 原生 credentials 管理。
 
 Windows ZIP 已做仓库外安装与依赖导入验证；设置与日志测试覆盖密钥不回显、新文件首事件、UTF-8 半行、截断及暂停恢复。
+悬浮窗已验证原生 WPF 渲染、置顶、鼠标穿透和交互切换、热键注册；PowerShell 文件使用 UTF-8 BOM，兼容 Windows PowerShell 5.1。
 原生 DSH 宿主已验证快路径、Agent coach_reply、SSE，以及日志进入 Agent 后生成建议；集成模型使用本地模拟服务。

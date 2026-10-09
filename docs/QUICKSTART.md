@@ -1,9 +1,10 @@
 # 快速开始
 1. 先安装 [DSH Desktop](https://deepseek.com/harness/)，运行一次后关闭。
-2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.1/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择安装。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.1) 提供备用下载。
+2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.2/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择安装。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.2) 提供备用下载。
 3. 重启 DSH，再选择“打开设置”。不要在 ZIP 压缩预览窗口里运行安装。
 4. 配置自己的模型 Key；或在电脑输入管理员提供的激活码，使用已开通的金宝云端额度，无需安装金宝 App。已有 App 账号仍可使用配对登录。
-5. 启动 LoL 或王者日志采集，保持设置页打开查看实时策略。
+5. 启动 LoL 或王者日志采集，策略悬浮窗会自动弹出。也可单独双击 overlay.cmd，或在「开始使用」菜单选择 6。按 Ctrl+Alt+J 切换鼠标穿透与交互，交互时可拖动、缩放和关闭。
+6. 游戏遮住悬浮窗时，切换游戏的无边框或窗口模式。
 
 王者需要金宝 App 的游戏采集功能、USB 连接及 USB 调试授权。ADB 已在 ZIP 中提供。手机配对 APK 为 arm64-v8a。
 独立电脑激活码只可使用一次，24 小时内兑换，会话最长 7 天；退出后需要管理员重新发码。

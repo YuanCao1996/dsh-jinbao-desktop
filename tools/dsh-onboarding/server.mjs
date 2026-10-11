@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { randomBytes,timingSafeEqual } from 'node:crypto';
-import { mkdir,readFile,writeFile,rename,readdir,stat,open } from 'node:fs/promises';
+import { mkdir,readFile,writeFile,rename,readdir,stat,open,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { once } from 'node:events';
@@ -15,13 +15,27 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
  const service=serviceUrl(serviceBaseUrl),nonce=randomBytes(32).toString('hex');
  await mkdir(join(stateDir,'logs'),{recursive:true});
  const filename=join(stateDir,'settings.json');
- let config={mode:'demo',baseUrl:'',model:''};
+ let config={mode:'cloud',baseUrl:'',model:''};
  try{config={...config,...JSON.parse(await readFile(filename,'utf8'))};}catch(e){if(e.code!=='ENOENT')throw Error('Invalid Jinbao settings file');}
  let local=(await credentials.resolve(refs.local))?.value;
  if(!local){local=randomBytes(32).toString('hex');await credentials.set(refs.local,local);}
  let pairing=null,mutation=Promise.resolve();
+ let wechat={enabled:false,checkedAt:0};
+ let nextRenewAttempt=0;
  const locked=fn=>{const next=mutation.then(fn);mutation=next.catch(()=>{});return next;};
  const resolve=async key=>(await credentials.resolve(refs[key]))?.value;
+ async function saveConfig(next){await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;}
+ async function acceptCloud(result){
+  if(typeof result.sessionToken!=='string'||!/^j[cdw]_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
+  await credentials.set(refs.cloud,result.sessionToken);
+  nextRenewAttempt=0;
+  if(Number.isFinite(result.expiresIn)&&result.expiresIn>0&&result.expiresIn<=2592000){
+   await writeFile(join(stateDir,'cloud-login.json'),JSON.stringify({expiresAt:Date.now()+result.expiresIn*1000,renewAfter:Date.now()+86400000}));
+  }else await rm(join(stateDir,'cloud-login.json'),{force:true});
+  // A deliberate BYOK choice survives account linking. New installations default to cloud.
+  if(config.mode!=='byok')await saveConfig({mode:'cloud',baseUrl:'',model:''});
+  pairing=null;
+ }
  async function remote(path,token,data){
   const response=await fetchImpl(new URL(path,service),{method:data===undefined?'GET':'POST',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(data===undefined?{}:{'Content-Type':'application/json'})},...(data===undefined?{}:{body:JSON.stringify(data)}),redirect:'error',signal:AbortSignal.timeout(10000)});
   if(!response.ok){await response.body?.cancel();throw error(response.status);}
@@ -33,8 +47,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
   for(const name of files){const info=await stat(join(stateDir,'logs',name));if(!recent||info.mtimeMs>recent.modifiedAt)recent={name,modifiedAt:info.mtimeMs,bytes:info.size};}
   let validTail=false;
   if(recent&&recent.bytes){const f=await open(join(stateDir,'logs',recent.name),'r');try{const n=Math.min(recent.bytes,65536),buffer=Buffer.alloc(n);await f.read(buffer,0,n,recent.bytes-n);const lines=buffer.toString('utf8').trim().split('\n');if(recent.bytes>n)lines.shift();validTail=lines.slice(-10).every(line=>{try{return !!JSON.parse(line);}catch{return false;}});}finally{await f.close();}}
-  let coachReady=false;try{const r=await fetchImpl('http://127.0.0.1:3081/health',{signal:AbortSignal.timeout(2000),redirect:'error'});coachReady=r.ok;await r.body?.cancel();}catch{}
-  return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady};
+  let coachReady=false;try{const r=await fetchImpl('http://127.0.0.1:3081/coach/state',{signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
+  const snapshot=overlay.view();
+  return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
+   activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000};
  }
  const overlay=await createOverlayService({stateDir,
   search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
@@ -89,9 +105,23 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
     send(res,200,{text:typeof reply?.text==='string'?reply.text.slice(0,2000):'',updatedAt:Number.isFinite(reply?.at)?reply.at:null,game:typeof snapshot.game==='string'?snapshot.game.slice(0,32):null});return;
    }
    if(req.url==='/api/status'&&req.method==='GET'){
-    const token=await resolve('cloud');let account=null,accountError=null;
+    if(Date.now()-wechat.checkedAt>60000){try{const capability=await remote('/desktop/auth/wechat/capabilities');wechat={enabled:capability.enabled===true,checkedAt:Date.now()};}catch{wechat={enabled:false,checkedAt:Date.now()};}}
+    let token=await resolve('cloud');let account=null,accountError=null;
+    if(token?.startsWith('jd_'))try{
+     const lifetime=JSON.parse(await readFile(join(stateDir,'cloud-login.json'),'utf8'));
+     if(Date.now()>lifetime.renewAfter&&Date.now()<lifetime.expiresAt&&Date.now()>=nextRenewAttempt){
+      await locked(async()=>{
+       const current=await resolve('cloud');
+       if(current!==token||Date.now()<nextRenewAttempt)return;
+       // Apply backoff before calling upstream so concurrent status polls share it.
+       nextRenewAttempt=Date.now()+300000;
+       await acceptCloud(await remote('/desktop/auth/session/renew',current,{}));
+      });
+      token=await resolve('cloud');
+     }
+    }catch{ /* A failed renewal does not invalidate an otherwise valid session. */ }
     if(token)try{account=await remote('/desktop/account',token);}catch(e){accountError=e.status??503;}
-    send(res,200,{...config,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,...await diagnostic()});return;
+    send(res,200,{...config,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
@@ -107,12 +137,11 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
       if(!await resolve('byok'))throw error(401);
      }
      if(b.mode==='cloud'&&!await resolve('cloud'))throw error(401);
-     await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;return {saved:true};
+     await saveConfig(next);return {saved:true};
     }
     if(req.url==='/api/login/ip'){
      const result=await remote('/desktop/auth/ip/register',null,{});
-     if(typeof result.sessionToken!=='string'||!/^jc_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
-     await credentials.set(refs.cloud,result.sessionToken);pairing=null;
+     await acceptCloud(result);
      return {status:'approved',nickname:result.nickname,seat:result.seat,seats:result.seats,modelLimit:result.modelLimit};
     }
     if(req.url==='/api/login/code'){
@@ -120,22 +149,28 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
      const activationCode=b.activationCode.trim().toUpperCase();
      if(!/^JB-[A-F0-9]{32}$/.test(activationCode))throw error(400);
      const result=await remote('/desktop/auth/code/redeem',null,{activationCode});
-     if(typeof result.sessionToken!=='string'||!/^jc_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
-     await credentials.set(refs.cloud,result.sessionToken);pairing=null;return {status:'approved'};
+     await acceptCloud(result);return {status:'approved'};
     }
     if(req.url==='/api/login/start'){
      pairing=await remote('/desktop/auth/device/start',null,{deviceName:hostname().slice(0,80)});
      return {userCode:pairing.userCode,expiresIn:pairing.expiresIn};
     }
+    if(req.url==='/api/login/wechat/start'){
+     const result=await remote('/desktop/auth/wechat/start',null,{deviceName:hostname().slice(0,80)});
+     const authorize=new URL(result.authorizationUrl);
+     if(authorize.origin!=='https://open.weixin.qq.com'||authorize.pathname!=='/connect/qrconnect'||authorize.username||authorize.password||typeof result.deviceSecret!=='string'||!Number.isFinite(result.expiresIn))throw error(502);
+     pairing=result;
+     return {authorizationUrl:authorize.href,expiresIn:result.expiresIn};
+    }
     if(req.url==='/api/login/poll'){
      if(!pairing)throw error(410);
      const result=await remote('/desktop/auth/device/poll',null,{deviceSecret:pairing.deviceSecret});
-     if(result.status==='approved'){await credentials.set(refs.cloud,result.sessionToken);pairing=null;return {status:'approved'};}
+     if(result.status==='approved'){await acceptCloud(result);return {status:'approved'};}
      return {status:'pending'};
     }
     if(req.url==='/api/logout'){
      const token=await resolve('cloud');if(token)await remote('/desktop/auth/logout',token,{});
-     await credentials.unset(refs.cloud);pairing=null;return {loggedOut:true};
+     await credentials.unset(refs.cloud);await rm(join(stateDir,'cloud-login.json'),{force:true});nextRenewAttempt=0;pairing=null;return {loggedOut:true};
     }
     throw error(404);
    });

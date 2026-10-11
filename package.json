@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test tools/dsh-onboarding/tests/*.test.mjs tools/dsh-coach-server/tests/*.test.mjs",
+    "test": "node --test tools/dsh-onboarding/tests/*.test.mjs tools/dsh-coach-server/tests/*.test.mjs tools/jinbao-launcher/tests/*.test.mjs",
     "build": "node tools/desktop-release/build.mjs"
   },
   "dependencies": {

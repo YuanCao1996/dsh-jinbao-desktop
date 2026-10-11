@@ -19,10 +19,30 @@ test('mid-game capture uses elapsed seconds, ends at GameEnd, resets across matc
  applyOverlayEvent(s,{game:'lol',t:2000,kind:'event',name:'GameEnd',time:559},'match1');
  applyOverlayEvent(s,{game:'lol',t:2001,kind:'state',state:{time:560}},'match1');
  assert.equal(overlayView(s).gameTime,'09:20');assert.equal(s.ended,true);
+ s.chat.push({role:'user',text:'上一局问题'});
  applyOverlayEvent(s,{game:'lol',t:3000,kind:'game_start',gameTime:3,me:{champion:'安妮'}},'match2');
  applyOverlayEvent(s,{at:1002,broadcast:'上一局建议'},'coach');
  assert.equal(s.ended,false);assert.equal(s.events.length,0);assert.equal(s.broadcasts.length,0);assert.equal(overlayView(s).gameTime,'00:03');
+ assert.equal(s.chat.length,0);
  assert.equal(clock(3601),'60:01');assert.equal(clock(null),'等待对局');
+});
+
+test('a delayed chat reply cannot overwrite the next match or its advice',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-chat-race-'));await mkdir(join(dir,'logs'));
+ const file=join(dir,'logs','lol-live.jsonl');
+ await writeFile(file,JSON.stringify({game:'lol',t:1,kind:'game_start',gameTime:5})+'\n');
+ let finish;
+ const service=await createOverlayService({stateDir:dir,pollMs:10,complete:()=>new Promise(resolve=>{finish=resolve;}),search:()=>{throw Error('unexpected query')}});t.after(service.close);
+ const request=service.ask('上一局怎么出装','equipment');
+ const rejected=assert.rejects(request,error=>error.status===409);
+ for(let i=0;!finish&&i<100;i++)await new Promise(r=>setTimeout(r,10));
+ assert.equal(typeof finish,'function');
+ await appendFile(file,JSON.stringify({game:'lol',t:2,kind:'game_start',gameTime:0})+'\n');
+ for(let i=0;service.view().gameTime!=='00:00'&&i<100;i++)await new Promise(r=>setTimeout(r,10));
+ assert.equal(service.view().gameTime,'00:00');
+ finish('上一局的过期出装建议');await rejected;
+ assert.doesNotMatch(service.view().chat,/上一局/);
+ assert.doesNotMatch(service.view().equipment,/过期出装建议/);
 });
 
 test('collector preserves both teams and resolves missing puuid through tagged player name before reading history',async()=>{

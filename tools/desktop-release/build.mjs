@@ -6,7 +6,7 @@ if(process.platform!=='win32')throw Error('Windows release builds must run on Wi
 const root=resolve('.'),out=resolve(process.argv[2]??'workspace/client-releases/jinbao-desktop');
 if(existsSync(out))throw Error('Choose a new output directory; existing releases are never overwritten');
 mkdirSync(join(out,'tools'),{recursive:true});
-for(const name of ['dsh-onboarding','dsh-game-services','dsh-coach-server','desktop-release']){
+for(const name of ['dsh-onboarding','dsh-game-services','dsh-coach-server','desktop-release','jinbao-launcher']){
  cpSync(join(root,'tools',name),join(out,'tools',name),{recursive:true,filter:p=>!p.includes('tests')&&!p.includes('.bak')&&!p.endsWith('build.mjs')});
 }
 mkdirSync(join(out,'tools','lol-companion'),{recursive:true});
@@ -44,7 +44,9 @@ writeFileSync(join(out,'lol.cmd'),'@echo off\r\npowershell.exe -NoProfile -Execu
 writeFileSync(join(out,'wzry.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\start-overlay.ps1"\r\n"%~dp0runtime\\node.exe" "%~dp0tools\\desktop-release\\capture-wzry.mjs"\r\npause\r\n');
 cpSync(join(root,'docs'),join(out,'docs'),{recursive:true});
 copyFileSync(join(root,'LICENSE'),join(out,'LICENSE'));
-copyFileSync(join(root,'tools/desktop-release/menu.cmd'),join(out,'开始使用.cmd'));
+writeFileSync(join(out,'start-jinbao.vbs'),'Option Explicit\r\nDim shell, fs, root, command\r\nSet shell = CreateObject("WScript.Shell")\r\nSet fs = CreateObject("Scripting.FileSystemObject")\r\nroot = fs.GetParentFolderName(WScript.ScriptFullName)\r\ncommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & root & "\\tools\\jinbao-launcher\\start.ps1" & Chr(34)\r\nshell.Run command, 0, False\r\n');
+writeFileSync(join(out,'开始使用.cmd'),'@echo off\r\nwscript.exe "%~dp0start-jinbao.vbs"\r\n');
+copyFileSync(join(root,'tools/desktop-release/menu.cmd'),join(out,'高级维护.cmd'));
 copyFileSync(join(root,'README.md'),join(out,'README.md'));
 const files=walk(out,true).map(f=>({path:f.slice(out.length+1).replaceAll('\\','/'),bytes:statSync(f).size,sha256:createHash('sha256').update(readFileSync(f)).digest('hex')}));
 writeFileSync(join(out,'manifest.json'),JSON.stringify({version:JSON.parse(readFileSync(join(root,'package.json'))).version,node:process.version,packages:[...packages],files},null,2));

@@ -13,6 +13,8 @@ const lookupStats=createRosterStats(readCredentials);
 let nextMatch=true;
 console.log('LoL collector started; waiting for client. Logs: '+folder);
 let running=true;process.once('SIGINT',()=>{running=false;});process.once('SIGTERM',()=>{running=false;});
+process.on('message',message=>{if(message?.action==='stop')running=false;});
+if(process.connected)process.once('disconnect',()=>{running=false;});
 while(running){
  try{
   const credentials=readCredentials();
@@ -35,3 +37,4 @@ while(running){
  }catch{ /* Client can disappear between polling steps; no credential is logged. */ }
  await sleep(3000);
 }
+if(process.connected)process.disconnect();

@@ -19,7 +19,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { existsSync, readdirSync, rmSync, writeFileSync, appendFileSync, mkdirSync, statSync, renameSync } from "node:fs";
 import { join as joinPath, basename } from "node:path";
 import { homedir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { SessionPreparation } from "@deepseek-ai/dsh-session";
@@ -28,6 +28,10 @@ import { createTailer, appendBroadcast } from "./logstream.js";
 import { createGameRegistry, WZRY_ADAPTER, LOL_ADAPTER } from "./game-registry.js";
 import { SseStream, sseHeaders } from "./sse.js";
 import { createVision } from "./vision.js";
+import { createMonitorBank } from "./monitor-bank.js";
+import { createMatchTracker } from "./match-tracker.js";
+import { projectWzryFacts } from "./adapters/wzry-facts.js";
+import { openCoachSession } from "./session-runtime.js";
 
 const name = "coach-server";
 const inject = ["tools", "systemPrompt", "llm", "agentLoop", "sessions", "web"];
@@ -107,6 +111,8 @@ const Config = z.object({
   // coach-live 会话启动看门狗:createAgent 既不 resolve 也不 reject 时(实测:preset
   // mount 卡住),旧实现让队列无限增长且毫无痕迹 —— 到点即判定失败并拒绝队列。
   monitorStartTimeoutMs: z.number().default(90000),
+  monitorWarmup: z.boolean().default(false), // Waiting for a game must not consume model tokens.
+  sessionCleanup: z.boolean().default(false), // Unique session IDs need no deletion of unrelated stored sessions.
   // 失败后的自动重建冷却。冷却期一过,下一条事件会重建会话(自愈),
   // 而不是让整个 DSH 生命周期内所有回合永久静默。
   monitorRetryCooldownMs: z.number().default(30000),
@@ -1392,7 +1398,11 @@ function apply(ctx, config) {
     const startTailer = () => {
       let briefCount = 0;
       let broadcastCount = 0;
-      liveMonitor = createMonitor(ctx, cfg, resolveGame);
+      liveMonitor = createMonitorBank((game,source) => createMonitor(ctx, { ...cfg, defaultGame: game,
+        monitorSessionId:'coach-live-'+createHash('sha256').update(game+':'+source).digest('hex').slice(0,24) }, resolveGame));
+      liveMonitor.get(cfg.defaultGame ?? "wzry", "waiting");
+      const monitorBank = liveMonitor;
+      ctx.effect(() => () => monitorBank.close());
       const pushMonitor = liveMonitor;
 
       // ── 事件分层 + 聚合防抖调度器(Phase 1)───────────────────────────
@@ -1423,21 +1433,21 @@ function apply(ctx, config) {
         (ev && ev.game && gameRegistry.get(ev.game)) || defaultAdapter;
       /** 每款游戏一份解析状态(已见英雄/事件 id、事实指纹等):adapter 自己定义形状 */
       const stateByGame = new Map();
-      const stateOf = (a) => {
-        let s = stateByGame.get(a.id);
-        if (!s) { s = a.createState ? a.createState() : {}; stateByGame.set(a.id, s); }
+      const stateOf = (a, source) => {
+        const key = a.id + ':' + source;
+        let s = stateByGame.get(key);
+        if (!s) { if(stateByGame.size>=64)stateByGame.delete(stateByGame.keys().next().value);s = a.createState ? a.createState() : {}; stateByGame.set(key, s); }
         return s;
       };
       /** 重置某游戏(或全部)的解析状态 —— 重放/暂停视为新起点。 */
       const resetStates = (a) => {
-        if (a) stateByGame.set(a.id, a.createState ? a.createState() : {});
-        else for (const g of gameRegistry.list()) { const ad = gameRegistry.get(g.id); stateByGame.set(g.id, ad.createState ? ad.createState() : {}); }
+        stateByGame.clear();
       };
       const filterOf = (a) => (a.filter ?? {});
-      const isRelevant = (ev, a) => (filterOf(a).isRelevant ? filterOf(a).isRelevant(ev, stateOf(a)) : true);
-      const isContextOnly = (ev, a) => (filterOf(a).contextOnly ? filterOf(a).contextOnly(ev, stateOf(a)) : false);
-      const isFactChanged = (ev, src, a) => (filterOf(a).isFactChanged ? filterOf(a).isFactChanged(ev, stateOf(a), src) : true);
-      const isHighSignalBatch = (evs, a) => (filterOf(a).isHighSignal ? filterOf(a).isHighSignal(evs, stateOf(a)) : true);
+      const isRelevant = (ev, a, src) => (filterOf(a).isRelevant ? filterOf(a).isRelevant(ev, stateOf(a,src)) : true);
+      const isContextOnly = (ev, a, src) => (filterOf(a).contextOnly ? filterOf(a).contextOnly(ev, stateOf(a,src)) : false);
+      const isFactChanged = (ev, src, a) => (filterOf(a).isFactChanged ? filterOf(a).isFactChanged(ev, stateOf(a,src), src) : true);
+      const isHighSignalBatch = (evs, a, src) => (filterOf(a).isHighSignal ? filterOf(a).isHighSignal(evs, stateOf(a,src)) : true);
       // 上下文事件(YOLO 检测 / 可见性刷新 / 端游局势轮询)的最新快照 —— 只富化同窗口的
       // 触发回合,自身不触发。用 last-wins 而非列表,避免高频帧把窗口撑爆。
       const contextOnlyLatest = new Map(); // key -> { event, sourceFile, adapter, at }
@@ -1445,10 +1455,8 @@ function apply(ctx, config) {
       // 每个都问一次模型纯浪费。限流期内的事件**推迟并入下次触发**(不丢)。
       const LOW_SIGNAL_MIN_MS = 30000;     // 低信号批次最小间隔(30s)
       const CONTEXT_SNAPSHOT_TTL_MS = 60000; // 上下文快照保鲜期:超时不再并入提示词
-      let lastLowSignalAt = 0;
-      let deferredEvents = [];
-      let deferredSourceFile = "-";
-      let deferredAdapter = defaultAdapter;
+      const lowSignalAt = new Map();
+      const deferredBySource = new Map();
       let suppressedLowSignal = 0;
 
       function hashText(s) {
@@ -1464,9 +1472,8 @@ function apply(ctx, config) {
         collectBuffer.length = 0;
         resetStates(); // 重放视为新起点(所有游戏)
         contextOnlyLatest.clear();
-        deferredEvents = [];
-        deferredAdapter = defaultAdapter;
-        lastLowSignalAt = 0;
+        deferredBySource.clear();
+        lowSignalAt.clear();
         suppressedLowSignal = 0;
       }
 
@@ -1479,10 +1486,11 @@ function apply(ctx, config) {
           : null;
         if (!body) return;
         const primary = events[0]; // 取首个作 kind/key 归因
-        const matchId = `file-${sourceFile.replace(/\.jsonl$/i, "")}`;
+        const matchId = primary.match ?? `file-${sourceFile.replace(/\.jsonl$/i, "")}`;
+        body.game=a.id;body.match_id=matchId;
         console.log(`[coach-server] logstream dialog game=${a.id} aggregated=${events.length} kinds=${events.map((e) => e.kind).join("+")} match=${matchId}`);
         updateLiveState({ agentStatus: "running", game: a.id, agentStep: liveState.agentStep + 1 }, cfg);
-        liveMonitor.submitInteraction({ ...primary, _aggregated: events }, sourceFile, body).then((text) => {
+        liveMonitor.get(a.id, sourceFile).submitInteraction({ ...primary, _aggregated: events }, sourceFile, body).then((text) => {
           const entry = {
             at: new Date().toISOString(),
             source: sourceFile,
@@ -1497,7 +1505,7 @@ function apply(ctx, config) {
           appendBroadcast(cfg.broadcastFile, entry);
           console.log(`[coach-server] logstream ★播报(${primary.kind}×${events.length}): ${text || "(silent)"}`);
           diagLog(`★播报(${primary.kind}×${events.length}): ${text || "(静音)"}`, cfg);
-          updateLiveState({ agentStatus: text ? "replied" : "idle", lastReply: { at: Date.now(), kind: primary.kind, text } }, cfg);
+          if(liveState.match===matchId)updateLiveState({ agentStatus: text ? "replied" : "idle", lastReply: { at: Date.now(), kind: primary.kind, text,game:a.id,match:matchId,source:sourceFile } }, cfg);
         }).catch((error) => {
           // 为什么把错误写进状态:真机对局 m20260919143955 里 134 个回合全部失败,但
           // 表现只是"教练不说话" —— lastReply 停在更早的一次成功、agentStatus 回到 idle。
@@ -1506,7 +1514,7 @@ function apply(ctx, config) {
           const msg = String(error?.message ?? error);
           console.warn(`[coach-server] logstream processing error: ${msg}`);
           diagLog(`✗ 回合失败: ${msg}`, cfg);
-          updateLiveState({
+          if(liveState.match===matchId)updateLiveState({
             agentStatus: "idle",
             lastError: { at: Date.now(), stage: "turn", kind: primary.kind, message: msg }
           }, cfg);
@@ -1531,27 +1539,27 @@ function apply(ctx, config) {
         // 聚合窗口内只可能出现同一款游戏的事件:acceptDialogEvent 在 adapter 切换时会先 flush。
         const adapter = batch[0].adapter ?? defaultAdapter;
         const now = Date.now();
-        const events = [...(deferredAdapter?.id === adapter.id ? deferredEvents : []), ...batch.map((b) => b.event)];
+        const sourceKey=adapter.id+':'+batch[0].sourceFile;
+        const events = [...(deferredBySource.get(sourceKey)??[]), ...batch.map((b) => b.event)];
         // 上下文快照只在"新鲜"时并入(默认 60s),且只并入**同款游戏**的:避免把几分钟前的
         // 小地图/可见性状态一直塞进后续每一轮提示词,也避免跨游戏串味。
-        for (const { event, at, adapter: a } of contextOnlyLatest.values()) {
+        for (const { event, at, adapter: a, sourceFile } of contextOnlyLatest.values()) {
           if (now - (at ?? 0) > CONTEXT_SNAPSHOT_TTL_MS) continue;
           if ((a?.id ?? defaultAdapter.id) !== adapter.id) continue;
+          if (sourceFile!==batch[0].sourceFile) continue;
           if (!events.includes(event)) events.push(event);
         }
-        const high = isHighSignalBatch(events, adapter);
-        if (!high && now - lastLowSignalAt < LOW_SIGNAL_MIN_MS) {
+        const high = isHighSignalBatch(events, adapter,batch[0].sourceFile);
+        if (!high && now - (lowSignalAt.get(sourceKey)??0) < LOW_SIGNAL_MIN_MS) {
           // 低信号批次限流:推迟到下次(不丢事件),状态已由 liveState 更新
-          deferredEvents = events.slice(-COLLECT_MAX);
-          deferredSourceFile = batch[0].sourceFile;
-          deferredAdapter = adapter;
+          if(deferredBySource.size>=64&&!deferredBySource.has(sourceKey))deferredBySource.delete(deferredBySource.keys().next().value);
+          deferredBySource.set(sourceKey,events.slice(-COLLECT_MAX));
           suppressedLowSignal += 1;
           console.log(`[coach-server] logstream low-signal batch deferred (${events.length} obs, suppressed=${suppressedLowSignal})`);
           return;
         }
-        if (!high) lastLowSignalAt = now;
-        deferredEvents = [];
-        deferredAdapter = adapter;
+        if (!high){if(lowSignalAt.size>=64&&!lowSignalAt.has(sourceKey))lowSignalAt.delete(lowSignalAt.keys().next().value);lowSignalAt.set(sourceKey,now);}
+        deferredBySource.delete(sourceKey);
         submitDialog(events.slice(-COLLECT_MAX), batch[0].sourceFile, adapter);
       }
 
@@ -1560,17 +1568,18 @@ function apply(ctx, config) {
       function acceptDialogEvent(event, sourceFile, adapter) {
         const a = adapter ?? defaultAdapter;
         // 上下文事件(如 YOLO 检测帧 / 端游局势轮询):只保留最新快照,不单独触发回合
-        if (isContextOnly(event, a)) {
+        if (isContextOnly(event, a, sourceFile)) {
           const ctxKey = (filterOf(a).contextKey ? filterOf(a).contextKey(event) : null) || `${event.kind}:${event.key ?? ""}`;
-          contextOnlyLatest.set(ctxKey, { event, sourceFile, adapter: a, at: Date.now() });
+          contextOnlyLatest.set(sourceFile+':'+ctxKey, { event, sourceFile, adapter: a, at: Date.now() });
+          if(contextOnlyLatest.size>500)contextOnlyLatest.delete(contextOnlyLatest.keys().next().value);
           return false;
         }
         // 噪音过滤:加载页/菜单/公告/版本号等 OCR 内容、识别失败的小地图 → 不触发对话
-        if (!isRelevant(event, a)) return false;
+        if (!isRelevant(event, a,sourceFile)) return false;
         // 事实指纹门(如 brief:比分/时间/经济/事件词未变)→ 同一事实重复播报,丢弃
         if (!isFactChanged(event, sourceFile, a)) return false;
         // 去重(按游戏分别记指纹,避免两款游戏同文案互相压制)
-        const hash = `${a.id}:${event.kind}:${hashText(event.text ?? event.key ?? event.rawMessage)}`;
+        const hash = `${a.id}:${sourceFile}:${event.kind}:${hashText(event.text ?? event.key ?? event.rawMessage)}`;
         const now = Date.now();
         // 去重:同 kind 同内容近期已对话过 → 丢弃
         const last = recentHashes.get(hash);
@@ -1581,7 +1590,7 @@ function apply(ctx, config) {
           for (const [k, t] of recentHashes) if (now - t > DEDUPE_MS * 2) recentHashes.delete(k);
         }
         // 聚合窗口内不允许混游戏:换游戏前先把已有窗口 flush 掉
-        if (collectBuffer.length > 0 && (collectBuffer[0].adapter?.id ?? defaultAdapter.id) !== a.id) flushCollect();
+        if (collectBuffer.length > 0 && ((collectBuffer[0].adapter?.id ?? defaultAdapter.id) !== a.id||collectBuffer[0].sourceFile!==sourceFile)) flushCollect();
         // 聚合:进 collecting buffer(保留近窗观察供 interaction 作为上下文)
         collectBuffer.push({ event, sourceFile, adapter: a });
         if (collectBuffer.length >= COLLECT_MAX) { flushCollect(); return true; }
@@ -1595,7 +1604,17 @@ function apply(ctx, config) {
 
       // 暂停标志:必须在 createTailer 之前声明(createTailer 会同步 scan 触发 onEvent)
       let dialogPaused = false;
+      const matchTracker=createMatchTracker();
       const tailer = createTailer(cfg.watchDir, (event, sourceFile) => {
+        sourceFile=event.match??sourceFile;
+        updateLiveState({game:event.game,match:event.match??sourceFile},cfg);
+        if(event.kind==='match_start'){
+          updateLiveState({agentStatus:'idle',gameTime:null,lastReply:null},cfg);return;
+        }
+        if(event.kind==='match_end'){
+          liveMonitor.finish(event.game,sourceFile);
+          updateLiveState({agentStatus:'idle'},cfg);return;
+        }
         // 暂停时彻底静默:不推送任何刻度,不触发对话
         if (dialogPaused) return;
         // 该事件所属游戏的 adapter(由 ingest.classify 写入 event.game)
@@ -1655,7 +1674,7 @@ function apply(ctx, config) {
           const line = `[App原播报 #${broadcastCount}] ${event.text}`;
           console.log(`[coach-server] logstream ${line.slice(0, 80)}`);
           updateLiveState({ lastBroadcast: { at: Date.now(), text: event.text } }, cfg);
-          pushMonitor.push(line);
+          pushMonitor.push(line, evAdapter.id, sourceFile);
           return;
         }
         // brief_start 参与 brief 拼接:此处 brief 的 text 已含完整简报,直接走对话
@@ -1676,9 +1695,18 @@ function apply(ctx, config) {
         // 命中后把 game id 写回事件,后续过滤/拼装都按这个 adapter 走。
         ingest: {
           classify(raw, file) {
+            if(raw.clockPending)return null;
             const a = adapterOfLog(raw, file);
             const ev = a.log.classify(raw, file);
+            if(raw.matchEnded&&ev?.kind!=='match_end')return null;
             if (ev && !ev.game) ev.game = a.id;
+            if(ev){
+              const facts=a.id==='wzry'?projectWzryFacts(ev):raw;
+              const identity=matchTracker.identify(a.id,file,{seconds:facts?.state?.time??facts?.gameTime,at:Number(raw.t)||a.log.eventTime?.(raw,file)||0,
+                started:raw.kind==='game_start'||ev.kind==='match_start',ended:ev.kind==='match_end',match:raw.match});
+              if(identity.pending)return null;
+              ev.match=identity.match;
+            }
             return ev;
           },
           eventTime(raw, file) {
@@ -1743,11 +1771,14 @@ function apply(ctx, config) {
 //   直接调用会抛 "resolveGame is not defined",而那是 createAgent 阶段,
 //   表现为会话建不出来、侧边栏什么都没有(2026-10-02 实测)。
 function createMonitor(ctx, cfg, resolveGame) {
+  const lifetime = new AbortController();
+  let liveReplyState = null;
   const pendingTexts = [];
   const queue = []; // { body, event, sourceFile, resolve, reject }
   const textQueue = []; // 回合运行期间到达的刻度文本(broadcast 等),回合结束后冲刷
   let session = null;
   let agent = null;
+  let ownedHandle = null;
   let running = false;
   // monitor 创建失败时记在这里:后续 submitInteraction 直接快速失败,
   // 而不是把 job 塞进一个永远不会被消费的队列(见 catch 里的说明)。
@@ -1759,13 +1790,11 @@ function createMonitor(ctx, cfg, resolveGame) {
       if (running) {
         // 回合进行中到达的刻度文本:积压,等回合完全展示完再推,避免插队
         textQueue.push(line);
+        if(textQueue.length>12)textQueue.shift();
         return;
       }
-      if (session === null) {
-        pendingTexts.push(line);
-        return;
-      }
-      appendMonitor(session, line);
+      pendingTexts.push(line);
+      if(pendingTexts.length>12)pendingTexts.shift();
     },
     isReady() {
       return session !== null && agent !== null;
@@ -1775,7 +1804,7 @@ function createMonitor(ctx, cfg, resolveGame) {
      *  没有这个字段就只能靠"教练怎么不说话"来猜。 */
     health() {
       const now = Date.now();
-      const up = session !== null && agent !== null;
+      const up = session !== null && agent !== null && !lifetime.signal.aborted;
       return {
         ready: up,
         failed: monitorFailed ? String(monitorFailed.message ?? monitorFailed) : null,
@@ -1820,6 +1849,12 @@ function createMonitor(ctx, cfg, resolveGame) {
     },
     /** 清空待处理队列与积压刻度:已排队未开始的回合全部放弃(resolve 空),
      *  当前进行中的回合自然结束后,不会再接续下一个。 */
+    close() {
+      lifetime.abort(new Error("Coach source closed"));
+      clearTimeout(startTimer);
+      api.clearQueue();
+      return ownedHandle?.dispose?.().catch(error => diagLog(`会话释放失败: ${error.message}`, cfg));
+    },
     clearQueue() {
       for (const job of queue.splice(0)) {
         try { job.resolve(""); } catch { /* noop */ }
@@ -1852,38 +1887,10 @@ function createMonitor(ctx, cfg, resolveGame) {
     flushTextQueue();
     const job = queue.shift();
     running = true;
-    // ── 埋点:回合出队(全轨迹的第一个时间点) ──
-    const t0 = Date.now();
-    let trace = "dequeued";
-    const mark = (m) => {
-      trace += ` | ${m}@+${Date.now() - t0}ms`;
-      try { diagLog(`   · ${m} (+${Date.now() - t0}ms)`, cfg); } catch { /* 埋点不该影响主链路 */ }
-    };
     try { diagLog(`▶ 回合出队 kind=${job.event?.kind ?? "?"} key=${job.event?.key ?? "?"} game=${job.body?.game ?? "?"}`, cfg); } catch {}
-    const isInit = job.event?.kind === "init";
-    const stamp = `[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}]`;
-    if (!isInit) {
-      // 先把日志事件作为 user 消息 append 进会话(可见:这条日志驱动了本轮对话)。
-      // 修复 #5:**只存摘要**。旧实现把整段 job.body.prompt(平均 420 字)再抄一遍,
-      // 而同一文本已经在发给模型的 coach 请求体里 —— 属于重复注入上下文(旧日志累计
-      // 约 16k 字符纯冗余)。这里压到"事件 key + 上下文 + 首条观察的前 80 字",
-      // 仍能让人在会话里看清是什么触发了本轮。
-      const contextText = job.event?.context
-        ? `(game_time=${job.event.context.game_time ?? "?"}, score=${job.event.context.score ?? "?"})`
-        : "";
-      const firstObs = String(job.body.prompt ?? "")
-        .split("\n")
-        .find((l) => l.startsWith("[观察")) ?? "";
-      const summary = firstObs.replace(/\s+/g, " ").slice(0, 80);
-      const userText = `【日志事件 ${job.event?.key ?? "?"}】${contextText} ${summary}`;
-      // ── 埋点:session 到底有没有、append 有没有成功 ──
-      mark(`append 前 session=${session ? "有" : "**null**"}`);
-      if (session) { appendMonitor(session, `${stamp} [互动] ${userText}`); mark("append 已调用"); }
-      else mark("session 为 null → **没写进会话**");
-    }
+    // Agent.send owns canonical user/assistant/tool persistence; no duplicate surface append.
     runAgentTurn(job)
       .then((text) => {
-        if (!isInit && session) appendMonitor(session, `${stamp} [DSH播报] ${text || "(静音)"}`);
         job.resolve(text);
       })
       .catch((error) => job.reject(error))
@@ -1894,9 +1901,8 @@ function createMonitor(ctx, cfg, resolveGame) {
   }
 
   function flushTextQueue() {
-    if (textQueue.length === 0 || session === null) return;
-    const batch = textQueue.splice(0);
-    for (const line of batch) appendMonitor(session, line);
+    pendingTexts.push(...textQueue.splice(0));
+    if(pendingTexts.length>12)pendingTexts.splice(0,pendingTexts.length-12);
   }
 
   /** 触发一次真实 agent 回合。
@@ -1908,7 +1914,9 @@ function createMonitor(ctx, cfg, resolveGame) {
     // ⚠ 按 game 解析适配器,不要写死 WZRY_ADAPTER ——
     //   写死的后果是玩 LoL 时拿到**王者荣耀的人设与播报规则**(称谓/该看什么全不对)。
     //   别处都是正确解析的(见 resolveGame / adapterOfEvent),只有这里漏了。
-    const msg = buildCoachMessage(job.body, resolveGame(job.body?.game));
+    const passive=pendingTexts.splice(0).map(line=>line.slice(0,400));
+    const body=passive.length?{...job.body,prompt:String(job.body.prompt??'')+'\n【额外观察数据】\n'+JSON.stringify(passive)}:job.body;
+    const msg = buildCoachMessage(body, resolveGame(job.body?.game));
     // 修复 #6:mark/trace 原定义在 drainQueue() 作用域,这里引用不到 → 定时器每跳
     //   必抛未捕获 ReferenceError 杀死宿主(桌面版打不开)。本函数补一套相同埋点三件套。
     const t0 = Date.now();
@@ -1918,7 +1926,7 @@ function createMonitor(ctx, cfg, resolveGame) {
       try { diagLog(`   · ${m} (+${Date.now() - t0}ms)`, cfg); } catch { /* 埋点不该影响主链路 */ }
     };
     const state = { text: null };
-    liveReplyState = state; // 模块级:coach_reply 工具把播报文本写进来
+    liveReplyState = state; // This source's coach_reply tool writes into its own turn.
     liveTextSink.lastText = ""; // 修复 #4:本回合 assistant 文本从零开始记录
     // Phase 2 广播:回合开始时告诉所有 /coach/stream 客户端"思考中"
     sseHub.write("phase", { name: "thinking", text: `回合开始(${job.event?.key ?? "?"})` });
@@ -1938,6 +1946,11 @@ function createMonitor(ctx, cfg, resolveGame) {
       const timer = setInterval(() => {
         // 加固:定时器内任何未捕获异常都会杀死宿主进程 → 桌面版闪退。整体包 try/catch。
         try {
+        if (lifetime.signal.aborted) {
+          clearInterval(timer); liveReplyState = null;
+          if (offTools) { try { offTools(); } catch {} }
+          reject(new Error("Coach source closed")); return;
+        }
         if (Date.now() > deadline) {
           clearInterval(timer);
           liveReplyState = null;
@@ -2011,9 +2024,9 @@ function createMonitor(ctx, cfg, resolveGame) {
     });
   }
 
-  const monitorId = `coach-live-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const monitorId = cfg.monitorSessionId ?? `coach-live-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   // 与本 agent 的 coach_reply 工具共享的回合状态(修复 #2/#3)
-  const liveReplyGuard = { replied: false };
+  const liveReplyGuard = { replied: false, game: cfg.defaultGame };
   const liveTextSink = { lastText: "" };
   // 启动看门狗:createAgent 既不 resolve 也不 reject 时(例如 preset mount 卡住),
   // 旧实现让队列无限增长且毫无痕迹 —— 到点即判定失败,让上层拿到明确错误。
@@ -2031,13 +2044,15 @@ function createMonitor(ctx, cfg, resolveGame) {
 
   /** 创建(或重建)coach-live 会话。失败与超时都收敛到 failMonitor()。 */
   function startSession() {
+    if (lifetime.signal.aborted) return;
     startAttempt += 1;
     startAt = Date.now();
     clearTimeout(startTimer);
     startTimer = setTimeout(() => {
       failMonitor(new Error(`createAgent ${Math.round(START_TIMEOUT_MS / 1000)}s 未就绪(无响应,既未 resolve 也未 reject)`));
     }, START_TIMEOUT_MS);
-    ctx.agentLoop.createAgent(ctx, {
+    openCoachSession(ctx, {
+      signal: lifetime.signal,
       sessionId: monitorId,
       meta: { cwd: cfg.sessionCwd, agentPreset: cfg.coachPreset },
       agentOptions: { provider: cfg.provider, model: cfg.model },
@@ -2049,13 +2064,15 @@ function createMonitor(ctx, cfg, resolveGame) {
         // 修复 #4:捕获本回合最后一条 assistant 文本(未调 coach_reply 时的兜底播报依据)
         installAssistantTextTap(agentCtx, liveTextSink, cfg);
         // coach_reply:agent 回合结束时把最终播报文本回传(会话持久、全局唯一入口)
-        agentCtx.tools.register(makeLiveReplyTool(liveReplyGuard, resolveGame));
+        agentCtx.tools.register(makeLiveReplyTool(liveReplyGuard, resolveGame, () => liveReplyState));
       }
     }).then(onMonitorReady).catch(failMonitor);
   }
 
   function onMonitorReady(published) {
     clearTimeout(startTimer);
+    if (lifetime.signal.aborted) { void published?.dispose?.(); return; }
+    ownedHandle = published;
     const a = published?.agent ?? published;
     // 返回值形状不对(既没有 send 也没有 status)同样属于"链路断了",
     // 必须在这里拦下 —— 否则又会退化成静默挂起。
@@ -2082,7 +2099,6 @@ function createMonitor(ctx, cfg, resolveGame) {
     }
     console.log(`[coach-server] coach-live monitor session ready (id=${monitorId})`);
     diagLog(`✓ coach-live 会话就绪 (id=${monitorId}, ${readyMs ?? "?"}ms)`, cfg);
-    for (const text of pendingTexts.splice(0)) appendMonitor(session, text);
     // 侧边栏可见性(关键):DSH 将"从未跑过 agent 回合"的会话视为 blank(空白占位),
     // 客户端 sessionVisible() 会隐藏 blank 会话(只显示当前会话)。coach-live 是纯
     // append 的监控会话,永不自然产生 turn/start → 永远 blank → 侧边栏看不到。
@@ -2093,7 +2109,7 @@ function createMonitor(ctx, cfg, resolveGame) {
     // 注意:这里必须用**注册表解析出的游戏 adapter**,不能硬编码某一个游戏 ——
     // 端游(lol)会话套用王者(monitorInit)文案属于跨游戏串味。
     // createMonitor 是顶层函数,拿不到 apply 里的 resolveGame,故从 ctx 取注册表。
-    if (!initQueued) {
+    if (cfg.monitorWarmup === true && !initQueued) {
       initQueued = true;
       const gameReg = typeof ctx.get === "function" ? ctx.get("gameRegistry") : null;
       const initAdapter = gameReg?.resolve?.(cfg.defaultGame ?? "wzry", "wzry") ?? WZRY_ADAPTER;
@@ -2144,8 +2160,7 @@ function createMonitor(ctx, cfg, resolveGame) {
 
 /** coach_reply 的 live 版:把最终播报文本记入当前回合的 liveReplyState(不 resolve,
  *  回合结束由 agent.send 控制,避免 tool result 未持久化就进入下一回合) */
-let liveReplyState = null;
-function makeLiveReplyTool(replyState, resolveGame) {
+function makeLiveReplyTool(replyState, resolveGame, currentReply) {
   // ⚠ 同样不要写死:人设决定工具描述与回复要求(≤50字/称谓等)。
   const persona = (resolveGame(replyState?.game) ?? WZRY_ADAPTER).persona ?? WZRY_ADAPTER.persona;
   return defineTool({
@@ -2187,6 +2202,7 @@ function makeLiveReplyTool(replyState, resolveGame) {
         replyState.replied = true;
       }
       const t = typeof args.text === "string" ? args.text : "";
+      const liveReplyState = currentReply();
       if (liveReplyState) liveReplyState.text = t;
       // ⚠ 这个工具的文本存进 liveReplyState(监控链路由它取走),不会丢;
       //   但**工具结果里也要带上** —— 用户在会话里看到的是工具结果,
@@ -2226,23 +2242,6 @@ async function attachSessionToWorkspace(ctx, cfg, sessionId) {
     await sleep(2500);
   }
   console.warn(`[coach-server] attach ${sessionId}: gave up after 8 attempts`);
-}
-
-function appendMonitor(session, text) {
-  try {
-    session.append("user/message", {
-      id: randomUUID(),
-      role: "user",
-      content: [{ type: "text", text }],
-      // ⚠ v4 校验**明确拒绝** source.kind === "plugin":
-      //   写成 plugin 会被判非法 → 污染会话 → 之后每个回合一开就报错,
-      //   agent 空转 ~100ms 就 idle(根本没跑模型),用户看到"思考中"干等两分钟。
-      //   用 "user" —— 与自己 agent.send 的 kind 一致,那条路径已验证可行。
-      source: { kind: "user" }
-    }, { surfaceOp: "append" });
-  } catch (error) {
-    console.warn(`[coach-server] monitor append error: ${error?.message ?? error}`);
-  }
 }
 
 export { Config, apply, inject, name };

@@ -88,6 +88,10 @@ function classify(raw) {
   const tag = fixEncoding(raw.tag ?? "");
   const message = fixEncoding(raw.message ?? "");
   if (!message) return null;
+  const beginning = message.match(/^MOBA新对局赛前会话开始:\s*phase=([^,]+),\s*generation=(\d+)/);
+  if (beginning) return { kind: 'match_start', phase: beginning[1], generation: Number(beginning[2]), time: raw.timestamp ?? null };
+  const ending = message.match(/^MOBA对局结束:\s*result=([^,]+)/);
+  if (ending) return { kind: 'match_end', outcome: ending[1], time: raw.timestamp ?? null };
 
   // 局内互动 → 教练请求(带 context JSON)
   const interaction = message.match(INTERACTION_RE);
@@ -398,7 +402,9 @@ function eventsToBody(events, opts = {}) {
     const content = ev.kind === "interaction"
       ? (ev.context?.content ?? ev.rawMessage ?? ev.text ?? "")
       : (ev.text ?? ev.key ?? ev.rawMessage ?? "");
-    return `[观察${i + 1}·${tag}${ev.key ? `(${ev.key})` : ""}] ${String(content).slice(0, 400)}`;
+    const context = ev.kind === 'interaction' && ev.context
+      ? '\n结构化对局事实：' + JSON.stringify(ev.context).slice(0, 1800) : '';
+    return `[观察${i + 1}·${tag}${ev.key ? `(${ev.key})` : ""}] ${String(content).slice(0, 400)}${context}`;
   });
   return {
     // 注意:不要在这里写"合并 N 条"这类**裸数字** —— 它是内部计数、与对局无关,

@@ -56,8 +56,10 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Button x:Name="CloseButton" Grid.Column="3" Content="×" FontSize="19" ToolTip="退出悬浮窗"/>
     </Grid>
     <StackPanel Grid.Row="1" Margin="3,8,3,4">
-     <TextBlock x:Name="TimeText" Text="等待对局" Foreground="#93C5FD" FontSize="14"/>
-     <TextBlock x:Name="SummaryText" Text="启动游戏日志采集后显示对局信息" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+     <TextBlock x:Name="TimeText" Text="等待进入游戏" Foreground="#93C5FD" FontSize="14"/>
+     <TextBlock x:Name="SummaryText" Text="正在检测游戏和教练服务…" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+     <TextBlock x:Name="LauncherText" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+     <Button x:Name="ActionButton" Content="微信登录" HorizontalAlignment="Left" Visibility="Collapsed"/>
     </StackPanel>
     <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,4,0,8"/>
     <ScrollViewer x:Name="PageScroll" Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -88,7 +90,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 '@
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
-foreach($name in @('Expanded','Header','TitleText','TimeText','SummaryText','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','InteractionButton','RefreshButton','TacticButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','InteractionButton','RefreshButton','TacticButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
 $script:source=$null
@@ -177,6 +179,19 @@ function Update-State {
   $controls.SummaryText.Text=[string]$next.summary
   if($changed){Update-Page}
  }catch{}
+ try{
+  $launcher=[IO.File]::ReadAllText((Join-Path $StateDir 'launcher-state.json'),[Text.Encoding]::UTF8) | ConvertFrom-Json
+  $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  if($now-[double]$launcher.updatedAt -lt 45000 -and $launcher.phase -ne 'stopped'){
+   $controls.LauncherText.Text=[string]$launcher.message
+   $controls.ActionButton.Tag=[string]$launcher.action
+   $controls.ActionButton.Content=[string]$launcher.actionLabel
+   $controls.ActionButton.Visibility=if($launcher.action){'Visible'}else{'Collapsed'}
+   if(!$script:snapshot -or $script:snapshot.ended -or $now-[double]$script:snapshot.updatedAt -gt 30000){
+    $controls.TimeText.Text='等待进入游戏'
+   }
+  }else{$controls.LauncherText.Text='启动管理已停止，请重新打开金宝';$controls.ActionButton.Visibility='Collapsed'}
+ }catch{}
  if($script:job -and $script:job.State -in @('Completed','Failed','Stopped')){
   $result=Receive-Job $script:job -ErrorAction SilentlyContinue
   $controls.HintText.Text=if($result -and $result.ok){'已完成'}elseif($result -and $result.message){[string]$result.message}else{'请求失败，请检查设置页的模型和服务状态。'}
@@ -230,6 +245,13 @@ $controls.InteractionButton.Add_Click({Set-Interaction (!$script:interactiveMode
 $controls.CollapseButton.Add_Click({Set-Collapsed $true})
 $controls.CloseButton.Add_Click({$window.Close()})
 $controls.BubbleClose.Add_Click({$window.Close()})
+$controls.ActionButton.Add_Click({
+ $action=[string]$controls.ActionButton.Tag
+ if($action -in @('login','settings','download')){
+  $command=@{action=$action;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}|ConvertTo-Json -Compress
+  [IO.File]::WriteAllText((Join-Path $StateDir 'launcher-control.json'),$command,[Text.UTF8Encoding]::new($false))
+ }
+})
 $controls.SettingsButton.Add_Click({
  if($SelfTest){$script:testResult.settings=$true;return}
  try{
@@ -271,7 +293,7 @@ function Pointer-Tick {
  [JinbaoOverlayNative]::GetCursorPos([ref]$p) | Out-Null
  Update-Drag $p.X $p.Y (([JinbaoOverlayNative]::GetAsyncKeyState(1) -band 0x8000) -ne 0)
  $hotzone=$false
- $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.Tabs,$controls.Footer)}
+ $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer)}
  foreach($target in $targets){
   $local=$target.PointFromScreen((New-Object Windows.Point($p.X,$p.Y)))
   if($local.X -ge 0 -and $local.Y -ge 0 -and $local.X -lt $target.ActualWidth -and $local.Y -lt $target.ActualHeight){$hotzone=$true;break}

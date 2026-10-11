@@ -2,13 +2,13 @@
 
 读取游戏日志，生成策略建议。当前支持 Windows 上的 LoL 和王者日志流。
 
-**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.5/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.5)**
+**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.6/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 历史版 v0.1.5](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.5)**
 
-GitHub 下载缓慢时优先使用服务器直链，支持断点续传。Windows 包的服务器与 GitHub 文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.5/SHA256SUMS.txt)。
+服务器直链提供当前 0.1.6 安装包并支持断点续传。GitHub 暂保留上一版 v0.1.5 作为备用下载；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.6/SHA256SUMS.txt)。
 
 普通用户下载上面的安装包即可，不需要克隆源码，也不需要安装 Node、Python 或下载攻略数据库。
 
-**[申请免费电脑试用](https://api.jinbaoai.top/desktop/trial)**：提交申请并保存私密领取凭证；人工审核后领取专属激活码，每人单独计量。[申请与领取说明](docs/TRIAL.md)。
+**前十个公网 IP 可直接试用**：在设置页点击“一键开通并使用金宝云端”，每个名额累计 1 亿模型 token，不用申请或填写激活码。相同公网出口 IP 共用一个名额；IP 变更可能占用新名额。已有电脑激活码和 App 配对仍可在备用入口使用。
 
 ## 第一次使用
 
@@ -16,7 +16,7 @@ GitHub 下载缓慢时优先使用服务器直链，支持断点续传。Windows
 2. 下载 `jinbao-desktop-windows.zip` 并完整解压，双击 `开始使用.cmd`，选择“一键安装并重启 DSH”。安装器会启动 DSH 并打开金宝设置页。
 3. 选择模型方式：
    - **自带 API Key**：填写 OpenAI 兼容 API 地址、模型 ID 和 Key。模型调用无需微信登录。
-   - **金宝云端**：在电脑设置页输入管理员提供的激活码并点击“激活并登录”，系统会自动完成云端配置，无需再手动选择和保存。无需安装金宝 App。已有 App 账号也可使用配对码登录。账号需要开通云端额度。
+   - **金宝云端**：首批十个公网 IP 可点“一键开通并使用金宝云端”，按 IP 固定名额，每个名额累计 1 亿模型 token。无需申请、激活码或 DeepSeek 账号；相同出口 IP 共用名额，IP 变化会被视为新名额。
 4. 选择游戏采集：
    - **LoL**：打开英雄联盟客户端，选择“启动 LoL 采集”。
    - **王者**：手机通过 USB 连接，开启 USB 调试并授权电脑；在金宝 App 中开启游戏采集，再选择“启动王者采集”。

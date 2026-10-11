@@ -1,12 +1,12 @@
 # 快速开始
 1. 安装并运行一次 [DSH Desktop](https://deepseek.com/harness/)，首次欢迎页选择「稍后设置（Set up later）」后关闭。它只作为插件宿主；使用金宝云端不需要 DeepSeek 账号或 DeepSeek API Key。
-2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.5/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择“一键安装并重启 DSH”；安装器会启动 DSH 并打开金宝设置。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.5) 提供备用下载。
-3. 在金宝设置页配置自己的模型 Key；或输入管理员提供的激活码并点击“激活并登录”，金宝云端会自动配置，无需安装金宝 App。已有 App 账号仍可使用配对登录。不要在 ZIP 压缩预览窗口里运行安装。
+2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.6/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择“一键安装并重启 DSH”；安装器会启动 DSH 并打开金宝设置。[GitHub v0.1.5 备用版](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.5) 提供备用下载。
+3. 在金宝设置页选择自己的模型 Key，或点击“一键开通并使用金宝云端”。前十个公网 IP 可直接试用，每个名额累计 1 亿模型 token；同一出口 IP 共用名额，换 IP 可能占新名额。无需申请或输入激活码。不要在 ZIP 压缩预览窗口里运行安装。
 4. 启动 LoL 或王者日志采集，策略悬浮窗会自动弹出。也可单独双击 overlay.cmd，或在「开始使用」菜单选择 6。按 Ctrl+Alt+J 切换鼠标穿透与交互，交互时可拖动、缩放和关闭。
 5. 游戏遮住悬浮窗时，切换游戏的无边框或窗口模式。
 
 王者需要金宝 App 的游戏采集功能、USB 连接及 USB 调试授权。ADB 已在 ZIP 中提供。手机 App 请从[金宝官网](https://www.jinbaoai.top/#download)下载统一 APK（arm64-v8a），无需另装配对专用版。
-独立电脑激活码只可使用一次，24 小时内兑换，会话最长 7 天；退出后需要管理员重新发码。
+旧版电脑激活码仍可使用一次，24 小时内兑换，会话最长 7 天；新用户可直接使用 IP 体验名额。
 新用户仅用 BYOK 进行模型调用不需要微信登录；云端模型和攻略检索需要独立开通权限。
 
 ## 安装或检测失败

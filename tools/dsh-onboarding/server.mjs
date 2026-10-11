@@ -89,6 +89,12 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
      if(b.mode==='cloud'&&!await resolve('cloud'))throw error(401);
      await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;return {saved:true};
     }
+    if(req.url==='/api/login/ip'){
+     const result=await remote('/desktop/auth/ip/register',null,{});
+     if(typeof result.sessionToken!=='string'||!/^jc_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
+     await credentials.set(refs.cloud,result.sessionToken);pairing=null;
+     return {status:'approved',nickname:result.nickname,seat:result.seat,seats:result.seats,modelLimit:result.modelLimit};
+    }
     if(req.url==='/api/login/code'){
      if(typeof b.activationCode!=='string')throw error(400);
      const activationCode=b.activationCode.trim().toUpperCase();
@@ -114,7 +120,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
     throw error(404);
    });
    send(res,200,value);
-  }catch(e){if(res.headersSent){res.destroy();return;}const status=[400,401,403,404,409,410,413,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:status===401?'请登录或配置模型密钥':status===403?'配置访问被拒绝':status===409?'请先配置模型或重新生成配对码':status===410?'配对码已过期':status===429?'请求过于频繁或额度已用完':status===400?'配置格式不正确':'连接失败，请稍后重试'});}
+  }catch(e){if(res.headersSent){res.destroy();return;}const status=[400,401,403,404,409,410,413,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:status===401?'请登录或配置模型密钥':status===403?'配置访问被拒绝':status===409?'请先配置模型或重新生成配对码':status===410?'配对码已过期':status===429?'首批体验名额已满或请求过于频繁':status===400?'配置格式不正确':'连接失败，请稍后重试'});}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;

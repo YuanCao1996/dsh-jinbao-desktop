@@ -42,4 +42,4 @@ for(const name of ['dsh-game-services','dsh-onboarding','dsh-coach-server']){
 }
 const updated=doc.toString();
 if(updated!==original){if(existsSync(patch))copyFileSync(patch,patch+'.jinbao-'+Date.now()+'.bak');writeFileSync(patch+'.tmp',updated);renameSync(patch+'.tmp',patch);}
-console.log('Installed. Restart DSH Desktop, then open Jinbao settings.');
+console.log('Installed.');

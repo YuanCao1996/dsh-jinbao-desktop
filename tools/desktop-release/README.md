@@ -1,8 +1,7 @@
 # 金宝 DSH 游戏扩展
 正式 ZIP 自带 Node 和 ADB，只需先安装兼容的 DSH Desktop。当前验证宿主：DSH 0.1.5-rc.2。
-1. 关闭 DSH Desktop，双击 install.cmd。安装器备份配置并保留其他模型和插件。
-2. 重启 DSH Desktop，双击 settings.cmd。
-3. 配对微信账号后选择云端模型，或填写自己的 OpenAI 兼容模型地址、模型 ID 和 API Key。
+1. 保存工作并关闭 DSH Desktop，双击「开始使用.cmd」并选择一键安装。安装器备份配置后自动启动 DSH 并打开金宝设置。
+2. 输入激活码后点击「激活并登录」，自动完成金宝云端配置；也可填写自己的 OpenAI 兼容模型地址、模型 ID 和 API Key。
 4. LoL 双击 lol.cmd；王者手机开启 USB 调试并授权电脑后双击 wzry.cmd。
 日志目录默认为用户目录/.dsh/jinbao/logs，设置页提供启动诊断。安装包不含完整攻略数据库。
 攻略检索与模型权限独立；权限不足时不会用演示数据冒充攻略。

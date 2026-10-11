@@ -2,9 +2,9 @@
 
 读取游戏日志，生成策略建议。当前支持 Windows 上的 LoL 和王者日志流。
 
-**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.4/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.4)**
+**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.5/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.5)**
 
-GitHub 下载缓慢时优先使用服务器直链，支持断点续传。Windows 包的服务器与 GitHub 文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.4/SHA256SUMS.txt)。
+GitHub 下载缓慢时优先使用服务器直链，支持断点续传。Windows 包的服务器与 GitHub 文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.5/SHA256SUMS.txt)。
 
 普通用户下载上面的安装包即可，不需要克隆源码，也不需要安装 Node、Python 或下载攻略数据库。
 
@@ -12,17 +12,16 @@ GitHub 下载缓慢时优先使用服务器直链，支持断点续传。Windows
 
 ## 第一次使用
 
-1. 安装并运行过一次 [DSH Desktop](https://deepseek.com/harness/)，然后关闭它。
-2. 下载 `jinbao-desktop-windows.zip`，解压到自己的文件夹；双击 `开始使用.cmd`，选择“安装扩展”。
-3. 重启 DSH Desktop；再次打开 `开始使用.cmd`，选择“打开设置”。
-4. 在设置页选择模型方式并保存：
+1. 安装并运行一次 [DSH Desktop](https://deepseek.com/harness/)，首次欢迎页选择「稍后设置（Set up later）」后关闭。DSH Desktop 只作为插件宿主；使用金宝云端不需要 DeepSeek 账号或 DeepSeek API Key。
+2. 下载 `jinbao-desktop-windows.zip` 并完整解压，双击 `开始使用.cmd`，选择“一键安装并重启 DSH”。安装器会启动 DSH 并打开金宝设置页。
+3. 选择模型方式：
    - **自带 API Key**：填写 OpenAI 兼容 API 地址、模型 ID 和 Key。模型调用无需微信登录。
-   - **金宝云端**：在电脑设置页输入管理员提供的激活码，登录后选择云端模型，无需安装金宝 App。已有 App 账号也可使用配对码登录。账号需要开通云端额度。
-5. 选择游戏采集：
+   - **金宝云端**：在电脑设置页输入管理员提供的激活码并点击“激活并登录”，系统会自动完成云端配置，无需再手动选择和保存。无需安装金宝 App。已有 App 账号也可使用配对码登录。账号需要开通云端额度。
+4. 选择游戏采集：
    - **LoL**：打开英雄联盟客户端，选择“启动 LoL 采集”。
    - **王者**：手机通过 USB 连接，开启 USB 调试并授权电脑；在金宝 App 中开启游戏采集，再选择“启动王者采集”。
-6. 设置页点击“刷新检测”，确认教练服务正常、日志持续更新。启动采集时会自动打开置顶策略悬浮窗，也可单独双击 `overlay.cmd`。
-7. 悬浮窗默认鼠标穿透；按 `Ctrl+Alt+J` 切换交互后可拖动、缩放、滚动、打开设置或关闭，再按一次恢复穿透。位置和尺寸会保存。
+5. 设置页点击“刷新检测”，确认教练服务正常、日志持续更新。启动采集时会自动打开置顶策略悬浮窗，也可单独双击 `overlay.cmd`。
+6. 悬浮窗默认鼠标穿透；按 `Ctrl+Alt+J` 切换交互后可拖动、缩放、滚动、打开设置或关闭，再按一次恢复穿透。位置和尺寸会保存。
 
 如果游戏遮住窗口，请切换游戏的无边框或窗口模式。悬浮窗显示最新策略文字和更新时间；英雄、海克斯等旧 companion 完整面板不在此版本中。
 

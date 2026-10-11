@@ -1,6 +1,6 @@
 # 快速开始
 1. 安装并运行一次 [DSH Desktop](https://deepseek.com/harness/)，首次欢迎页选择「稍后设置（Set up later）」后关闭。它只作为插件宿主；使用金宝云端不需要 DeepSeek 账号或 DeepSeek API Key。
-2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.6/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择“一键安装并重启 DSH”；安装器会启动 DSH 并打开金宝设置。[GitHub v0.1.5 备用版](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.5) 提供备用下载。
+2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.6/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择“一键安装并重启 DSH”；安装器会启动 DSH 并打开金宝设置。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.6) 提供相同版本的备用下载。
 3. 在金宝设置页选择自己的模型 Key，或点击“一键开通并使用金宝云端”。前十个公网 IP 可直接试用，每个名额累计 1 亿模型 token；同一出口 IP 共用名额，换 IP 可能占新名额。无需申请或输入激活码。不要在 ZIP 压缩预览窗口里运行安装。
 4. 启动 LoL 或王者日志采集，策略悬浮窗会自动弹出。也可单独双击 overlay.cmd，或在「开始使用」菜单选择 6。按 Ctrl+Alt+J 切换鼠标穿透与交互，交互时可拖动、缩放和关闭。
 5. 游戏遮住悬浮窗时，切换游戏的无边框或窗口模式。

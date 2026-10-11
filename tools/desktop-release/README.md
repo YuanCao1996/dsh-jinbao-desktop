@@ -1,8 +1,9 @@
 # 金宝 DSH 游戏扩展
 正式 ZIP 自带 Node 和 ADB，只需先安装兼容的 DSH Desktop。当前验证宿主：DSH 0.1.5-rc.2。
 1. 保存工作并关闭 DSH Desktop，双击「开始使用.cmd」并选择一键安装。安装器备份配置后自动启动 DSH 并打开金宝设置。
-2. 输入激活码后点击「激活并登录」，自动完成金宝云端配置；也可填写自己的 OpenAI 兼容模型地址、模型 ID 和 API Key。
-4. LoL 双击 lol.cmd；王者手机开启 USB 调试并授权电脑后双击 wzry.cmd。
+2. 首批十个公网 IP 可点击「一键开通并使用金宝云端」，每个名额累计一亿 token；也可填写自己的 OpenAI 兼容模型地址、模型 ID 和 API Key。
+3. LoL 双击 lol.cmd；王者手机开启 USB 调试并授权电脑后双击 wzry.cmd。
+4. 悬浮窗提供八个页签和对局计时，标题栏及按钮可直接点击；Ctrl+Alt+J 切换整窗交互。点击 ×、托盘退出或运行 stop-overlay.cmd 可完全退出。
 日志目录默认为用户目录/.dsh/jinbao/logs，设置页提供启动诊断。安装包不含完整攻略数据库。
 攻略检索与模型权限独立；权限不足时不会用演示数据冒充攻略。
 恢复安装前的 cordis.patch.yml.jinbao-*.bak 并重启，可回退配置。

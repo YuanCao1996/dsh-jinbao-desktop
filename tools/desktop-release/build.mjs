@@ -10,7 +10,7 @@ for(const name of ['dsh-onboarding','dsh-game-services','dsh-coach-server','desk
  cpSync(join(root,'tools',name),join(out,'tools',name),{recursive:true,filter:p=>!p.includes('tests')&&!p.includes('.bak')&&!p.endsWith('build.mjs')});
 }
 mkdirSync(join(out,'tools','lol-companion'),{recursive:true});
-for(const name of ['collector.mjs','lockfile.mjs','lcu.mjs','live.mjs','eventlog.mjs'])copyFileSync(join(root,'tools/lol-companion',name),join(out,'tools/lol-companion',name));
+for(const name of ['collector.mjs','collector-state.mjs','player-stats.mjs','lockfile.mjs','lcu.mjs','live.mjs','eventlog.mjs'])copyFileSync(join(root,'tools/lol-companion',name),join(out,'tools/lol-companion',name));
 const req=createRequire(join(root,'package.json')),packages=new Set();
 function walk(dir,includeModules=false){return readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?(e.name==='node_modules'&&!includeModules?[]:walk(join(dir,e.name),includeModules)):[join(dir,e.name)]);}
 function bundle(name){
@@ -39,6 +39,7 @@ if(!process.env.JINBAO_BUILD_ADB_DIR)throw Error('Set JINBAO_BUILD_ADB_DIR to yo
 const adbSource=resolve(process.env.JINBAO_BUILD_ADB_DIR);
 for(const name of ['adb.exe','AdbWinApi.dll','AdbWinUsbApi.dll','NOTICE.txt'])copyFileSync(join(adbSource,name),join(out,'runtime/platform-tools',name));
 writeFileSync(join(out,'overlay.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\start-overlay.ps1"\r\n');
+writeFileSync(join(out,'stop-overlay.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\stop-overlay.ps1"\r\n');
 writeFileSync(join(out,'lol.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\start-overlay.ps1"\r\n"%~dp0runtime\\node.exe" "%~dp0tools\\lol-companion\\collector.mjs"\r\npause\r\n');
 writeFileSync(join(out,'wzry.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\start-overlay.ps1"\r\n"%~dp0runtime\\node.exe" "%~dp0tools\\desktop-release\\capture-wzry.mjs"\r\npause\r\n');
 cpSync(join(root,'docs'),join(out,'docs'),{recursive:true});

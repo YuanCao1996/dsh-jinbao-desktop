@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { once } from 'node:events';
 import { serviceUrl,chatUrl,limitedJson } from '../dsh-game-services/client.mjs';
+import { createOverlayService } from './overlay-state.mjs';
 const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY'};
 const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
@@ -35,6 +36,18 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
   let coachReady=false;try{const r=await fetchImpl('http://127.0.0.1:3081/health',{signal:AbortSignal.timeout(2000),redirect:'error'});coachReady=r.ok;await r.body?.cancel();}catch{}
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady};
  }
+ const overlay=await createOverlayService({stateDir,
+  search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
+  complete:async messages=>{
+   if(config.mode==='demo')throw error(409);
+   const token=await resolve(config.mode==='byok'?'byok':'cloud');if(!token)throw error(401);
+   const endpoint=config.mode==='byok'?chatUrl(config.baseUrl):new URL('/v1/chat/completions',service);
+   const response=await fetchImpl(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messages,model:config.mode==='byok'?config.model:'game-fast',max_tokens:1800,stream:false,store:false}),redirect:'error',signal:AbortSignal.timeout(60000)});
+   if(!response.ok){await response.body?.cancel();throw error(response.status);}
+   const result=await limitedJson(response,128*1024),answer=result.choices?.[0]?.message?.content;
+   if(typeof answer!=='string'||!answer.trim())throw error(502);return answer;
+  }
+ });
  const server=http.createServer(async(req,res)=>{
   const expectedHost='127.0.0.1:'+server.address().port;
   if(req.headers.host!==expectedHost){send(res,403,{error:'invalid_host'});return;}
@@ -63,6 +76,13 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
    }
    if(!same(req.headers['x-jinbao-setup'],nonce))throw error(403);
    if(req.headers.origin&&req.headers.origin!=='http://'+expectedHost)throw error(403);
+   if(req.url==='/api/overlay'&&req.method==='GET'){send(res,200,overlay.view());return;}
+   if(['/api/overlay/ask','/api/overlay/refresh'].includes(req.url)&&req.method==='POST'){
+    if(!String(req.headers['content-type']).startsWith('application/json'))throw error(400);
+    const b=await body(req,8192);
+    const result=req.url.endsWith('/ask')?await overlay.ask(b.question,b.topic):await overlay.refresh();
+    send(res,200,result??{refreshed:true});return;
+   }
    if(req.url==='/api/advice'&&req.method==='GET'){
     let snapshot={};try{const state=join(stateDir,'coach_live_state.json');if((await stat(state)).size<=1024*1024)snapshot=JSON.parse(await readFile(state,'utf8'));}catch{}
     const reply=snapshot.lastReply;
@@ -125,5 +145,5 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;
  await writeFile(join(stateDir,'settings-link.txt'),url,{mode:0o600});
- return {url,port:server.address().port,close:()=>new Promise(r=>{server.closeAllConnections();server.close(r);})};
+ return {url,port:server.address().port,close:async()=>{await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
 }

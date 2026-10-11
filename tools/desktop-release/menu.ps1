@@ -70,6 +70,7 @@ while ($true) {
     Write-Host '4. 启动王者采集和策略悬浮窗'
     Write-Host '5. 打开 DSH Desktop 官方下载页'
     Write-Host '6. 单独打开策略悬浮窗'
+    Write-Host '7. 退出策略悬浮窗'
     Write-Host 'Q. 退出'
     $selection = Read-Host '请选择'
     if ($null -eq $selection) { exit 0 }
@@ -83,8 +84,9 @@ while ($true) {
             '4' { Invoke-Collector 'tools\desktop-release\capture-wzry.mjs' }
             '5' { Start-Process 'https://deepseek.com/harness/' }
             '6' { Invoke-PackageScript 'start-overlay.ps1' }
+            '7' { Invoke-PackageScript 'stop-overlay.ps1' }
             'Q' { exit 0 }
-            default { Write-Host '请输入 1–6 或 Q。' }
+            default { Write-Host '请输入 1–7 或 Q。' }
         }
     } catch {
         Write-Host ("操作未完成：" + $_.Exception.Message) -ForegroundColor Red

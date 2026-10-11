@@ -1,13 +1,19 @@
 # 快速开始
 1. 安装并运行一次 [DSH Desktop](https://deepseek.com/harness/)，首次欢迎页选择「稍后设置（Set up later）」后关闭。它只作为插件宿主；使用金宝云端不需要 DeepSeek 账号或 DeepSeek API Key。
-2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.6/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择“一键安装并重启 DSH”；安装器会启动 DSH 并打开金宝设置。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.6) 提供相同版本的备用下载。
+2. 下载 [服务器直链 Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.7/jinbao-desktop-windows.zip)，右键解压全部，双击“开始使用.cmd”，选择“一键安装并重启 DSH”；安装器会启动 DSH 并打开金宝设置。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.7) 提供相同版本的备用下载。
 3. 在金宝设置页选择自己的模型 Key，或点击“一键开通并使用金宝云端”。前十个公网 IP 可直接试用，每个名额累计 1 亿模型 token；同一出口 IP 共用名额，换 IP 可能占新名额。无需申请或输入激活码。不要在 ZIP 压缩预览窗口里运行安装。
-4. 启动 LoL 或王者日志采集，策略悬浮窗会自动弹出。也可单独双击 overlay.cmd，或在「开始使用」菜单选择 6。按 Ctrl+Alt+J 切换鼠标穿透与交互，交互时可拖动、缩放和关闭。
+4. 启动 LoL 或王者日志采集，策略悬浮窗会自动弹出。也可双击 overlay.cmd，或在「开始使用」菜单选择 6。标题栏可直接拖动，设置、收起、关闭与页签始终可点击；Ctrl+Alt+J 切换整个窗口的交互与穿透，聊天页会自动进入交互模式。
 5. 游戏遮住悬浮窗时，切换游戏的无边框或窗口模式。
 
 王者需要金宝 App 的游戏采集功能、USB 连接及 USB 调试授权。ADB 已在 ZIP 中提供。手机 App 请从[金宝官网](https://www.jinbaoai.top/#download)下载统一 APK（arm64-v8a），无需另装配对专用版。
 旧版电脑激活码仍可使用一次，24 小时内兑换，会话最长 7 天；新用户可直接使用 IP 体验名额。
 新用户仅用 BYOK 进行模型调用不需要微信登录；云端模型和攻略检索需要独立开通权限。
+
+悬浮窗包含战况、装备、海克斯、对手、胜率、团战、事件和聊天八个页签。时间显示游戏已进行的时长；中途启动采集也会使用游戏当前计时。推荐按当前英雄查询，统计数据需要攻略检索权限；未开通检索时仍可通过所选模型咨询出装、海克斯和团战，模型建议不冒充统计胜率。
+
+退出悬浮窗可点击右上角 ×、托盘菜单“退出悬浮窗”、双击 stop-overlay.cmd，或在「开始使用」菜单选择 7。收起后点击“金宝”图标展开，按住图标可拖动。
+
+升级 0.1.7：保存工作并关闭 DSH Desktop，解压新包后选择菜单 1，再启动采集。安装器会关闭旧版悬浮窗。旧日志只有播报和个人状态时无法补出真实玩家战绩；新版 LoL 采集器会保存双方名单，并从本机客户端查询近20局大乱斗记录。海克斯选择面板 OCR 仍不包含在轻量包内，可在聊天中提供选项。
 
 ## 安装或检测失败
 - 插件依赖版本不一致：当前验证宿主为 DSH 0.1.5-rc.2；暂未验证其他版本，不要覆盖共享依赖强行安装。

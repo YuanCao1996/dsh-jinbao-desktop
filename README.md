@@ -2,9 +2,9 @@
 
 读取游戏日志，生成策略建议。当前支持 Windows 上的 LoL 和王者日志流。
 
-**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.6/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.6)**
+**[服务器直链：Windows 安装包](https://api.jinbaoai.top/downloads/dsh/v0.1.7/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.7)**
 
-服务器直链提供当前 0.1.6 安装包并支持断点续传。Windows 包的服务器与 GitHub 文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.6/SHA256SUMS.txt)。
+服务器直链提供当前 0.1.7 安装包并支持断点续传。Windows 包的服务器与 GitHub 文件完全一致；[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.7/SHA256SUMS.txt)。
 
 普通用户下载上面的安装包即可，不需要克隆源码，也不需要安装 Node、Python 或下载攻略数据库。
 

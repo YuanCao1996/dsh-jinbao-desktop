@@ -3,6 +3,7 @@ tools/dsh-onboarding：本机设置、独立激活码登录、可选电脑配对
 tools/dsh-game-services：site_datasets/site_query，商业服务只返回有界的 rows 数组。
 tools/dsh-coach-server：日志尾读、王者/LoL 适配、原生 Agent 循环和回复工具。
 tools/lol-companion：只读本机游戏接口的轻量采集器。
+tools/jinbao-launcher：一键入口、宿主检测、快捷方式、登录恢复、游戏采集监督与退出清理。
 tools/desktop-release：安装与运行时打包，独立 WPF 策略悬浮窗及启动器。悬浮窗只读取用户状态目录的 coach_live_state.json，不依赖旧 LoL companion 或完整攻略库。
 android-pairing：App 电脑配对 Activity 的独立源码及集成说明。
 

@@ -1,14 +1,27 @@
-﻿param([ValidateSet('inspect','shortcut','open')][string]$Action='inspect',[string]$Target)
+﻿param([ValidateSet('inspect','shortcut','open')][string]$Action='inspect',[string]$Target,[string]$ShortcutDirectory,[string]$DesktopUserDataDir)
 $ErrorActionPreference='Stop'
-if($Action -eq 'open') { Start-Process -FilePath $Target; exit 0 }
+if($Action -eq 'open') {
+    if($Target -match 'DeepSeek Harness\.exe$'){
+        $arguments=if($DesktopUserDataDir){'--user-data-dir="'+[IO.Path]::GetFullPath($DesktopUserDataDir)+'"'}else{''}
+        if($arguments){Start-Process -FilePath $Target -ArgumentList $arguments -WindowStyle Hidden}
+        else{Start-Process -FilePath $Target -WindowStyle Hidden}
+    }else{Start-Process -FilePath $Target}
+    exit 0
+}
 $shell=New-Object -ComObject WScript.Shell
 if($Action -eq 'shortcut') {
-    $shortcut=$shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) '金宝.lnk'))
-    $shortcut.TargetPath=Join-Path $env:SystemRoot 'System32\wscript.exe'
-    $shortcut.Arguments='"'+$Target+'"'
-    $shortcut.WorkingDirectory=[IO.Path]::GetDirectoryName($Target)
-    $shortcut.Description='启动金宝游戏教练'
-    $shortcut.Save()
+    $directories=if($ShortcutDirectory){@([IO.Path]::GetFullPath($ShortcutDirectory))}else{
+        @([Environment]::GetFolderPath('Desktop'),(Join-Path ([Environment]::GetFolderPath('Programs')) '金宝'))
+    }
+    foreach($directory in $directories){
+        [IO.Directory]::CreateDirectory($directory)|Out-Null
+        $shortcut=$shell.CreateShortcut((Join-Path $directory '金宝.lnk'))
+        $shortcut.TargetPath=Join-Path $env:SystemRoot 'System32\wscript.exe'
+        $shortcut.Arguments='"'+$Target+'"'
+        $shortcut.WorkingDirectory=[IO.Path]::GetDirectoryName($Target)
+        $shortcut.Description='启动金宝游戏教练'
+        $shortcut.Save()
+    }
     exit 0
 }
 $desktop=$null

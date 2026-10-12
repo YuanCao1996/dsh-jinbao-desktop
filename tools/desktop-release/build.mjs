@@ -1,4 +1,5 @@
-import { readFileSync,writeFileSync,readdirSync,mkdirSync,cpSync,copyFileSync,existsSync,statSync } from 'node:fs';
+import { readFileSync,writeFileSync,readdirSync,mkdirSync,copyFileSync,existsSync,statSync } from 'node:fs';
+import { cp } from 'node:fs/promises';
 import { join,resolve,dirname,relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
@@ -7,27 +8,28 @@ const root=resolve('.'),out=resolve(process.argv[2]??'workspace/client-releases/
 if(existsSync(out))throw Error('Choose a new output directory; existing releases are never overwritten');
 mkdirSync(join(out,'tools'),{recursive:true});
 for(const name of ['dsh-onboarding','dsh-game-services','dsh-coach-server','desktop-release','jinbao-launcher']){
- cpSync(join(root,'tools',name),join(out,'tools',name),{recursive:true,filter:p=>!p.includes('tests')&&!p.includes('.bak')&&!p.endsWith('build.mjs')});
+ const from=join(root,'tools',name);
+ await cp(from,join(out,'tools',name),{recursive:true,filter:p=>!relative(from,p).split(/[\\/]/).some(part=>part==='tests'||part.includes('.bak'))&&!p.endsWith('build.mjs')});
 }
 mkdirSync(join(out,'tools','lol-companion'),{recursive:true});
 for(const name of ['collector.mjs','collector-state.mjs','player-stats.mjs','lockfile.mjs','lcu.mjs','live.mjs','eventlog.mjs'])copyFileSync(join(root,'tools/lol-companion',name),join(out,'tools/lol-companion',name));
 const req=createRequire(join(root,'package.json')),packages=new Set();
 function walk(dir,includeModules=false){return readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?(e.name==='node_modules'&&!includeModules?[]:walk(join(dir,e.name),includeModules)):[join(dir,e.name)]);}
-function bundle(name){
+async function bundle(name){
  if(packages.has(name)||name.startsWith('node:'))return;
  let manifest;try{manifest=req.resolve(name+'/package.json');}catch{let f=req.resolve(name);while(!existsSync(join(dirname(f),'package.json')))f=dirname(f);manifest=join(dirname(f),'package.json');}
  const dir=dirname(manifest),pkg=JSON.parse(readFileSync(manifest));packages.add(name);
- const dest=join(out,'node_modules',name);cpSync(dir,dest,{recursive:true,filter:p=>!relative(dir,p).split(requireSeparator()).some(part=>part==='node_modules'||part==='test'||part==='tests')&&!p.endsWith('.map')&&!p.endsWith('.ts')});
+ const dest=join(out,'node_modules',name);await cp(dir,dest,{recursive:true,filter:p=>!relative(dir,p).split(requireSeparator()).some(part=>part==='node_modules'||part==='test'||part==='tests')&&!p.endsWith('.map')&&!p.endsWith('.ts')});
  for(const file of walk(dir).filter(f=>f.endsWith('.js')||f.endsWith('.mjs')||f.endsWith('.cjs'))){
   const text=readFileSync(file,'utf8');
   for(const m of text.matchAll(/(?:from\s*|import\s*\(|require\s*\(|import\s*)['"]([^'"]+)['"]/g)){
-   const spec=m[1];if(spec.startsWith('.')||spec.startsWith('/')||spec.startsWith('node:')||!spec.includes('/')){if(!spec.startsWith('.')&&['yaml','chokidar','cosmokit','cordis','schemastery'].includes(spec))bundle(spec);continue;}
-   bundle(spec.startsWith('@')?spec.split('/').slice(0,2).join('/'):spec.split('/')[0]);
+   const spec=m[1];if(spec.startsWith('.')||spec.startsWith('/')||spec.startsWith('node:')||!spec.includes('/')){if(!spec.startsWith('.')&&['yaml','chokidar','cosmokit','cordis','schemastery'].includes(spec))await bundle(spec);continue;}
+   await bundle(spec.startsWith('@')?spec.split('/').slice(0,2).join('/'):spec.split('/')[0]);
   }
  }
 }
 function requireSeparator(){return process.platform==='win32'?'\\':'/';}
-for(const name of ['@deepseek-ai/schemastery','@deepseek-ai/dsh-tools','@deepseek-ai/dsh-session','yaml'])bundle(name);
+for(const name of ['@deepseek-ai/schemastery','@deepseek-ai/dsh-tools','@deepseek-ai/dsh-session','yaml'])await bundle(name);
 mkdirSync(join(out,'runtime'),{recursive:true});copyFileSync(process.execPath,join(out,'runtime','node.exe'));
 const license=join(dirname(process.execPath),'LICENSE');
 const nodeLicense=existsSync(license)?license:join(root,'third-party/node-LICENSE.txt');
@@ -42,7 +44,7 @@ writeFileSync(join(out,'overlay.cmd'),'@echo off\r\npowershell.exe -NoProfile -E
 writeFileSync(join(out,'stop-overlay.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\stop-overlay.ps1"\r\n');
 writeFileSync(join(out,'lol.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\start-overlay.ps1"\r\n"%~dp0runtime\\node.exe" "%~dp0tools\\lol-companion\\collector.mjs"\r\npause\r\n');
 writeFileSync(join(out,'wzry.cmd'),'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\\desktop-release\\start-overlay.ps1"\r\n"%~dp0runtime\\node.exe" "%~dp0tools\\desktop-release\\capture-wzry.mjs"\r\npause\r\n');
-cpSync(join(root,'docs'),join(out,'docs'),{recursive:true});
+await cp(join(root,'docs'),join(out,'docs'),{recursive:true});
 copyFileSync(join(root,'LICENSE'),join(out,'LICENSE'));
 writeFileSync(join(out,'start-jinbao.vbs'),'Option Explicit\r\nDim shell, fs, root, command\r\nSet shell = CreateObject("WScript.Shell")\r\nSet fs = CreateObject("Scripting.FileSystemObject")\r\nroot = fs.GetParentFolderName(WScript.ScriptFullName)\r\ncommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & root & "\\tools\\jinbao-launcher\\start.ps1" & Chr(34)\r\nshell.Run command, 0, False\r\n');
 writeFileSync(join(out,'开始使用.cmd'),'@echo off\r\nwscript.exe "%~dp0start-jinbao.vbs"\r\n');

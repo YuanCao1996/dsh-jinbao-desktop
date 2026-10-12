@@ -8,7 +8,7 @@ export async function installationCurrent(root, profiles) {
   async function matches(source, installed) {
     for (const entry of await readdir(source, { withFileTypes: true })) {
       const from = join(source, entry.name);
-      if (from.includes('tests') || from.includes('.bak')) continue;
+      if (entry.name === 'tests' || entry.name.includes('.bak')) continue;
       const to = join(installed, entry.name);
       if (entry.isDirectory()) {
         if (!await matches(from, to)) return false;

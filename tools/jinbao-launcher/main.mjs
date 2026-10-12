@@ -99,12 +99,16 @@ async function main() {
         }
         if (stopping) break;
         installed = true;
-        await psRun(platform, ['-Action', 'shortcut', '-Target', join(root, 'start-jinbao.vbs')]);
+        try{
+          await psRun(platform, ['-Action', 'shortcut', '-Target', join(root, 'start-jinbao.vbs'),
+            ...(process.env.JINBAO_SHORTCUT_DIR?['-ShortcutDirectory',process.env.JINBAO_SHORTCUT_DIR]:[])]);
+        }catch{ /* The portable package entry remains usable when a shortcut cannot be written. */ }
       }
       if (stopping) break;
       if (recovery.shouldStart(host.running)) {
         await publish('starting', '正在启动 DSH 和教练服务…');
-        try { await psRun(platform, ['-Action', 'open', '-Target', host.desktop]); }
+        try { await psRun(platform, ['-Action', 'open', '-Target', host.desktop,
+          ...(process.env.JINBAO_DSH_USER_DATA_DIR?['-DesktopUserDataDir',process.env.JINBAO_DSH_USER_DATA_DIR]:[])]); }
         catch { await publish('service-error', 'DSH 启动失败，金宝会稍后重试；也可手动打开 DSH。'); }
       }
       try {

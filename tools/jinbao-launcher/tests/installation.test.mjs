@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { installationCurrent, createHostRecovery } from '../installation.mjs';
 
 test('upgrade detection covers nested helpers and newly added plugin files', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'jinbao-install-'));
+  const root = await mkdtemp(join(tmpdir(), 'tests-jinbao-install-'));
   const profiles = join(root, 'profiles');
   for (const name of ['dsh-onboarding', 'dsh-coach-server', 'dsh-game-services']) {
     const source = join(root, 'tools', name);

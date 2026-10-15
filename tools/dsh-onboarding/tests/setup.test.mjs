@@ -9,7 +9,7 @@ test('setup guards secrets, pairs, routes BYOK directly and revokes cloud token'
  const credentials={resolve:async k=>values.has(k)?{value:values.get(k)}:undefined,set:async(k,v)=>values.set(k,v),unset:async k=>values.delete(k)};
  const fetchImpl=async(url,opts={})=>{calls.push({url:String(url),opts});const path=new URL(url).pathname;
  if(path==='/desktop/auth/code/redeem')return Response.json({sessionToken:'jc_'+'1'.repeat(64),expiresIn:604800});
- if(path==='/desktop/auth/ip/register')return Response.json({sessionToken:'jc_'+'2'.repeat(64),expiresIn:604800,nickname:'体验用户 01',seat:1,seats:10,modelLimit:100000000});
+ if(path==='/desktop/auth/ip/register')return Response.json({sessionToken:'jc_'+'2'.repeat(64),expiresIn:604800,nickname:'体验用户 01',seat:1,seats:30,modelLimit:100000000});
  if(path==='/health')return new Response('{}');
  if(path.endsWith('/start'))return Response.json({deviceSecret:'server-secret',userCode:'1234ABCD',expiresIn:300});
  if(path.endsWith('/poll'))return Response.json({status:'approved',sessionToken:'jd_'+'3'.repeat(64)});
@@ -39,7 +39,7 @@ test('setup guards secrets, pairs, routes BYOK directly and revokes cloud token'
  await writeFile(join(stateDir,'coach_live_state.json'),JSON.stringify({game:'lol',lastReply:{text:'先集合',at:123},privateContext:'do-not-return'}));
  const advice=await(await request('/api/advice')).json();assert.deepEqual(advice,{game:'lol',text:'先集合',updatedAt:123});
  await request('/api/logout',{});assert.equal(values.has('JINBAO_SERVICE_TOKEN'),false);
- const pilot=await(await request('/api/login/ip',{})).json();assert.deepEqual(pilot,{status:'approved',nickname:'体验用户 01',seat:1,seats:10,modelLimit:100000000});assert.equal(values.get('JINBAO_SERVICE_TOKEN'),'jc_'+'2'.repeat(64));assert.equal(new URL(calls.at(-1).url).pathname,'/desktop/auth/ip/register');
+ const pilot=await(await request('/api/login/ip',{})).json();assert.deepEqual(pilot,{status:'approved',nickname:'体验用户 01',seat:1,seats:30,modelLimit:100000000});assert.equal(values.get('JINBAO_SERVICE_TOKEN'),'jc_'+'2'.repeat(64));assert.equal(new URL(calls.at(-1).url).pathname,'/desktop/auth/ip/register');
  await request('/api/logout',{});
  assert.equal((await request('/api/login/code',{activationCode:'bad'})).status,400);
  const activated=await(await request('/api/login/code',{activationCode:' jb-'+'a'.repeat(32)+' '})).json();assert.deepEqual(activated,{status:'approved'});assert.equal(values.get('JINBAO_SERVICE_TOKEN'),'jc_'+'1'.repeat(64));assert.ok(!JSON.stringify(activated).includes('jc_'));assert.equal(JSON.parse(calls.at(-1).opts.body).activationCode,'JB-'+'A'.repeat(32));

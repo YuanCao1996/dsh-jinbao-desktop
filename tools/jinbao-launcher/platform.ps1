@@ -1,4 +1,4 @@
-﻿param([ValidateSet('inspect','shortcut','open','legacy-show')][string]$Action='inspect',[string]$Target,[string]$ShortcutDirectory,[string]$DesktopUserDataDir)
+﻿param([ValidateSet('inspect','shortcut','open','legacy-show')][string]$Action='inspect',[string]$Target,[string]$ShortcutDirectory,[string]$DesktopUserDataDir,[string]$StateDir)
 $ErrorActionPreference='Stop'
 if($Action -eq 'legacy-show'){
  . (Join-Path $PSScriptRoot 'legacy-overlay.ps1')
@@ -31,6 +31,12 @@ if($Action -eq 'shortcut') {
     exit 0
 }
 $desktop=$null
+if(!$StateDir){$dshRoot=if($env:DSH_HOME){$env:DSH_HOME}else{Join-Path $env:USERPROFILE '.dsh'};$StateDir=Join-Path $dshRoot 'jinbao'}
+$desktopCache=Join-Path $StateDir 'desktop-path.txt'
+if(Test-Path -LiteralPath $desktopCache){
+ $candidate=[IO.File]::ReadAllText($desktopCache).Trim()
+ if([IO.Path]::IsPathRooted($candidate) -and [IO.Path]::GetFileName($candidate) -eq 'DeepSeek Harness.exe' -and (Test-Path -LiteralPath $candidate -PathType Leaf)){$desktop=$candidate}
+}
 $roots=@((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'),(Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'))
 foreach($root in $roots) {
     if(!(Test-Path -LiteralPath $root)){continue}
@@ -45,6 +51,7 @@ $processes=@(Get-CimInstance Win32_Process -Filter "Name='DeepSeek Harness.exe'"
 if(!$desktop){foreach($process in $processes){if($process.ExecutablePath){$desktop=$process.ExecutablePath;break}}}
 $known=@((Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\DeepSeek Harness.exe'))
 foreach($path in $known){if(!$desktop -and (Test-Path -LiteralPath $path -PathType Leaf)){$desktop=$path}}
+if($desktop){[IO.Directory]::CreateDirectory($StateDir)|Out-Null;[IO.File]::WriteAllText($desktopCache,$desktop,[Text.UTF8Encoding]::new($false))}
 . (Join-Path $PSScriptRoot 'legacy-overlay.ps1')
 $legacy=@(Find-JinbaoLegacyOverlay)
 @{desktop=$desktop;running=($processes.Count -gt 0);legacyOverlay=$legacy} | ConvertTo-Json -Depth 3 -Compress

@@ -4,6 +4,8 @@ import { join,resolve,dirname,relative } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parseDocument,YAMLSeq } from '../../node_modules/yaml/dist/index.js';
+import { disableLegacyPlugin } from './legacy-config.mjs';
+import { copyDependency } from './dependency-copy.mjs';
 const args=process.argv.slice(2),option=(k,d)=>args.includes(k)?args[args.indexOf(k)+1]:d;
 const profiles=resolve(option('--profiles',join(homedir(),'.dsh','profiles')));
 const state=resolve(option('--state',join(homedir(),'.dsh','jinbao')));
@@ -14,6 +16,7 @@ const doc=parseDocument(original,{customTags:[{tag:'tag:yaml.org,2002:js',resolv
 if(doc.errors.length||!Array.isArray(doc.toJS()))throw Error('Desktop patch must be a valid YAML array');
 function entries(seq){return [...seq.items.flatMap(n=>n?.get?.('insert') instanceof YAMLSeq?entries(n.get('insert')):[]),...seq.items];}
 const all=entries(doc.contents);
+disableLegacyPlugin(doc, all);
 const targets=[
 {id:'jinbao-onboarding',name:'dsh-onboarding',config:{port:3084,stateDir:state}},
 {id:'site-assistant',name:'dsh-game-services',config:{mode:'remote',serviceBaseUrl:'https://api.jinbaoai.top',tokenEnv:'JINBAO_SERVICE_TOKEN'}},
@@ -35,7 +38,7 @@ const releaseManifest=join(source,'..','manifest.json');
 const dependencies=existsSync(releaseManifest)?JSON.parse(readFileSync(releaseManifest)).packages:['@deepseek-ai/schemastery','@deepseek-ai/cosmokit','@deepseek-ai/dsh-tools','@deepseek-ai/cordis','@deepseek-ai/cordis-plugin-loader','@deepseek-ai/dsh-scope','@deepseek-ai/dsh-llm','@deepseek-ai/dsh-typert-protocol','@deepseek-ai/dsh-util-values','@deepseek-ai/dsh-util-crypto','@deepseek-ai/dsh-brand','@deepseek-ai/dsh-timeout','@deepseek-ai/dsh-session','yaml'];
 for(const name of dependencies){const from=join(bundled,name,'package.json'),to=join(profiles,'node_modules',name,'package.json');if(existsSync(to)&&JSON.parse(readFileSync(from)).version!==JSON.parse(readFileSync(to)).version)throw Error('Existing dependency version differs: '+name+'; use a compatible DSH profile.');}
 // Async copy also handles Unicode paths and repairs files missing after an interrupted install.
-for(const name of dependencies)await cp(join(bundled,name),join(profiles,'node_modules',name),{recursive:true,force:false});
+for(const name of dependencies)await copyDependency(join(bundled,name),join(profiles,'node_modules',name));
 mkdirSync(dirname(patch),{recursive:true});mkdirSync(join(state,'logs'),{recursive:true});
 for(const name of ['dsh-game-services','dsh-onboarding','dsh-coach-server']){
  const from=join(source,name),to=join(profiles,'node_modules',name);

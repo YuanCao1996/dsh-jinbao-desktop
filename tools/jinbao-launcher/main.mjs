@@ -19,7 +19,7 @@ const shutdown = new AbortController();
 async function psRun(script, extra = []) {
   return exec(ps, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...extra], { windowsHide: true, timeout: 60000, maxBuffer: 65536 });
 }
-async function inspect() { return JSON.parse((await psRun(platform)).stdout.replace(/^\uFEFF/, '')); }
+async function inspect() { return JSON.parse((await psRun(platform, ['-StateDir', stateDir])).stdout.replace(/^\uFEFF/, '')); }
 async function exists(path) { try { await access(path); return true; } catch { return false; } }
 async function publish(phase, message, extra = {}) {
   const path = join(stateDir, 'launcher-state.json');

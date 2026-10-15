@@ -38,6 +38,7 @@ test('native entry yields to a legacy window and still starts normally when none
     await Promise.all([mkdir(launcher, { recursive: true }), mkdir(desktop, { recursive: true }), mkdir(join(root, 'runtime'))]);
     await copyFile(process.execPath, join(root, 'runtime/node.exe'));
     await copyFile(helper, join(launcher, 'legacy-overlay.ps1'));
+    await writeFile(join(launcher, 'legacy-window.ps1'), "function Show-JinbaoLegacyOverlay { param($Legacy) [IO.File]::WriteAllText((Join-Path $StateDir 'legacy-show-called'),'yes'); return $true }");
     await copyFile(fileURLToPath(new URL('../start.ps1', import.meta.url)), join(launcher, 'start.ps1'));
     await writeFile(join(desktop, 'start-overlay.ps1'), "param($StateDir)\n[IO.File]::WriteAllText((Join-Path $StateDir 'overlay-called'),'yes')");
     await writeFile(join(launcher, 'main.mjs'), "import fs from 'node:fs';import path from 'node:path';fs.writeFileSync(path.join(process.argv[3],'manager-called'),'yes');");
@@ -53,6 +54,8 @@ test('native entry yields to a legacy window and still starts normally when none
       await exec('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
       const status = JSON.parse(await readFile(join(state, 'launcher-state.json'), 'utf8'));
       assert.equal(status.phase, legacy ? 'legacy-active' : 'starting');
+      if (legacy) await access(join(state, 'legacy-show-called'));
+      else await assert.rejects(access(join(state, 'legacy-show-called')));
       for (const marker of ['overlay-called', 'manager-called']) {
         if (legacy) await assert.rejects(access(join(state, marker)));
         else await access(join(state, marker));

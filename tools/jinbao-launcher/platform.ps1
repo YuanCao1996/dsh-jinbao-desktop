@@ -1,5 +1,11 @@
-﻿param([ValidateSet('inspect','shortcut','open')][string]$Action='inspect',[string]$Target,[string]$ShortcutDirectory,[string]$DesktopUserDataDir)
+﻿param([ValidateSet('inspect','shortcut','open','legacy-show')][string]$Action='inspect',[string]$Target,[string]$ShortcutDirectory,[string]$DesktopUserDataDir)
 $ErrorActionPreference='Stop'
+if($Action -eq 'legacy-show'){
+ . (Join-Path $PSScriptRoot 'legacy-overlay.ps1')
+ . (Join-Path $PSScriptRoot 'legacy-window.ps1')
+ if(!(Show-JinbaoLegacyOverlay -Legacy @(Find-JinbaoLegacyOverlay))){throw 'Existing overlay could not be shown.'}
+ exit 0
+}
 if($Action -eq 'open') {
     if($Target -match 'DeepSeek Harness\.exe$'){
         $arguments=if($DesktopUserDataDir){'--user-data-dir="'+[IO.Path]::GetFullPath($DesktopUserDataDir)+'"'}else{''}

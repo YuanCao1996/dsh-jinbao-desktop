@@ -86,6 +86,7 @@ async function main() {
       if (action === 'download') await psRun(platform, ['-Action', 'open', '-Target', 'https://deepseek.com/harness/']);
       if (Date.now() > nextHostCheck) { host = await inspect(); nextHostCheck = Date.now() + 10000; }
       if (host.legacyOverlay?.length) {
+        await psRun(platform, ['-Action', 'legacy-show']);
         // A developer host may launch its old overlay after our first check.
         // Yield our UI and owned collectors without touching that host or its config.
         legacyActive = true;

@@ -15,7 +15,10 @@ try {
     if(!$owned){& (Join-Path $packageRoot 'tools\desktop-release\start-overlay.ps1') -StateDir $StateDir;exit 0}
     if($CheckOnly){& $node (Join-Path $PSScriptRoot 'main.mjs') --state $StateDir --check;exit $LASTEXITCODE}
     . (Join-Path $PSScriptRoot 'legacy-overlay.ps1')
-    if(@(Find-JinbaoLegacyOverlay).Count -gt 0){
+    $legacy=@(Find-JinbaoLegacyOverlay)
+    if($legacy.Count -gt 0){
+        . (Join-Path $PSScriptRoot 'legacy-window.ps1')
+        if(!(Show-JinbaoLegacyOverlay -Legacy $legacy)){throw 'Existing overlay could not be shown.'}
         $status=@{phase='legacy-active';message='正在使用 DSH 已启动的金宝悬浮窗，下载版未接管现有开发配置。';updatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}|ConvertTo-Json -Compress
         [IO.File]::WriteAllText((Join-Path $StateDir 'launcher-state.json'),$status,[Text.UTF8Encoding]::new($false))
         exit 0

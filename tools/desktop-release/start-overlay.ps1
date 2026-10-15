@@ -1,5 +1,8 @@
 ﻿param([string]$StateDir=(Join-Path $env:USERPROFILE '.dsh/jinbao'))
 $ErrorActionPreference='Stop'
+if(!$PSBoundParameters.ContainsKey('StateDir') -and $env:DSH_HOME){$StateDir=Join-Path $env:DSH_HOME 'jinbao'}
+. (Join-Path $PSScriptRoot '..\jinbao-launcher\legacy-overlay.ps1')
+if(@(Find-JinbaoLegacyOverlay).Count -gt 0){Write-Output 'Existing DSH Jinbao overlay is active; reusing it.';exit 0}
 $overlay=Join-Path $PSScriptRoot 'strategy-overlay.ps1'
 if(!(Test-Path -LiteralPath $overlay)){throw 'Strategy overlay file is missing'}
 $StateDir=[IO.Path]::GetFullPath($StateDir)

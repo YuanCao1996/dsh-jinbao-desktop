@@ -1,5 +1,6 @@
 ﻿param([string]$StateDir=(Join-Path $env:USERPROFILE '.dsh/jinbao'))
 $ErrorActionPreference='Stop'
+if(!$PSBoundParameters.ContainsKey('StateDir') -and $env:DSH_HOME){$StateDir=Join-Path $env:DSH_HOME 'jinbao'}
 $StateDir=[IO.Path]::GetFullPath($StateDir)
 [IO.Directory]::CreateDirectory($StateDir) | Out-Null
 $command=@{action='exit';at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}|ConvertTo-Json -Compress

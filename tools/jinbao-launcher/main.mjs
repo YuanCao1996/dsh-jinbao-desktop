@@ -53,6 +53,7 @@ async function main() {
   let host = await inspect();
   if (args.includes('--check')) {
     console.log(JSON.stringify({ desktopInstalled: !!host.desktop, desktopRunning: host.running,
+      legacyOverlayRunning: !!host.legacyOverlay?.length,
       pluginInstalled: await exists(join(profiles, 'node_modules/dsh-onboarding/plugin.mjs')) }));
     return;
   }
@@ -74,6 +75,7 @@ async function main() {
   let loginPolling = false;
   let lastAction = Date.now();
   let nextHostCheck = 0;
+  let legacyActive = false;
   try {
     while (!stopping && !await exists(join(stateDir, 'overlay-stopped'))) {
       let action = '';
@@ -83,6 +85,13 @@ async function main() {
       } catch { /* No pending UI action. */ }
       if (action === 'download') await psRun(platform, ['-Action', 'open', '-Target', 'https://deepseek.com/harness/']);
       if (Date.now() > nextHostCheck) { host = await inspect(); nextHostCheck = Date.now() + 10000; }
+      if (host.legacyOverlay?.length) {
+        // A developer host may launch its old overlay after our first check.
+        // Yield our UI and owned collectors without touching that host or its config.
+        legacyActive = true;
+        await writeFile(join(stateDir, 'overlay-control.json'), JSON.stringify({ action: 'exit', at: Date.now() }));
+        break;
+      }
       if (!host.desktop) {
         await publish('install-required', '首次使用需要安装 DeepSeek Harness，安装后金宝会自动继续。', { action: 'download', actionLabel: '下载 DSH' });
         await sleep(2000); continue;
@@ -145,7 +154,11 @@ async function main() {
       }
       await sleep(3000, undefined, { signal: shutdown.signal }).catch(() => {});
     }
-  } finally { clearInterval(stopWatcher); await supervisor.close(); await publish('stopped', '金宝已退出'); }
+  } finally {
+    clearInterval(stopWatcher); await supervisor.close();
+    await publish(legacyActive ? 'legacy-active' : 'stopped', legacyActive
+      ? '正在使用 DSH 已启动的金宝悬浮窗，下载版未接管现有开发配置。' : '金宝已退出');
+  }
 }
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   main().catch(async () => { await publish('error', '启动失败，请从高级维护菜单检查安装与服务状态'); process.exitCode = 1; });

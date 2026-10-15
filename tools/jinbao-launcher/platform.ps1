@@ -39,4 +39,6 @@ $processes=@(Get-CimInstance Win32_Process -Filter "Name='DeepSeek Harness.exe'"
 if(!$desktop){foreach($process in $processes){if($process.ExecutablePath){$desktop=$process.ExecutablePath;break}}}
 $known=@((Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness\DeepSeek Harness.exe'))
 foreach($path in $known){if(!$desktop -and (Test-Path -LiteralPath $path -PathType Leaf)){$desktop=$path}}
-@{desktop=$desktop;running=($processes.Count -gt 0)} | ConvertTo-Json -Compress
+. (Join-Path $PSScriptRoot 'legacy-overlay.ps1')
+$legacy=@(Find-JinbaoLegacyOverlay)
+@{desktop=$desktop;running=($processes.Count -gt 0);legacyOverlay=$legacy} | ConvertTo-Json -Depth 3 -Compress

@@ -2,9 +2,9 @@
 
 读取游戏日志，生成策略建议。当前支持 Windows 上的 LoL 和王者日志流，使用 DSH Desktop 管理 Agent、会话、上下文和工具。
 
-**[服务器直链：Windows 下载包](https://api.jinbaoai.top/downloads/dsh/v0.1.8/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.8)**
+**[服务器直链：Windows 下载包](https://api.jinbaoai.top/downloads/dsh/v0.1.9/jinbao-desktop-windows.zip)** · **[金宝官网：下载统一手机 App](https://www.jinbaoai.top/#download)** · **[GitHub 备用下载及版本说明](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.9)**
 
-完整解压下载包即可使用，不需要安装 Node、Python 或下载攻略数据库。[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.8/SHA256SUMS.txt)。请保留解压目录，桌面快捷方式指向其中的启动文件。
+完整解压下载包即可使用，不需要安装 Node、Python 或下载攻略数据库。[SHA-256 校验文件](https://api.jinbaoai.top/downloads/dsh/v0.1.9/SHA256SUMS.txt)。请保留解压目录，桌面快捷方式指向其中的启动文件。
 
 ## 第一次使用
 
@@ -14,6 +14,8 @@
 4. 悬浮窗显示“等待进入游戏”。LoL 采集自动启动；王者需连接一台已授权 USB 调试的 Android 手机，并在统一金宝 App 中开启游戏采集。无需手动选择游戏或启动采集器。
 
 以后双击桌面“金宝”即可启动。关闭悬浮窗会停止本次启动器及其采集进程；DSH Desktop 保留运行，方便继续使用其他功能。
+
+0.1.9 修复与本机既有开发版悬浮窗的冲突：发现同一 Windows 会话中的旧 LoL 悬浮窗时，保留原窗口及 DSH 配置，不启动第二套。若旧窗口稍后才被宿主拉起，下载版会退出自己的窗口及采集器。此兼容处理不会自动迁移旧版的模型配置。
 
 微信网站扫码代码已接入客户端及服务端，但需要审核通过的网站应用和服务器配置后才能开放。当前下载包不会展示可用的微信网站扫码入口。
 
@@ -39,7 +41,7 @@
 
 已验证 DSH Desktop 0.2.0-rc.2，插件 SDK 依赖为 0.1.5-rc.2。安装器保留其他插件和模型配置；共享依赖版本不一致时会停止安装。
 
-验证覆盖 24 项客户端自动测试、真实 DSH 宿主的日志建议与重启上下文恢复，以及中文和空格目录中的完整一键启动、重复启动、等待零请求和退出清理。集成模型使用模拟服务；微信网站扫码和手机完整对局仍需实机验收。任意游戏识别和全部游戏适配尚未实现。
+验证覆盖 26 项客户端自动测试、真实 DSH 宿主的日志建议与重启上下文恢复，以及中文和空格目录中的完整一键启动、重复启动、等待零请求和退出清理。集成模型使用模拟服务；微信网站扫码和手机完整对局仍需实机验收。任意游戏识别和全部游戏适配尚未实现。
 
 [快速开始与排障](docs/QUICKSTART.md) · [结构与开发](docs/DEVELOPMENT.md) · [一键启动实施记录](docs/ONE_CLICK_START_PLAN.md)
 

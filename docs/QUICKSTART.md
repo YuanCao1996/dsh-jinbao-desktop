@@ -1,7 +1,7 @@
 # 快速开始
 
 1. 安装 [DSH Desktop](https://deepseek.com/harness/)，使用金宝官方服务无需 DeepSeek 账号或 Key。
-2. 下载 [Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.8/jinbao-desktop-windows.zip)，右键“解压全部”，双击 `开始使用.cmd`。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.8) 提供相同版本。不要在压缩预览窗口里运行单个文件。
+2. 下载 [Windows ZIP](https://api.jinbaoai.top/downloads/dsh/v0.1.9/jinbao-desktop-windows.zip)，右键“解压全部”，双击 `开始使用.cmd`。[GitHub Release](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/tag/v0.1.9) 提供相同版本。不要在压缩预览窗口里运行单个文件。
 3. 悬浮窗立即显示启动进度。首次安装或升级如提示关闭宿主，请保存 DSH 中的工作、关闭宿主，再启动金宝。配置完成后自动启动 DSH，并创建桌面和开始菜单的“金宝”快捷方式。
 4. 新用户默认使用金宝官方服务。微信网站扫码尚未开通，当前通过设置页的 IP 试用或 App 配对登录；首批十个公网 IP 每个名额累计 1 亿模型 token，同一出口共用名额。也可在设置中配置自己的模型 API Key，已有 BYOK 配置会保留。
 5. 悬浮窗显示“等待进入游戏”，自动启动支持的采集。LoL 在本机运行；王者需要一台已授权 USB 调试的 Android 手机及金宝 App 的游戏采集功能。无需选择游戏模式。多台手机连接时，请保留需要采集的一台。

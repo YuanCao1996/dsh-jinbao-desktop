@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "main": "plugin.mjs",
-  "files": ["plugin.mjs", "client.mjs", "README.md", "desktop-models.example.yml"],
+  "files": ["plugin.mjs", "client.mjs"],
   "peerDependencies": {
     "@deepseek-ai/schemastery": "*",
     "@deepseek-ai/dsh-tools": "*"

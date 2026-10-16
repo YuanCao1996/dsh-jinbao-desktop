@@ -18,4 +18,4 @@ $command=@{action='show';at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}|C
 [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-control.json'),$command,[Text.UTF8Encoding]::new($false))
 $arguments='-NoProfile -STA -ExecutionPolicy Bypass -File "'+$overlay+'" -StateDir "'+$StateDir+'"'
 Start-Process -FilePath powershell.exe -ArgumentList $arguments -WindowStyle Hidden | Out-Null
-Write-Output 'Strategy overlay started. Header/buttons are clickable; Ctrl+Alt+J toggles full interaction. Use stop-overlay.cmd to exit.'
+Write-Output 'Strategy overlay started. Use the close button or Advanced Maintenance to exit.'

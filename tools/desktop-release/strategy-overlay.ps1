@@ -212,8 +212,10 @@ $controls.PageScroll.Add_PreviewMouseWheel({param($sender,$eventArgs)
 })
 function Resize-Window([double]$dx,[double]$dy){
  if($script:collapsed){return}
- $window.Width=[Math]::Max($window.MinWidth,[Math]::Min($window.Width+$dx,[Math]::Max($window.MinWidth,$area.Right-$window.Left)))
- $window.Height=[Math]::Max($window.MinHeight,[Math]::Min($window.Height+$dy,[Math]::Max($window.MinHeight,$area.Bottom-$window.Top)))
+ $window.Width=[Math]::Max($window.MinWidth,[Math]::Min($window.Width+$dx,$area.Width))
+ $window.Height=[Math]::Max($window.MinHeight,[Math]::Min($window.Height+$dy,$area.Height))
+ $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
+ $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
 }
 function Save-Bounds {
  $bounds=@{left=$window.Left;top=$window.Top;width=$(if($script:collapsed){$script:expandedWidth}else{$window.Width});height=$(if($script:collapsed){$script:expandedHeight}else{$window.Height})}|ConvertTo-Json -Compress

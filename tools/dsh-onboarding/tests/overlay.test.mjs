@@ -7,6 +7,19 @@ import { initialOverlayState, applyOverlayEvent, overlayView, clock, createOverl
 import { stateEvent, createRosterStats } from '../../lol-companion/collector-state.mjs';
 import { createSetupServer } from '../server.mjs';
 
+test('opponent rows omit player identifiers and sort valid recent win rates descending with unknowns last',()=>{
+ const s=initialOverlayState();s.game='lol';
+ s.allies=[{champion:'锐雯',puuid:'a',riotId:'隐藏名字A#123',name:'隐藏昵称A',k:1,d:2,a:3}];
+ s.enemies=[{champion:'安妮',puuid:'b',riotId:'隐藏名字B#123'},{champion:'布隆',puuid:'c'},{champion:'娜美',puuid:'d'},{champion:'诺克萨斯之手',puuid:'e'}];
+ s.playerStats=[{puuid:'a',winRate:50,games:20},{puuid:'b',winRate:80,games:20},{puuid:'c',winRate:100,games:0},{puuid:'d',winRate:0,games:20},{puuid:'e',winRate:100,games:20,error:'查询失败'}];
+ const v=overlayView(s);
+ assert.deepEqual(v.playerRows.map(r=>r.champion),['安妮','锐雯','娜美','布隆','诺克萨斯之手']);
+ assert.deepEqual(v.playerRows.map(r=>r.winRate),[80,50,0,null,null]);
+ assert.equal(v.playerRows[1].kda,'1/2/3');assert.equal(v.playerRows[0].kda,'—');
+ assert.doesNotMatch(JSON.stringify({players:v.players,rows:v.playerRows}),/隐藏|puuid|riotId|昵称/);
+ s.playerStats[0].winRate='';assert.equal(overlayView(s).playerRows.find(r=>r.champion==='锐雯').winRate,null);
+});
+
 test('mid-game capture uses elapsed seconds, ends at GameEnd, resets across matches and does not invent win rates',()=>{
  const s=initialOverlayState();
  applyOverlayEvent(s,{game:'lol',t:1000,kind:'game_start',me:{champion:'放逐之刃'}},'match1');

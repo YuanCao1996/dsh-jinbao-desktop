@@ -64,7 +64,10 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
     </StackPanel>
     <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,4,0,8"/>
     <ScrollViewer x:Name="PageScroll" Grid.Row="3" Background="Transparent" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
+     <StackPanel>
      <TextBlock x:Name="PageText" Text="等待新的游戏日志…" TextWrapping="Wrap" Foreground="#E2E8F0" FontSize="14" LineHeight="24" Margin="4"/>
+     <StackPanel x:Name="PlayersTable" Visibility="Collapsed" Margin="4"/>
+     </StackPanel>
     </ScrollViewer>
     <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,8,0,0" Visibility="Collapsed">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -98,6 +101,7 @@ $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','InteractionButton','RefreshButton','TacticButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
+$controls.PlayersTable=$window.FindName('PlayersTable')
 $script:renderedTab=$null
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
@@ -174,6 +178,26 @@ try{
 }catch{}
 Set-BackgroundOpacity
 $controls.OpacitySlider.Add_ValueChanged({Set-BackgroundOpacity;Save-Preferences})
+function Add-PlayerTableRow($values,[bool]$heading,[int]$index) {
+ $grid=New-Object Windows.Controls.Grid
+ foreach($width in @('28','*','70','36','78')){
+  $column=New-Object Windows.Controls.ColumnDefinition
+  $column.Width=[Windows.GridLengthConverter]::new().ConvertFromString($width)
+  $grid.ColumnDefinitions.Add($column)
+ }
+ for($i=0;$i -lt $values.Count;$i++){
+  $label=New-Object Windows.Controls.TextBlock
+  $label.Text=[string]$values[$i];$label.FontSize=12;$label.Padding='2,8,2,8';$label.TextWrapping='Wrap';$label.VerticalAlignment='Center'
+  $label.Foreground=if($heading){'#93C5FD'}else{'#E2E8F0'}
+  if($heading){$label.FontWeight='SemiBold'}
+  if($i -ge 2){$label.TextAlignment='Right'}
+  [Windows.Controls.Grid]::SetColumn($label,$i);$grid.Children.Add($label) | Out-Null
+ }
+ $border=New-Object Windows.Controls.Border
+ $border.BorderBrush='#334155';$border.BorderThickness='0,0,0,1'
+ if(!$heading -and $index % 2 -eq 0){$border.Background='#1829364E'}
+ $border.Child=$grid;$controls.PlayersTable.Children.Add($border) | Out-Null
+}
 function Update-Page {
  $scroll=$controls.PageScroll
  $samePage=$script:renderedTab -eq $script:tab
@@ -183,6 +207,21 @@ function Update-Page {
  if($script:snapshot){
   $value=[string]$script:snapshot.($script:tab)
   $controls.PageText.Text=if($value){$value}else{'等待此页面的数据…'}
+ }
+ $tableVisible=$script:tab -eq 'players' -and $null -ne $script:snapshot.playerRows -and @($script:snapshot.playerRows).Count -gt 0
+ $controls.PlayersTable.Visibility=if($tableVisible){'Visible'}else{'Collapsed'}
+ $controls.PageText.Visibility=if($tableVisible){'Collapsed'}else{'Visible'}
+ if($tableVisible){
+  $controls.PlayersTable.Children.Clear()
+  $caption=New-Object Windows.Controls.TextBlock
+  $caption.Text='近20局大乱斗胜率 ↓ · 无数据置后';$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
+  $controls.PlayersTable.Children.Add($caption) | Out-Null
+  Add-PlayerTableRow @('阵营','英雄','胜率 ↓','场次','当前 K/D/A') $true 0
+  $index=0
+  foreach($row in $script:snapshot.playerRows){
+   Add-PlayerTableRow @($row.side,$row.champion,$row.winRateText,$row.gamesText,$row.kda) $false $index
+   $index++
+  }
  }
  $controls.ChatPanel.Visibility=if($script:tab -eq 'chat'){'Visible'}else{'Collapsed'}
  $scroll.UpdateLayout()
@@ -423,6 +462,10 @@ try{
     $controls.PageScroll.ScrollToEnd();$controls.PageScroll.UpdateLayout()
     $script:snapshot.chat+="`n又一条消息";Update-Page
     $script:testResult.chatFollowsBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
+    $script:snapshot=[pscustomobject]@{players='英雄战绩';playerRows=@([pscustomobject]@{side='敌';champion='厄斐琉斯';winRateText='75%';gamesText='20';kda='1/2/3'})}
+    Set-Tab 'players'
+    $script:testResult.playerTableVisible=$controls.PlayersTable.Visibility -eq 'Visible' -and $controls.PageText.Visibility -eq 'Collapsed'
+    $script:testResult.playerTableColumns=$controls.PlayersTable.Children[2].Child.ColumnDefinitions.Count -eq 5
     $script:testResult.gameTime=$controls.TimeText.Text
     $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.closed=$script:closing

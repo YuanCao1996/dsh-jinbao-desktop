@@ -138,12 +138,16 @@ export function overlayView(state, knowledge = {}) {
   const own = items(me.items);
   const players = [...state.allies.map(p => ({ ...p, side: '友' })), ...state.enemies.map(p => ({ ...p, side: '敌' }))];
   const statRows = state.playerStats;
-  const roster = players.map(p => {
+  const playerRows = players.map(p => {
     const r = statRows.find(s => (p.puuid && s.puuid === p.puuid) || (p.riotId && s.riotId === p.riotId));
-    const kda=[p.k,p.d,p.a].every(Number.isFinite)?`${p.k}/${p.d}/${p.a}`:'KDA 未确认';
-    return `${p.side} ${p.champion ?? '?'} · ${p.riotId ?? p.name ?? ''} · ${kda}` +
-      (r ? `\n  近20局大乱斗：${r.error ? '查询失败' : r.games ? percent(r.winRate) + ' / ' + r.games + '局' : '暂无大乱斗记录'}` : '\n  个人胜率：待客户端查询');
-  });
+    const rate = r && !r.error && r.games > 0 && r.winRate != null && r.winRate !== '' ? Number(r.winRate) : NaN;
+    const winRate = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : null;
+    return { side: p.side, champion: p.champion || '未知英雄',
+      kda: [p.k,p.d,p.a].every(Number.isFinite) ? `${p.k}/${p.d}/${p.a}` : '—',
+      winRate, winRateText: winRate !== null ? `${Number(winRate.toFixed(1))}%` : r?.error ? '查询失败' : r && !r.games ? '暂无记录' : '待查询',
+      gamesText: r && !r.error && r.games > 0 ? String(r.games) : '—' };
+  }).sort((a,b) => (b.winRate ?? -1) - (a.winRate ?? -1));
+  const roster = playerRows.map(p => `${p.side} ${p.champion} · ${p.winRateText} · ${p.gamesText}局 · ${p.kda}`);
   const stats = statRows.map(r => `${r.team === 'enemy' ? '敌' : '友'} ${r.champion ?? ''} · ${r.riotId ?? ''}\n  ${r.error ? '查询失败：' + r.error : r.games ? percent(r.winRate) + ' / ' + r.games + '局 · KDA ' + (r.kda ?? '—') : '近期无大乱斗记录'}`);
   const builds = rows.filter(r => r._type === 'coreBuilds').map(r => `${items(r.items)}\n  样本胜率 ${percent(r.winRate)} · 使用率 ${percent(r.pickRate)}`);
   const augments = rows.filter(r => r._type === 'augments').map(r => `${r.name ?? ''} · ${r.tier ?? ''} · 样本胜率 ${percent(r.winRate)}\n${text(r.desc)}`);
@@ -156,6 +160,7 @@ export function overlayView(state, knowledge = {}) {
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索，或点击刷新推荐。') + '\n\n敌方装备\n' + (items(state.enemyItems) || '等待敌方装备日志'),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在出装和团战页查看建议，或通过聊天咨询当前局势。':'英雄适配海克斯\n' + (augments.join('\n\n') || knowledge.message || '进入对局后自动检索，或点击刷新推荐。') + (state.augmentAdvice?'\n\n教练建议\n'+state.augmentAdvice:'') + '\n\n本局已选\n' + (state.ownedAugments.join('、') || '尚未收到强化选择日志') + '\n\n当前选项\n' + (items(state.offers) || '尚未收到选择面板日志，可在聊天中输入三个选项咨询。'),
     players: roster.join('\n\n') || '此日志没有保存双方完整名单。新版采集器会记录名单和玩家战绩。',
+    playerRows,
     stats: '英雄样本胜率\n' + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?'T'+String(hero.tier).replace(/^T/,''):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索') + '\n\n个人近期战绩（与英雄样本胜率分开）\n' + (stats.join('\n\n') || (state.game==='wzry'?'当前王者日志没有个人历史胜率，无法据此计算。':'当前日志没有玩家战绩。新版采集器通过本机 LoL 客户端查询近20局记录。')),
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
     events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待局内事件',

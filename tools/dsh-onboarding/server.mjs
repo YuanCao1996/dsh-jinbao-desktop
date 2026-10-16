@@ -10,7 +10,7 @@ const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'J
 const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
-async function body(req,max=128*1024){let size=0;const chunks=[];for await(const c of req){size+=c.length;if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
+async function body(req,max=512*1024,onBytes){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){onBytes?.(declared);req.resume();throw error(413);}let size=0;const chunks=[];for await(const c of req){size+=c.length;onBytes?.(size);if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
 export async function createSetupServer({credentials,stateDir,port=3084,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch}) {
  const service=serviceUrl(serviceBaseUrl),nonce=randomBytes(32).toString('hex');
  await mkdir(join(stateDir,'logs'),{recursive:true});
@@ -71,7 +71,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
   try{
    if(req.url==='/v1/chat/completions'&&req.method==='POST'){
     if(!same(req.headers.authorization,'Bearer '+local))throw error(401);
-    const b=await body(req);if(!Array.isArray(b.messages))throw error(400);
+    const diagnostic={at:Date.now(),bytes:0};
+    res.once('finish',()=>{void writeFile(join(stateDir,'model-proxy-diagnostics.json'),JSON.stringify({...diagnostic,status:res.statusCode})).catch(()=>{});});
+    const b=await body(req,512*1024,size=>diagnostic.bytes=size);if(!Array.isArray(b.messages))throw error(400);
+    diagnostic.messageCount=b.messages.length;diagnostic.toolCount=Array.isArray(b.tools)?b.tools.length:0;diagnostic.systemBytes=Buffer.byteLength(JSON.stringify(b.messages.filter(m=>m.role==='system')));
     if(config.mode==='demo')throw error(409);
     const token=await resolve(config.mode==='byok'?'byok':'cloud');if(!token)throw error(401);
     const endpoint=config.mode==='byok'?chatUrl(config.baseUrl):new URL('/v1/chat/completions',service);
@@ -121,7 +124,9 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
      }
     }catch{ /* A failed renewal does not invalidate an otherwise valid session. */ }
     if(token)try{account=await remote('/desktop/account',token);}catch(e){accountError=e.status??503;}
-    send(res,200,{...config,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,...await diagnostic()});return;
+    let update=null;
+    try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<8192){const saved=JSON.parse(await readFile(path,'utf8'));update={state:saved.state,version:saved.version,message:saved.message};}}catch{}
+    send(res,200,{...config,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);

@@ -1,3 +1,4 @@
+import { configureGameAgent } from './agent-profile.js';
 // dsh-coach-server
 // ----------
 // 金宝游戏教练的 DSH 后端插件。App 通过 HTTP 调用,DSH 提供"大脑":
@@ -653,6 +654,7 @@ const coachRegistry = {
       setup: async (agentCtx) => {
         const presets = agentCtx.get("agentPresets");
         if (presets) await presets.mount(agentCtx, cfg.coachPreset);
+        configureGameAgent(agentCtx, cfg.coachPreset);
         // 修复 #2:coach_reply 提交后拒绝同回合的收尾 step(省一次 LLM 往返)
         installReplyStepGuard(agentCtx, replyState);
         // 修复 #4 观测:记录本回合最后一条 assistant 文本(便于诊断"未调 coach_reply"的回合)
@@ -2059,6 +2061,7 @@ function createMonitor(ctx, cfg, resolveGame) {
       setup: async (agentCtx) => {
         const presets = agentCtx.get("agentPresets");
         if (presets) await presets.mount(agentCtx, cfg.coachPreset);
+        configureGameAgent(agentCtx, cfg.coachPreset);
         // 修复 #2:coach_reply 提交后拒绝同回合的收尾 step(省一次 LLM 往返)
         installReplyStepGuard(agentCtx, liveReplyGuard);
         // 修复 #4:捕获本回合最后一条 assistant 文本(未调 coach_reply 时的兜底播报依据)

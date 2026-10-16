@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { parseDocument,YAMLSeq } from '../../node_modules/yaml/dist/index.js';
 import { disableLegacyPlugin } from './legacy-config.mjs';
 import { copyDependency } from './dependency-copy.mjs';
+import { installCoachPreset, COACH_PRESET } from './coach-preset.mjs';
 const args=process.argv.slice(2),option=(k,d)=>args.includes(k)?args[args.indexOf(k)+1]:d;
 const profiles=resolve(option('--profiles',join(homedir(),'.dsh','profiles')));
 const state=resolve(option('--state',join(homedir(),'.dsh','jinbao')));
@@ -17,10 +18,11 @@ if(doc.errors.length||!Array.isArray(doc.toJS()))throw Error('Desktop patch must
 function entries(seq){return [...seq.items.flatMap(n=>n?.get?.('insert') instanceof YAMLSeq?entries(n.get('insert')):[]),...seq.items];}
 const all=entries(doc.contents);
 disableLegacyPlugin(doc, all);
+installCoachPreset(doc, all);
 const targets=[
 {id:'jinbao-onboarding',name:'dsh-onboarding',config:{port:3084,stateDir:state}},
 {id:'site-assistant',name:'dsh-game-services',config:{mode:'remote',serviceBaseUrl:'https://api.jinbaoai.top',tokenEnv:'JINBAO_SERVICE_TOKEN'}},
-{id:'coach-server',name:'dsh-coach-server',config:{port:3081,provider:'jinbao-local',model:'jinbao-strategy',watchDir:join(state,'logs'),broadcastFile:join(state,'logs','coach_broadcasts.jsonl'),diagLogFile:join(state,'coach-server.log'),sessionCwd:state,coachPreset:'minimal',defaultGame:'wzry',visionEnabled:false,watchEnabled:true,liveTimeoutMs:120000}}
+{id:'coach-server',name:'dsh-coach-server',config:{port:3081,provider:'jinbao-local',model:'jinbao-strategy',watchDir:join(state,'logs'),broadcastFile:join(state,'logs','coach_broadcasts.jsonl'),diagLogFile:join(state,'coach-server.log'),sessionCwd:state,coachPreset:COACH_PRESET,defaultGame:'wzry',visionEnabled:false,watchEnabled:true,liveTimeoutMs:120000}}
 ];
 for(const target of targets){
  const found=all.filter(n=>n?.get?.('id')===target.id);if(found.length>1)throw Error('Duplicate plugin id: '+target.id);

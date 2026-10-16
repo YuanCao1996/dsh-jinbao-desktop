@@ -1,4 +1,4 @@
-﻿param([string]$StateDir,[switch]$CheckOnly)
+﻿param([string]$StateDir,[switch]$CheckOnly,[switch]$UseInstalledVersion)
 if(!$StateDir){$dshRoot=if($env:DSH_HOME){$env:DSH_HOME}else{Join-Path $env:USERPROFILE '.dsh'};$StateDir=Join-Path $dshRoot 'jinbao'}
 $ErrorActionPreference='Stop'
 $packageRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
@@ -6,6 +6,21 @@ $node=Join-Path $packageRoot 'runtime\node.exe'
 if(!(Test-Path -LiteralPath $node -PathType Leaf)) { throw '请完整解压金宝安装包，缺少内置运行环境。' }
 $StateDir=[IO.Path]::GetFullPath($StateDir)
 [IO.Directory]::CreateDirectory($StateDir) | Out-Null
+if(!$UseInstalledVersion -and !$CheckOnly){
+    try{
+        $selection=(& $node (Join-Path $PSScriptRoot 'update.mjs') --root $packageRoot --state $StateDir --resolve) | ConvertFrom-Json
+        if($LASTEXITCODE -ne 0){throw 'Update selection failed'}
+        if($selection.root -and [IO.Path]::GetFullPath($selection.root) -ne $packageRoot){
+            try{
+                & (Join-Path $selection.root 'tools\jinbao-launcher\start.ps1') -StateDir $StateDir -UseInstalledVersion
+                if($LASTEXITCODE -ne 0){throw 'Updated launcher failed'}
+                exit 0
+            }catch{
+                & $node (Join-Path $PSScriptRoot 'update.mjs') --root $selection.root --state $StateDir --reject | Out-Null
+            }
+        }
+    }catch{ } # An offline or damaged update never prevents portable startup.
+}
 $hash=[Security.Cryptography.SHA256]::Create()
 try{$identity=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($StateDir.ToLowerInvariant())))).Replace('-','').Substring(0,16)}finally{$hash.Dispose()}
 $mutex=New-Object Threading.Mutex($false,('Local\JinbaoLauncher-'+$identity))
@@ -27,6 +42,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $StateDir 'launcher-state.json'),$status,[Text.UTF8Encoding]::new($false))
     & (Join-Path $packageRoot 'tools\desktop-release\start-overlay.ps1') -StateDir $StateDir | Out-Null
     & $node (Join-Path $PSScriptRoot 'main.mjs') --state $StateDir
+    if($LASTEXITCODE -ne 0){throw 'Jinbao launcher failed'}
 } catch {
     $status=@{phase='error';message='启动失败，请完整解压安装包，或从高级维护菜单检查安装。';updatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}|ConvertTo-Json -Compress
     [IO.File]::WriteAllText((Join-Path $StateDir 'launcher-state.json'),$status,[Text.UTF8Encoding]::new($false))

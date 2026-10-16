@@ -9,7 +9,7 @@ if(existsSync(out))throw Error('Choose a new output directory; existing releases
 mkdirSync(join(out,'tools'),{recursive:true});
 for(const name of ['dsh-onboarding','dsh-game-services','dsh-coach-server','desktop-release','jinbao-launcher']){
  const from=join(root,'tools',name);
- await cp(from,join(out,'tools',name),{recursive:true,filter:p=>!relative(from,p).split(/[\\/]/).some(part=>part==='tests'||part.includes('.bak'))&&!p.endsWith('build.mjs')});
+ await cp(from,join(out,'tools',name),{recursive:true,filter:p=>!relative(from,p).split(/[\\/]/).some(part=>part==='tests'||part.includes('.bak'))&&!p.endsWith('build.mjs')&&!p.endsWith('update-metadata.mjs')});
 }
 mkdirSync(join(out,'tools','lol-companion'),{recursive:true});
 for(const name of ['collector.mjs','collector-state.mjs','player-stats.mjs','lockfile.mjs','lcu.mjs','live.mjs','eventlog.mjs'])copyFileSync(join(root,'tools/lol-companion',name),join(out,'tools/lol-companion',name));

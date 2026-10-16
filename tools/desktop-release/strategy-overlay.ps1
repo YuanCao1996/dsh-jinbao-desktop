@@ -60,6 +60,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <TextBlock x:Name="TimeText" Text="等待进入游戏" Foreground="#93C5FD" FontSize="14"/>
      <TextBlock x:Name="SummaryText" Text="正在检测游戏和教练服务…" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
      <TextBlock x:Name="LauncherText" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+     <TextBlock x:Name="UpdateText" Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
      <Button x:Name="ActionButton" Content="微信登录" HorizontalAlignment="Left" Visibility="Collapsed"/>
     </StackPanel>
     <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,4,0,8"/>
@@ -102,6 +103,7 @@ $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','InteractionButton','RefreshButton','TacticButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
+$controls.UpdateText=$window.FindName('UpdateText')
 $script:renderedTab=$null
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
@@ -263,6 +265,8 @@ function Update-State {
   $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   if($now-[double]$launcher.updatedAt -lt 45000 -and $launcher.phase -ne 'stopped'){
    $controls.LauncherText.Text=[string]$launcher.message
+   $controls.UpdateText.Text=[string]$launcher.update.message
+   $controls.UpdateText.Visibility=if($launcher.update.state -in @('downloading','ready','failed')){'Visible'}else{'Collapsed'}
    $controls.ActionButton.Tag=[string]$launcher.action
    $controls.ActionButton.Content=[string]$launcher.actionLabel
    $controls.ActionButton.Visibility=if($launcher.action){'Visible'}else{'Collapsed'}

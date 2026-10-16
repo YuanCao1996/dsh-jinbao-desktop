@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createSupervisor } from './supervisor.mjs';
 import { installationCurrent, createHostRecovery } from './installation.mjs';
+import { createUpdater } from './update.mjs';
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -16,6 +17,7 @@ const profiles = join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'profiles
 const ps = join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
 const platform = join(root, 'tools/jinbao-launcher/platform.ps1');
 const shutdown = new AbortController();
+const updater = createUpdater({ root, stateDir });
 async function psRun(script, extra = []) {
   return exec(ps, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...extra], { windowsHide: true, timeout: 60000, maxBuffer: 65536 });
 }
@@ -23,7 +25,9 @@ async function inspect() { return JSON.parse((await psRun(platform, ['-StateDir'
 async function exists(path) { try { await access(path); return true; } catch { return false; } }
 async function publish(phase, message, extra = {}) {
   const path = join(stateDir, 'launcher-state.json');
-  await writeFile(path + '.tmp', JSON.stringify({ phase, message, ...extra, updatedAt: Date.now() }));
+  let update;
+  try { update = JSON.parse(await readFile(join(stateDir, 'updates/status.json'), 'utf8')); } catch { /* First launch. */ }
+  await writeFile(path + '.tmp', JSON.stringify({ phase, message, ...extra, update, updatedAt: Date.now() }));
   await rename(path + '.tmp', path);
 }
 export function settingsAddress(value) {
@@ -69,6 +73,9 @@ async function main() {
     finally { checkingStop = false; }
   }, 250);
   const supervisor = createSupervisor({ root, stateDir, signal: shutdown.signal });
+  let updateTask = updater.check(shutdown.signal);
+  const updateTimer = setInterval(() => { updateTask = updater.check(shutdown.signal); }, 6 * 60 * 60 * 1000);
+  let updateHealthy = false;
   let installed = false;
   const recovery = createHostRecovery();
   let loginOpened = false;
@@ -123,6 +130,7 @@ async function main() {
       }
       try {
         const { link, value } = await status();
+        if (value.coachReady && !updateHealthy) { await updater.healthy().catch(() => {}); updateHealthy = true; }
         if (loginPolling) {
           try { const result = await localRequest(link, 'login/poll'); if (result.status === 'approved') loginPolling = false; }
           catch (error) { if (error.status === 410) loginPolling = false; }
@@ -156,7 +164,7 @@ async function main() {
       await sleep(3000, undefined, { signal: shutdown.signal }).catch(() => {});
     }
   } finally {
-    clearInterval(stopWatcher); await supervisor.close();
+    clearInterval(stopWatcher); clearInterval(updateTimer); shutdown.abort(); await updateTask; await supervisor.close();
     await publish(legacyActive ? 'legacy-active' : 'stopped', legacyActive
       ? '正在使用 DSH 已启动的金宝悬浮窗，下载版未接管现有开发配置。' : '金宝已退出');
   }

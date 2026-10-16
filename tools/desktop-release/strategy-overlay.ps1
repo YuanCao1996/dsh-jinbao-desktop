@@ -32,6 +32,7 @@ $StateDir=[IO.Path]::GetFullPath($StateDir)
 [IO.Directory]::CreateDirectory($StateDir) | Out-Null
 $stateFile=Join-Path $StateDir 'overlay-state.json'
 $boundsFile=Join-Path $StateDir 'strategy-overlay-bounds.json'
+$preferencesFile=Join-Path $StateDir 'strategy-overlay-preferences.json'
 $controlFile=Join-Path $StateDir 'overlay-control.json'
 $hash=[Security.Cryptography.SHA256]::Create()
 try{$identity=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($StateDir.ToLowerInvariant())))).Replace('-','').Substring(0,16)}finally{$hash.Dispose()}
@@ -44,7 +45,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
  <Window.Resources>
   <Style TargetType="Button"><Setter Property="Background" Value="#29364E"/><Setter Property="Foreground" Value="#E2E8F0"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="9,6"/><Setter Property="Margin" Value="3"/><Setter Property="Cursor" Value="Hand"/></Style>
  </Window.Resources>
- <Border Background="#E8172033" BorderBrush="#536078" BorderThickness="1" CornerRadius="14" Padding="12">
+ <Border x:Name="MainBorder" Background="#E8172033" BorderBrush="#536078" BorderThickness="1" CornerRadius="14" Padding="12">
   <Grid>
    <Grid x:Name="Expanded">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
@@ -62,7 +63,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Button x:Name="ActionButton" Content="微信登录" HorizontalAlignment="Left" Visibility="Collapsed"/>
     </StackPanel>
     <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,4,0,8"/>
-    <ScrollViewer x:Name="PageScroll" Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <ScrollViewer x:Name="PageScroll" Grid.Row="3" Background="Transparent" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
      <TextBlock x:Name="PageText" Text="等待新的游戏日志…" TextWrapping="Wrap" Foreground="#E2E8F0" FontSize="14" LineHeight="24" Margin="4"/>
     </ScrollViewer>
     <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,8,0,0" Visibility="Collapsed">
@@ -76,7 +77,12 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
       <Button x:Name="RefreshButton" Content="刷新推荐"/>
       <Button x:Name="TacticButton" Content="咨询团战"/>
      </WrapPanel>
-     <TextBlock x:Name="HintText" Text="标题和按钮可直接点击 · Ctrl+Alt+J 切换交互" Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap" Margin="4,4,0,0"/>
+     <StackPanel Orientation="Horizontal" Margin="4,5,4,0">
+      <TextBlock Text="背景不透明度" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center"/>
+      <Slider x:Name="OpacitySlider" Minimum="20" Maximum="100" Value="91" Width="140" Margin="10,0" IsMoveToPointEnabled="True" SmallChange="1" LargeChange="10" ToolTip="调低后背景更透明，文字保持清晰"/>
+      <TextBlock x:Name="OpacityText" Foreground="#E2E8F0" FontSize="11" VerticalAlignment="Center"/>
+     </StackPanel>
+     <TextBlock x:Name="HintText" Text="内容区可直接滚动 · 标题可拖动 · Ctrl+Alt+J 切换交互" Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap" Margin="4,4,0,0"/>
     </StackPanel>
    </Grid>
    <Grid x:Name="Bubble" Visibility="Collapsed" Background="#01000000" Cursor="SizeAll">
@@ -90,7 +96,9 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 '@
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
-foreach($name in @('Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','InteractionButton','RefreshButton','TacticButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','InteractionButton','RefreshButton','TacticButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
+$script:scrollPositions=@{}
+$script:renderedTab=$null
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
 $script:source=$null
@@ -120,7 +128,7 @@ if(!$SelfTest){
 }
 function Set-PointerMode([bool]$hotzone){
  if($script:windowHandle -eq [IntPtr]::Zero){return}
- $through=!($script:interactiveMode -or $hotzone -or $script:dragging)
+ $through=!($script:interactiveMode -or $hotzone -or $script:dragging -or [Windows.Input.Mouse]::Captured)
  $focusable=$script:interactiveMode -and !$script:collapsed
  if($script:lastThrough -ne $through -or $script:lastFocusable -ne $focusable){
   [JinbaoOverlayNative]::InputMode($script:windowHandle,$through,$focusable)
@@ -130,7 +138,7 @@ function Set-PointerMode([bool]$hotzone){
 function Set-Interaction([bool]$enabled){
  $script:interactiveMode=$enabled
  $controls.InteractionButton.Content=if($enabled){'恢复穿透'}else{'交互模式'}
- $controls.HintText.Text=if($enabled){'可滚动和输入 · 标题可拖动 · Ctrl+Alt+J 恢复穿透'}else{'标题和按钮可直接点击 · Ctrl+Alt+J 切换交互'}
+ $controls.HintText.Text=if($enabled){'可滚动和输入 · 标题可拖动 · Ctrl+Alt+J 恢复穿透'}else{'内容区可直接滚动 · 标题可拖动 · Ctrl+Alt+J 切换交互'}
  Set-PointerMode $false
 }
 function Set-Collapsed([bool]$on){
@@ -148,13 +156,42 @@ function Set-Collapsed([bool]$on){
  }
  $script:collapsed=$on;Set-PointerMode $true
 }
+function Save-Preferences {
+ $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value)} | ConvertTo-Json -Compress
+ $temporary=$preferencesFile+'.tmp'
+ [IO.File]::WriteAllText($temporary,$json,[Text.UTF8Encoding]::new($false))
+ Move-Item -LiteralPath $temporary -Destination $preferencesFile -Force
+}
+function Set-BackgroundOpacity {
+ $percent=[Math]::Round($controls.OpacitySlider.Value)
+ $color=[Windows.Media.Color]::FromArgb([byte][Math]::Round(255*$percent/100),23,32,51)
+ $controls.MainBorder.Background=New-Object Windows.Media.SolidColorBrush($color)
+ $controls.OpacityText.Text=([string]$percent)+'%'
+}
+try{
+ $preferences=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
+ if($preferences.backgroundOpacity -ge 20 -and $preferences.backgroundOpacity -le 100){$controls.OpacitySlider.Value=[double]$preferences.backgroundOpacity}
+}catch{}
+Set-BackgroundOpacity
+$controls.OpacitySlider.Add_ValueChanged({Set-BackgroundOpacity;Save-Preferences})
 function Update-Page {
+ $scroll=$controls.PageScroll
+ $samePage=$script:renderedTab -eq $script:tab
+ $offset=$scroll.VerticalOffset
+ $followChat=$samePage -and $script:tab -eq 'chat' -and ($scroll.ScrollableHeight-$offset) -lt 24
+ if(!$samePage -and $script:renderedTab){$script:scrollPositions[$script:renderedTab]=$offset}
  if($script:snapshot){
   $value=[string]$script:snapshot.($script:tab)
   $controls.PageText.Text=if($value){$value}else{'等待此页面的数据…'}
  }
  $controls.ChatPanel.Visibility=if($script:tab -eq 'chat'){'Visible'}else{'Collapsed'}
- if($script:tab -eq 'chat'){$controls.PageScroll.ScrollToEnd()}else{$controls.PageScroll.ScrollToTop()}
+ $scroll.UpdateLayout()
+ if($followChat -or (!$samePage -and $script:tab -eq 'chat' -and !$script:scrollPositions.ContainsKey('chat'))){$scroll.ScrollToEnd()}
+ elseif($samePage){$scroll.ScrollToVerticalOffset($offset)}
+ elseif($script:scrollPositions.ContainsKey($script:tab)){$scroll.ScrollToVerticalOffset($script:scrollPositions[$script:tab])}
+ else{$scroll.ScrollToTop()}
+ $scroll.UpdateLayout()
+ $script:renderedTab=$script:tab
 }
 function Set-Tab([string]$name){
  $script:tab=$name
@@ -173,7 +210,10 @@ function Update-State {
  try{
   if((Get-Item -LiteralPath $stateFile -ErrorAction Stop).Length -gt 1048576){return}
   $next=[IO.File]::ReadAllText($stateFile,[Text.Encoding]::UTF8) | ConvertFrom-Json
-  $changed=(!$script:snapshot -or [string]$next.($script:tab) -ne [string]$script:snapshot.($script:tab))
+  if($script:snapshot -and ([string]$next.game -ne [string]$script:snapshot.game -or [string]$next.match -ne [string]$script:snapshot.match)){
+   $script:scrollPositions=@{};$script:renderedTab=$null
+  }
+  $changed=(!$script:snapshot -or !$script:renderedTab -or [string]$next.($script:tab) -ne [string]$script:snapshot.($script:tab))
   $script:snapshot=$next;$controls.TitleText.Text=[string]$next.title
   $controls.TimeText.Text=if($next.gameTime -and $next.gameTime -ne '等待对局'){'对局 '+$next.gameTime+$(if($next.ended){' · 已结束'}else{''})}else{'等待对局'}
   $controls.SummaryText.Text=[string]$next.summary
@@ -288,17 +328,20 @@ function Update-Drag([double]$x,[double]$y,[bool]$pressed){
   }
  }
 }
+function Test-PointerHotzone([Windows.Point]$screenPoint) {
+ $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.ChatPanel)}
+ foreach($target in $targets){
+  if(!$target.IsVisible){continue}
+  $local=$target.PointFromScreen($screenPoint)
+  if($local.X -ge 0 -and $local.Y -ge 0 -and $local.X -lt $target.ActualWidth -and $local.Y -lt $target.ActualHeight){return $true}
+ }
+ return $false
+}
 function Pointer-Tick {
  $p=New-Object 'JinbaoOverlayNative+Point'
  [JinbaoOverlayNative]::GetCursorPos([ref]$p) | Out-Null
  Update-Drag $p.X $p.Y (([JinbaoOverlayNative]::GetAsyncKeyState(1) -band 0x8000) -ne 0)
- $hotzone=$false
- $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer)}
- foreach($target in $targets){
-  $local=$target.PointFromScreen((New-Object Windows.Point($p.X,$p.Y)))
-  if($local.X -ge 0 -and $local.Y -ge 0 -and $local.X -lt $target.ActualWidth -and $local.Y -lt $target.ActualHeight){$hotzone=$true;break}
- }
- Set-PointerMode $hotzone
+ Set-PointerMode (Test-PointerHotzone (New-Object Windows.Point($p.X,$p.Y)))
 }
 $hook=[Windows.Interop.HwndSourceHook]{
  param($handle,$message,$wParam,$lParam,[ref]$handled)
@@ -354,6 +397,32 @@ try{
     Update-Drag 50 40 $false;$script:testResult.dragReleased=!$script:dragging
     foreach($button in $controls.Tabs.Children){$button.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))}
     $script:testResult.chatInteractive=$script:interactiveMode -and $controls.ChatPanel.Visibility -eq 'Visible'
+    $controls.OpacitySlider.Value=45
+    $script:testResult.opacityChanged=$controls.MainBorder.Background.Color.A -eq 115 -and $controls.OpacityText.Text -eq '45%'
+    $savedPreferences=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
+    $script:testResult.opacitySaved=$savedPreferences.backgroundOpacity -eq 45
+    $longText=(1..150 | ForEach-Object {"第 $_ 条策略内容，用于验证滚动位置。"}) -join "`n"
+    $script:snapshot=[pscustomobject]@{advice=$longText;equipment=$longText;chat=$longText}
+    Set-Tab 'advice';Set-Interaction $false
+    $contentPoint=$controls.PageScroll.PointToScreen((New-Object Windows.Point(50,50)))
+    Set-PointerMode (Test-PointerHotzone $contentPoint)
+    $script:testResult.contentReceivesMouse=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x20) -eq 0
+    $wheel=New-Object Windows.Input.MouseWheelEventArgs([Windows.Input.Mouse]::PrimaryDevice,0,-120)
+    $wheel.RoutedEvent=[Windows.Input.Mouse]::MouseWheelEvent
+    $controls.PageScroll.RaiseEvent($wheel);$controls.PageScroll.UpdateLayout()
+    $script:testResult.wheelScrolls=$controls.PageScroll.VerticalOffset -gt 0
+    $controls.PageScroll.ScrollToVerticalOffset(200);$controls.PageScroll.UpdateLayout()
+    $offset=$controls.PageScroll.VerticalOffset
+    $script:snapshot.advice=$longText+"`n新增策略";Update-Page
+    $script:testResult.refreshPreservesScroll=$offset -gt 0 -and [Math]::Abs($controls.PageScroll.VerticalOffset-$offset) -lt 1
+    Set-Tab 'equipment';Set-Tab 'advice'
+    $script:testResult.tabRestoresScroll=[Math]::Abs($controls.PageScroll.VerticalOffset-$offset) -lt 1
+    Set-Tab 'chat';$controls.PageScroll.ScrollToVerticalOffset(200);$controls.PageScroll.UpdateLayout()
+    $script:snapshot.chat=$longText+"`n新的聊天消息";Update-Page
+    $script:testResult.chatReadingPreserved=[Math]::Abs($controls.PageScroll.VerticalOffset-200) -lt 1
+    $controls.PageScroll.ScrollToEnd();$controls.PageScroll.UpdateLayout()
+    $script:snapshot.chat+="`n又一条消息";Update-Page
+    $script:testResult.chatFollowsBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
     $script:testResult.gameTime=$controls.TimeText.Text
     $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.closed=$script:closing

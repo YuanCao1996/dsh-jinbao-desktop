@@ -258,6 +258,11 @@ function Update-Page {
  $controls.PageText.Visibility=if($tableVisible){'Collapsed'}else{'Visible'}
  if($tableVisible){
   $controls.PlayersTable.Children.Clear()
+  if($script:snapshot.heroStats){
+   $heroSummary=New-Object Windows.Controls.TextBlock
+   $heroSummary.Text=[string]$script:snapshot.heroStats;$heroSummary.Foreground='#E2E8F0';$heroSummary.FontSize=$controls.FontSlider.Value;$heroSummary.TextWrapping='Wrap';$heroSummary.Margin='0,0,0,14'
+   $controls.PlayersTable.Children.Add($heroSummary) | Out-Null
+  }
   $caption=New-Object Windows.Controls.TextBlock
   $caption.Text='近20局大乱斗胜率 ↓ · 无数据置后';$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
   $controls.PlayersTable.Children.Add($caption) | Out-Null
@@ -278,13 +283,17 @@ function Update-Page {
  $script:renderedTab=$script:tab
 }
 function Set-Tab([string]$name){
+ if($name -eq 'stats'){$name='players'}
  $script:tab=$name
  foreach($button in $controls.Tabs.Children){$button.Background=if($button.Tag -eq $name){'#2563EB'}else{'#29364E'}}
- if($name -eq 'chat'){Set-Interaction $true}
+ if($name -eq 'chat'){
+  Set-Interaction $true
+ }
  $controls.TacticButton.Content=switch($name){'equipment'{'咨询出装'}'augments'{'咨询海克斯'}default{'咨询团战'}}
  Update-Page
+ if($name -eq 'chat' -and $window.IsVisible){$window.Activate() | Out-Null;$controls.QuestionBox.Focus() | Out-Null;[Windows.Input.Keyboard]::Focus($controls.QuestionBox) | Out-Null}
 }
-foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','对手'),@('stats','胜率'),@('teamfight','团战'),@('events','事件'),@('chat','聊天'))){
+foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','胜率'),@('teamfight','团战'),@('events','事件'),@('chat','聊天'))){
  $button=New-Object Windows.Controls.Button
  $button.Tag=$entry[0];$button.Content=$entry[1];$button.FontSize=12
  $button.Add_Click({param($sender,$eventArgs) Set-Tab ([string]$sender.Tag)})
@@ -321,6 +330,9 @@ function Update-State {
  }catch{}
  if($script:job -and $script:job.State -in @('Completed','Failed','Stopped')){
   $result=Receive-Job $script:job -ErrorAction SilentlyContinue
+  if($result -and !$result.ok -and $script:pendingQuestion -and !$controls.QuestionBox.Text){$controls.QuestionBox.Text=$script:pendingQuestion}
+  $script:pendingQuestion=$null
+  if($result -and $result.ok){$script:renderedTab=$null}
   $controls.HintText.Text=if($result -and $result.ok){'已完成'}elseif($result -and $result.message){[string]$result.message}else{'请求失败，请检查设置页的模型和服务状态。'}
   Remove-Job $script:job -Force -ErrorAction SilentlyContinue;$script:job=$null
   $controls.SendButton.IsEnabled=$true;$controls.RefreshButton.IsEnabled=$true;$controls.TacticButton.IsEnabled=$true
@@ -346,7 +358,11 @@ function Start-Request([string]$route,[hashtable]$payload){
    try{
     Invoke-RestMethod -Uri $endpoint -Method Post -Headers @{'x-jinbao-setup'=$nonce} -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 70 | Out-Null
     @{ok=$true}
-   }catch{@{ok=$false;message='请求失败，请在设置页检查模型配置和攻略检索权限。'}}
+   }catch{
+    $status=0;try{$status=[int]$_.Exception.Response.StatusCode}catch{}
+    $message=switch($status){401{'登录已失效，请在设置页重新登录。'}403{'当前账号没有服务权限，请检查设置页。'}409{'教练忙碌或对局已切换，请稍后重试。'}429{'服务额度已用完或请求过于频繁，请稍后重试。'}default{'连接失败或回复超时，请检查网络后重试。'}}
+    @{ok=$false;message=$message}
+   }
   }
   $controls.SendButton.IsEnabled=$false;$controls.RefreshButton.IsEnabled=$false;$controls.TacticButton.IsEnabled=$false
   $controls.HintText.Text=if($route -eq 'ask'){'教练思考中…'}else{'正在检索推荐…'}
@@ -356,7 +372,7 @@ function Send-Question {
  $question=$controls.QuestionBox.Text.Trim()
  if(!$question -or $script:job){return}
  Start-Request 'ask' @{question=$question}
- if($script:job){$controls.QuestionBox.Text=''}
+ if($script:job){$script:pendingQuestion=$question;$controls.QuestionBox.Text=''}
 }
 $controls.SendButton.Add_Click({Send-Question})
 $controls.QuestionBox.Add_PreviewKeyDown({param($sender,$eventArgs)
@@ -480,6 +496,7 @@ try{
     $script:testResult.collapsed=$script:collapsed -and $window.Width -eq 110
     Set-Collapsed $false;$script:testResult.expanded=$window.Width -ge 420
     $script:testResult.tabs=$controls.Tabs.Children.Count
+    $script:testResult.singleWinRateTab=@($controls.Tabs.Children | Where-Object {$_.Content -eq '胜率'}).Count -eq 1 -and @($controls.Tabs.Children | Where-Object {$_.Content -eq '对手' -or $_.Tag -eq 'stats'}).Count -eq 0
     $script:dragStartX=0;$script:dragStartY=0;$script:dragLeft=100;$script:dragTop=100;$script:dragging=$true;$script:bubbleDrag=$false
     Update-Drag 50 40 $true;$script:testResult.dragMoved=$window.Left -gt 100 -and $window.Top -gt 100
     Update-Drag 50 40 $false;$script:testResult.dragReleased=!$script:dragging
@@ -506,6 +523,7 @@ try{
     $controls.AppearanceButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     foreach($button in $controls.Tabs.Children){$button.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))}
     $script:testResult.chatInteractive=$script:interactiveMode -and $controls.ChatPanel.Visibility -eq 'Visible'
+    $script:testResult.chatFocusable=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x08000000) -eq 0
     $controls.OpacitySlider.Value=45
     $script:testResult.opacityChanged=$controls.MainBorder.Background.Color.A -eq 115 -and $controls.OpacityText.Text -eq '45%'
     $savedPreferences=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json

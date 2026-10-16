@@ -17,6 +17,8 @@ test('opponent rows omit player identifiers and sort valid recent win rates desc
  assert.deepEqual(v.playerRows.map(r=>r.winRate),[80,50,0,null,null]);
  assert.equal(v.playerRows[1].kda,'1/2/3');assert.equal(v.playerRows[0].kda,'—');
  assert.doesNotMatch(JSON.stringify({players:v.players,rows:v.playerRows}),/隐藏|puuid|riotId|昵称/);
+ const merged=overlayView(s,{rows:[{_viewKind:'hero',name:'安妮',winRate:55,tier:1}]});
+ assert.match(merged.players,/英雄样本胜率\n安妮 · T1 · 55%/);assert.match(merged.players,/双方近期胜率/);
  s.playerStats[0].winRate='';assert.equal(overlayView(s).playerRows.find(r=>r.champion==='锐雯').winRate,null);
 });
 

@@ -41,9 +41,9 @@ $owned=$false
 try{$owned=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$owned=$true}
 if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already running.';exit 0}
 [xml]$xaml=@'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="金宝策略悬浮窗" Width="560" Height="500" MinWidth="420" MinHeight="320" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="CanResizeWithGrip">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="金宝策略悬浮窗" Width="580" Height="600" MinWidth="420" MinHeight="380" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="CanResize">
  <Window.Resources>
-  <Style TargetType="Button"><Setter Property="Background" Value="#29364E"/><Setter Property="Foreground" Value="#E2E8F0"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="9,6"/><Setter Property="Margin" Value="3"/><Setter Property="Cursor" Value="Hand"/></Style>
+  <Style TargetType="Button"><Setter Property="Background" Value="#29364E"/><Setter Property="Foreground" Value="#E2E8F0"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,4"/><Setter Property="Margin" Value="3"/><Setter Property="Cursor" Value="Hand"/></Style>
  </Window.Resources>
  <Border x:Name="MainBorder" Background="#E8172033" BorderBrush="#536078" BorderThickness="1" CornerRadius="14" Padding="12">
   <Grid>
@@ -56,14 +56,16 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Button x:Name="CollapseButton" Grid.Column="2" Content="收起"/>
      <Button x:Name="CloseButton" Grid.Column="3" Content="×" FontSize="19" ToolTip="退出悬浮窗"/>
     </Grid>
-    <StackPanel Grid.Row="1" Margin="3,8,3,4">
+    <StackPanel Grid.Row="1" Margin="3,4,3,2">
+     <WrapPanel>
      <TextBlock x:Name="TimeText" Text="等待进入游戏" Foreground="#93C5FD" FontSize="14"/>
-     <TextBlock x:Name="SummaryText" Text="正在检测游戏和教练服务…" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+     <TextBlock x:Name="SummaryText" Text="正在检测游戏和教练服务…" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" Margin="8,2,0,0"/>
+     </WrapPanel>
      <TextBlock x:Name="LauncherText" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
      <TextBlock x:Name="UpdateText" Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
      <Button x:Name="ActionButton" Content="微信登录" HorizontalAlignment="Left" Visibility="Collapsed"/>
     </StackPanel>
-    <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,4,0,8"/>
+    <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,2,0,4"/>
     <ScrollViewer x:Name="PageScroll" Grid.Row="3" Background="Transparent" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
      <StackPanel>
      <TextBlock x:Name="PageText" Text="等待新的游戏日志…" TextWrapping="Wrap" Foreground="#E2E8F0" FontSize="14" LineHeight="24" Margin="4"/>
@@ -80,15 +82,26 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
       <Button x:Name="InteractionButton" Content="交互模式"/>
       <Button x:Name="RefreshButton" Content="刷新推荐"/>
       <Button x:Name="TacticButton" Content="咨询团战"/>
+      <Button x:Name="AppearanceButton" Content="外观" ToolTip="调整背景透明度和正文大小"/>
      </WrapPanel>
+     <StackPanel x:Name="AppearancePanel" Visibility="Collapsed">
      <StackPanel Orientation="Horizontal" Margin="4,5,4,0">
       <TextBlock Text="背景不透明度" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center"/>
       <Slider x:Name="OpacitySlider" Minimum="20" Maximum="100" Value="91" Width="140" Margin="10,0" IsMoveToPointEnabled="True" SmallChange="1" LargeChange="10" ToolTip="调低后背景更透明，文字保持清晰"/>
       <TextBlock x:Name="OpacityText" Foreground="#E2E8F0" FontSize="11" VerticalAlignment="Center"/>
      </StackPanel>
-     <TextBlock x:Name="HintText" Text="内容区可直接滚动 · 标题可拖动 · Ctrl+Alt+J 切换交互" Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap" Margin="4,4,0,0"/>
+     <StackPanel Orientation="Horizontal" Margin="4,5,4,4">
+      <TextBlock Text="正文大小" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center"/>
+      <Slider x:Name="FontSlider" Minimum="11" Maximum="22" Value="14" Width="140" Margin="32,0,10,0" TickFrequency="1" IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" ToolTip="也可在正文区按住 Ctrl 滚动滚轮"/>
+      <TextBlock x:Name="FontText" Foreground="#E2E8F0" FontSize="11" VerticalAlignment="Center"/>
+     </StackPanel>
+     </StackPanel>
+     <TextBlock x:Name="HintText" Text="右下角拖动缩放 · Ctrl+滚轮调整正文" Foreground="#94A3B8" FontSize="10" TextTrimming="CharacterEllipsis" Margin="4,3,18,0"/>
     </StackPanel>
    </Grid>
+   <Thumb x:Name="ResizeGrip" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-8,-8" Cursor="SizeNWSE" ToolTip="拖动调整窗口大小，会记住你的尺寸">
+    <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="#01000000"><Path Data="M 7,22 L 22,7 M 14,22 L 22,14 M 21,22 L 22,21" Stroke="#93C5FD" StrokeThickness="2"/></Grid></ControlTemplate></Thumb.Template>
+   </Thumb>
    <Grid x:Name="Bubble" Visibility="Collapsed" Background="#01000000" Cursor="SizeAll">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
     <TextBlock Text="金宝" Foreground="#93C5FD" FontSize="14" VerticalAlignment="Center" ToolTip="点击展开；按住拖动"/>
@@ -104,6 +117,7 @@ foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
+foreach($name in @('ResizeGrip','AppearanceButton','AppearancePanel','FontSlider','FontText')){$controls[$name]=$window.FindName($name)}
 $script:renderedTab=$null
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
@@ -118,7 +132,7 @@ $script:lastThrough=$null
 $script:lastFocusable=$null
 $script:lastControl=0
 $script:closing=$false
-$script:expandedWidth=560.0;$script:expandedHeight=500.0
+$script:expandedWidth=580.0;$script:expandedHeight=600.0
 $script:tray=$null
 $script:testResult=@{}
 $area=[Windows.SystemParameters]::WorkArea
@@ -127,7 +141,7 @@ if(!$SelfTest){
  try{
   $saved=[IO.File]::ReadAllText($boundsFile) | ConvertFrom-Json
   if($saved.width -ge 420 -and $saved.width -le $area.Width){$window.Width=[double]$saved.width}
-  if($saved.height -ge 320 -and $saved.height -le $area.Height){$window.Height=[double]$saved.height}
+  if($saved.height -ge 380 -and $saved.height -le $area.Height){$window.Height=[double]$saved.height}
   $window.Left=[Math]::Max($area.Left,[Math]::Min([double]$saved.left,$area.Right-$window.Width))
   $window.Top=[Math]::Max($area.Top,[Math]::Min([double]$saved.top,$area.Bottom-$window.Height))
  }catch{}
@@ -144,7 +158,7 @@ function Set-PointerMode([bool]$hotzone){
 function Set-Interaction([bool]$enabled){
  $script:interactiveMode=$enabled
  $controls.InteractionButton.Content=if($enabled){'恢复穿透'}else{'交互模式'}
- $controls.HintText.Text=if($enabled){'可滚动和输入 · 标题可拖动 · Ctrl+Alt+J 恢复穿透'}else{'内容区可直接滚动 · 标题可拖动 · Ctrl+Alt+J 切换交互'}
+ $controls.HintText.Text=if($enabled){'右下角缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 恢复穿透'}else{'右下角拖动缩放 · Ctrl+滚轮调整正文'}
  Set-PointerMode $false
 }
 function Set-Collapsed([bool]$on){
@@ -152,10 +166,10 @@ function Set-Collapsed([bool]$on){
  if($on){
   $script:expandedWidth=$window.Width;$script:expandedHeight=$window.Height
   $window.MinWidth=0;$window.MinHeight=0;$window.Width=110;$window.Height=52
-  $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible'
+  $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed'
  }else{
   $window.Width=$script:expandedWidth;$window.Height=$script:expandedHeight
-  $window.MinWidth=420;$window.MinHeight=320;$window.ResizeMode='CanResizeWithGrip'
+  $window.MinWidth=420;$window.MinHeight=380;$window.ResizeMode='CanResize';$controls.ResizeGrip.Visibility='Visible'
   $controls.Expanded.Visibility='Visible';$controls.Bubble.Visibility='Collapsed'
   $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
   $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
@@ -163,7 +177,7 @@ function Set-Collapsed([bool]$on){
  $script:collapsed=$on;Set-PointerMode $true
 }
 function Save-Preferences {
- $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value)} | ConvertTo-Json -Compress
+ $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value);bodyFontSize=[Math]::Round($controls.FontSlider.Value)} | ConvertTo-Json -Compress
  $temporary=$preferencesFile+'.tmp'
  [IO.File]::WriteAllText($temporary,$json,[Text.UTF8Encoding]::new($false))
  Move-Item -LiteralPath $temporary -Destination $preferencesFile -Force
@@ -174,12 +188,39 @@ function Set-BackgroundOpacity {
  $controls.MainBorder.Background=New-Object Windows.Media.SolidColorBrush($color)
  $controls.OpacityText.Text=([string]$percent)+'%'
 }
+function Set-BodyFontSize {
+ $size=[Math]::Round($controls.FontSlider.Value)
+ $controls.PageText.FontSize=$size;$controls.PageText.LineHeight=[Math]::Round($size*1.65)
+ $controls.FontText.Text=([string]$size)+' px'
+ foreach($child in $controls.PlayersTable.Children){if($child -is [Windows.Controls.Border]){foreach($label in $child.Child.Children){$label.FontSize=[Math]::Max(11,$size-2)}}}
+}
 try{
  $preferences=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
  if($preferences.backgroundOpacity -ge 20 -and $preferences.backgroundOpacity -le 100){$controls.OpacitySlider.Value=[double]$preferences.backgroundOpacity}
+ if($preferences.bodyFontSize -ge 11 -and $preferences.bodyFontSize -le 22){$controls.FontSlider.Value=[double]$preferences.bodyFontSize}
 }catch{}
 Set-BackgroundOpacity
+Set-BodyFontSize
 $controls.OpacitySlider.Add_ValueChanged({Set-BackgroundOpacity;Save-Preferences})
+$controls.FontSlider.Add_ValueChanged({Set-BodyFontSize;Save-Preferences})
+$controls.AppearanceButton.Add_Click({$controls.AppearancePanel.Visibility=if($controls.AppearancePanel.Visibility -eq 'Visible'){'Collapsed'}else{'Visible'}})
+$controls.PageScroll.Add_PreviewMouseWheel({param($sender,$eventArgs)
+ if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Control) -ne 0){
+  $controls.FontSlider.Value=[Math]::Max(11,[Math]::Min(22,$controls.FontSlider.Value+[Math]::Sign($eventArgs.Delta)))
+  $eventArgs.Handled=$true
+ }
+})
+function Resize-Window([double]$dx,[double]$dy){
+ if($script:collapsed){return}
+ $window.Width=[Math]::Max($window.MinWidth,[Math]::Min($window.Width+$dx,[Math]::Max($window.MinWidth,$area.Right-$window.Left)))
+ $window.Height=[Math]::Max($window.MinHeight,[Math]::Min($window.Height+$dy,[Math]::Max($window.MinHeight,$area.Bottom-$window.Top)))
+}
+function Save-Bounds {
+ $bounds=@{left=$window.Left;top=$window.Top;width=$(if($script:collapsed){$script:expandedWidth}else{$window.Width});height=$(if($script:collapsed){$script:expandedHeight}else{$window.Height})}|ConvertTo-Json -Compress
+ [IO.File]::WriteAllText($boundsFile,$bounds,[Text.UTF8Encoding]::new($false))
+}
+$controls.ResizeGrip.Add_DragDelta({param($sender,$eventArgs) Resize-Window $eventArgs.HorizontalChange $eventArgs.VerticalChange})
+$controls.ResizeGrip.Add_DragCompleted({if(!$SelfTest){Save-Bounds}})
 function Add-PlayerTableRow($values,[bool]$heading,[int]$index) {
  $grid=New-Object Windows.Controls.Grid
  foreach($width in @('28','*','70','36','78')){
@@ -189,7 +230,7 @@ function Add-PlayerTableRow($values,[bool]$heading,[int]$index) {
  }
  for($i=0;$i -lt $values.Count;$i++){
   $label=New-Object Windows.Controls.TextBlock
-  $label.Text=[string]$values[$i];$label.FontSize=12;$label.Padding='2,8,2,8';$label.TextWrapping='Wrap';$label.VerticalAlignment='Center'
+  $label.Text=[string]$values[$i];$label.FontSize=[Math]::Max(11,$controls.FontSlider.Value-2);$label.Padding='2,8,2,8';$label.TextWrapping='Wrap';$label.VerticalAlignment='Center'
   $label.Foreground=if($heading){'#93C5FD'}else{'#E2E8F0'}
   if($heading){$label.FontWeight='SemiBold'}
   if($i -ge 2){$label.TextAlignment='Right'}
@@ -265,6 +306,7 @@ function Update-State {
   $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   if($now-[double]$launcher.updatedAt -lt 45000 -and $launcher.phase -ne 'stopped'){
    $controls.LauncherText.Text=[string]$launcher.message
+   $controls.LauncherText.Visibility=if($launcher.phase -in @('waiting','playing')){'Collapsed'}else{'Visible'}
    $controls.UpdateText.Text=[string]$launcher.update.message
    $controls.UpdateText.Visibility=if($launcher.update.state -in @('downloading','ready','failed')){'Visible'}else{'Collapsed'}
    $controls.ActionButton.Tag=[string]$launcher.action
@@ -372,7 +414,7 @@ function Update-Drag([double]$x,[double]$y,[bool]$pressed){
  }
 }
 function Test-PointerHotzone([Windows.Point]$screenPoint) {
- $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.ChatPanel)}
+ $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.ChatPanel,$controls.ResizeGrip)}
  foreach($target in $targets){
   if(!$target.IsVisible){continue}
   $local=$target.PointFromScreen($screenPoint)
@@ -413,8 +455,9 @@ $window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
 Set-Tab $PreviewTab;Update-State
 try{
  if($PreviewPath){
-  $root=$window.Content;$root.Measure((New-Object Windows.Size(560,500)));$root.Arrange((New-Object Windows.Rect(0,0,560,500)));$root.UpdateLayout()
-  $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap(560,500,96,96,[Windows.Media.PixelFormats]::Pbgra32);$bitmap.Render($root)
+  $width=[int][Math]::Ceiling($window.Width);$height=[int][Math]::Ceiling($window.Height)
+  $root=$window.Content;$root.Measure((New-Object Windows.Size($width,$height)));$root.Arrange((New-Object Windows.Rect(0,0,$width,$height)));$root.UpdateLayout()
+  $bitmap=New-Object Windows.Media.Imaging.RenderTargetBitmap($width,$height,96,96,[Windows.Media.PixelFormats]::Pbgra32);$bitmap.Render($root)
   $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder;$encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
   $stream=[IO.File]::Create([IO.Path]::GetFullPath($PreviewPath));try{$encoder.Save($stream)}finally{$stream.Dispose()}
   Write-Output 'Overlay preview rendered.'
@@ -438,6 +481,27 @@ try{
     $script:dragStartX=0;$script:dragStartY=0;$script:dragLeft=100;$script:dragTop=100;$script:dragging=$true;$script:bubbleDrag=$false
     Update-Drag 50 40 $true;$script:testResult.dragMoved=$window.Left -gt 100 -and $window.Top -gt 100
     Update-Drag 50 40 $false;$script:testResult.dragReleased=!$script:dragging
+    $window.UpdateLayout();$beforeBody=$controls.PageScroll.ActualHeight
+    $beforeWidth=$window.Width;$beforeHeight=$window.Height
+    $controls.ResizeGrip.RaiseEvent((New-Object Windows.Controls.Primitives.DragDeltaEventArgs(60,100)))
+    $window.UpdateLayout()
+    $script:testResult.resizeDrag=$window.Width -eq $beforeWidth+60 -and $window.Height -eq $beforeHeight+100
+    $script:testResult.resizeExpandsBody=$controls.PageScroll.ActualHeight -ge $beforeBody+99
+    Set-Interaction $false
+    Set-PointerMode (Test-PointerHotzone ($controls.ResizeGrip.PointToScreen((New-Object Windows.Point(13,13)))))
+    $script:testResult.resizeReceivesMouse=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x20) -eq 0
+    Resize-Window -10000 -10000;$window.UpdateLayout()
+    $script:testResult.resizeMinimum=$window.Width -eq 420 -and $window.Height -eq 380 -and $controls.PageScroll.ActualHeight -gt 140
+    Resize-Window 160 220;$window.UpdateLayout();Save-Bounds
+    $savedBounds=[IO.File]::ReadAllText($boundsFile) | ConvertFrom-Json
+    $script:testResult.resizeSaved=$savedBounds.width -eq 580 -and $savedBounds.height -eq 600
+    $controls.FontSlider.Value=18
+    $savedFont=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
+    $script:testResult.fontZoomSaved=$controls.PageText.FontSize -eq 18 -and $savedFont.bodyFontSize -eq 18
+    $controls.FontSlider.Value=14
+    $controls.AppearanceButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    $script:testResult.appearanceOpens=$controls.AppearancePanel.Visibility -eq 'Visible'
+    $controls.AppearanceButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     foreach($button in $controls.Tabs.Children){$button.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))}
     $script:testResult.chatInteractive=$script:interactiveMode -and $controls.ChatPanel.Visibility -eq 'Visible'
     $controls.OpacitySlider.Value=45
@@ -479,8 +543,7 @@ try{
   $window.ShowDialog() | Out-Null
   if($SelfTest){$script:testResult | ConvertTo-Json -Compress}
   else{
-   $bounds=@{left=$window.Left;top=$window.Top;width=$(if($script:collapsed){$script:expandedWidth}else{$window.Width});height=$(if($script:collapsed){$script:expandedHeight}else{$window.Height})}|ConvertTo-Json -Compress
-   [IO.File]::WriteAllText($boundsFile,$bounds,[Text.UTF8Encoding]::new($false))
+   Save-Bounds
    [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-stopped'),'closed',[Text.UTF8Encoding]::new($false))
   }
  }

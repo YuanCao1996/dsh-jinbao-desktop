@@ -1,3 +1,4 @@
+import { gameModePrompt, normalizeLolMode } from '../game-mode-prompt.js';
 // adapters/lol.js — 英雄联盟(端游)adapter
 // ----------
 // 与 wzry.js 同一契约,但游戏侧知识完全不同:
@@ -18,20 +19,9 @@
 
 //#region 配置
 const PERSONA_SYSTEM_PROMPT =
-  "你是英雄联盟端游助手金宝,当前主玩海克斯大乱斗(极地大乱斗 + 海克斯强化)。" +
-  "你熟悉极地大乱斗的地图节奏(单线、无回城补给、雪球/治疗包、回复削弱、团战频繁),也熟悉海克斯强化的取舍逻辑。" +
-  // 这个模式里**有两种三选一**,必须让模型分清,否则会把属性碎片当强化讨论
-  "注意这个模式里有两种三选一:①【海克斯选择】给的是强化效果(金/棱彩档);" +
-  "②【属性碎片选择】来自属性锻造器,给的是纯属性(攻击力/攻速/法术穿透等),不是强化。" +
-  "两者取舍逻辑不同:强化的价值看效果与阵容配合,属性碎片看你的英雄更需要哪种属性。" +
-  // 团战打法:事实层由本地算出(定位/出装/阶段都来自真实数据),
-  // 模型负责把它讲成"现在这一波该怎么打" —— 技能细节是模型自己的知识。
-  "【团战打法】观察里若带【团战·前/中/后期】段落,里面是本地按**英雄定位(DataDragon roles)、" +
-  "双方出装(Live API)、当前等级与装备件数**算出的事实:谁能开团、主要打谁、先别管谁、你的站位、进场时机。" +
-  "你要基于这些事实,结合该英雄的**技能机制**(你的知识)给出这一波具体怎么打:" +
-  "先手还是后手、谁去开、盯着谁打、技能先交什么留什么、什么时候进场、打不过该怎么退。" +
-  "定位与出装是确定的;若标注了「从画面推断,不确证」,说明那是猜的,不要当事实讲。" +
-  "给建议时先给结论再给一句依据,基于阵容与当前局势,不要空泛的正确废话。";
+  '你是英雄联盟端游助手金宝。依据每轮确认的游戏模式、英雄、装备与阵容给出简洁可执行的建议。' +
+  '角色定位与本地战术评分只是辅助判断，不是已经确认的走位或技能状态；未识别或低置信度信息明确说明。' +
+  '强化、装备与当前版本机制以真实日志和匹配模式的检索证据为准，不按经典模式的默认套路补全未知事实。';
 
 /** 高信号:出现这些说明是真实战局转折,不受低信号限流约束,立即触发。 */
 const HIGH_SIGNAL_RE = /大龙|男爵|远古巨龙|巨龙|小龙|先锋|峡谷先锋|防御塔|水晶|基地|团灭|一血|五杀|四杀|三杀|双杀|被击杀|击杀|抢龙|反打|ace/i;
@@ -674,11 +664,12 @@ function lookupHint(text) {
 function eventToBody(event, opts = {}) {
   if (!event) return null;
   return {
+    mode: normalizeLolMode(event.mode ?? event.queue),
     prompt:
       `【实时对局观察】\n${toLine(event, 0)}\n\n` +
       `请基于以上观察给出下一步建议(≤50字,口语化,先结论后依据);若纯状态无变化可输出空串。` +
       lookupHint(toLine(event, 0)),
-    system_prompt: opts.systemPrompt || PERSONA_SYSTEM_PROMPT,
+    system_prompt: (opts.systemPrompt || PERSONA_SYSTEM_PROMPT) + "\n" + gameModePrompt({game:"lol",mode:event.mode??event.queue}),
     // ⚠ 这里**不要**写死 model。原先写着 "qwen3.6-plus",而**没有任何地方读它** ——
     //   真正生效的是 coach-server 配置里的 cfg.provider / cfg.model
     //   (index.js 的 llm 调用与 agentOptions 都从那里取)。
@@ -693,14 +684,16 @@ function eventsToBody(events, opts = {}) {
   if (!Array.isArray(events) || events.length === 0) return null;
   const ordered = [...events].sort((a, b) => (a.kind === "interaction" ? 0 : 1) - (b.kind === "interaction" ? 0 : 1));
   const lines = ordered.map(toLine);
+  const mode = [...events].reverse().map(event=>normalizeLolMode(event.mode??event.queue)).find(Boolean) || "";
   return {
     // 注意:不要写"合并 N 条"这类裸数字(会被模型误读为比分)
     prompt:
-      `【实时对局观察(海克斯大乱斗,按时间先后排列)】\n${lines.join("\n")}\n\n` +
+      `【实时对局观察(${mode || "模式待确认"},按时间先后排列)】\n${lines.join("\n")}\n\n` +
       `请基于以上实时观察给出下一步的简短播报建议(≤50字,口语化,说给正在打游戏的玩家听);` +
       `若均为纯状态无变化可输出空串。` +
       lookupHint(lines.join("\n")),
-    system_prompt: opts.systemPrompt || PERSONA_SYSTEM_PROMPT,
+    mode,
+    system_prompt: (opts.systemPrompt || PERSONA_SYSTEM_PROMPT) + "\n" + gameModePrompt({game:"lol",mode}),
     // ⚠ 这里**不要**写死 model。原先写着 "qwen3.6-plus",而**没有任何地方读它** ——
     //   真正生效的是 coach-server 配置里的 cfg.provider / cfg.model
     //   (index.js 的 llm 调用与 agentOptions 都从那里取)。

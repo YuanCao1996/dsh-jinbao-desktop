@@ -48,7 +48,7 @@ export function createGameMemory(stateDir) {
       try { const row = JSON.parse(await readFile(join(root, name), 'utf8')); if (row.game === game && row.match !== match) rows.push(row); } catch {}
     }
     return rows.sort((a, b) => b.at - a.at).filter(row => !query || JSON.stringify(row).includes(query)).slice(cursor, cursor + limit).map(row => ({
-      game: row.game, match: row.match, champion: row.me?.champion, ended: row.ended,
+      game: row.game, mode: row.mode, match: row.match, champion: row.me?.champion, ended: row.ended,
       durationSeconds: row.gameSeconds, at: row.at, ownedAugments: row.ownedAugments,
       items: row.me?.items, events: row.events?.slice(-8), chat: row.chat?.slice(-4), broadcasts: row.broadcasts?.slice(-2),
     }));
@@ -105,7 +105,7 @@ export function createGameMemory(stateDir) {
     snapshot(state, knowledge = []) {
       if (!state?.game || !state.match) return Promise.resolve();
       const key = id(state.game, state.match);
-      const value = cleanGameData({ game: state.game, match: state.match, at: state.at, matchStartedAt: state.matchStartedAt,
+      const value = cleanGameData({ game: state.game, mode: state.mode, match: state.match, at: state.at, matchStartedAt: state.matchStartedAt,
         gameSeconds: state.gameSeconds, ended: state.ended, phase: state.phase, me: state.me,
         allies: state.allies, enemies: state.enemies, bench: state.bench, offers: state.offers,
         offerHistory: state.offerHistory, ownedAugments: state.ownedAugments,
@@ -130,11 +130,11 @@ export function createGameMemory(stateDir) {
       // Keep valid JSON; reduce whole fields rather than cutting serialized text in half.
       while (JSON.stringify(result).length > 16000 && result.previousMatches.length) result.previousMatches.pop();
       if (current && JSON.stringify(result).length > 16000) {
-        result.current = { game, match, phase: current.phase, gameSeconds: current.gameSeconds, me: current.me,
+        result.current = { game, mode: current.mode, match, phase: current.phase, gameSeconds: current.gameSeconds, me: current.me,
           offers: current.offers, ownedAugments: current.ownedAugments, events: current.events?.slice(-12),
           broadcasts: current.broadcasts?.slice(-3), chat: current.chat?.slice(-4), contextReduced: true };
       }
-      if (JSON.stringify(result).length > 16000) result.current = { game, match, champion: current?.me?.champion, contextReduced: true };
+      if (JSON.stringify(result).length > 16000) result.current = { game, mode: current?.mode, match, champion: current?.me?.champion, contextReduced: true };
       return result;
     },
     history,

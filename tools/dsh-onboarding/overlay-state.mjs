@@ -6,6 +6,7 @@ import { createMatchTracker } from '../dsh-coach-server/lib/match-tracker.js';
 import { rankedAugments, augmentLine, offerNames } from './augment-ranking.mjs';
 import { projectProgressEvent,observeEquipment } from './progress-events.mjs';
 import { createGameMemory } from '../dsh-coach-server/lib/game-memory.js';
+import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -20,7 +21,7 @@ export function clock(seconds) {
   return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
 }
 export function initialOverlayState() {
-  return { game: null, match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',
+  return { game: null, mode: '', match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',
     me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [], equipmentSnapshots:new Map(),
     ownedAugments: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, equipment: '', augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
 }
@@ -49,6 +50,8 @@ export function applyOverlayEvent(state, event, file) {
     if(state.match!==match||state.phase!=='ChampSelect')Object.assign(state,initialOverlayState(),{match,matchStartedAt:at,game:event.game,at});
     state.phase='ChampSelect';state.me=event.me??{};state.allies=list(event.allies);state.enemies=list(event.enemies);state.bench=list(event.bench);state.gameSeconds=null;
   }
+  const mode=normalizeLolMode(event.mode??event.queue??event.state?.mode);
+  if(state.game==='lol'&&mode)state.mode=mode;
   if(event.kind==='champ_select_end'){
     state.ended=true;state.phase=event.cancelled?'Lobby':'Loading';
     if(event.cancelled){state.me={};state.allies=[];state.enemies=[];state.bench=[];}

@@ -225,7 +225,7 @@ $controls.ResizeGrip.Add_DragDelta({param($sender,$eventArgs) Resize-Window $eve
 $controls.ResizeGrip.Add_DragCompleted({if(!$SelfTest){Save-Bounds}})
 function Add-PlayerTableRow($values,[bool]$heading,[int]$index) {
  $grid=New-Object Windows.Controls.Grid
- foreach($width in @('28','*','70','36','78')){
+ foreach($width in @('32','*','90','70')){
   $column=New-Object Windows.Controls.ColumnDefinition
   $column.Width=[Windows.GridLengthConverter]::new().ConvertFromString($width)
   $grid.ColumnDefinitions.Add($column)
@@ -258,18 +258,13 @@ function Update-Page {
  $controls.PageText.Visibility=if($tableVisible){'Collapsed'}else{'Visible'}
  if($tableVisible){
   $controls.PlayersTable.Children.Clear()
-  if($script:snapshot.heroStats){
-   $heroSummary=New-Object Windows.Controls.TextBlock
-   $heroSummary.Text=[string]$script:snapshot.heroStats;$heroSummary.Foreground='#E2E8F0';$heroSummary.FontSize=$controls.FontSlider.Value;$heroSummary.TextWrapping='Wrap';$heroSummary.Margin='0,0,0,14'
-   $controls.PlayersTable.Children.Add($heroSummary) | Out-Null
-  }
   $caption=New-Object Windows.Controls.TextBlock
-  $caption.Text='近20局大乱斗胜率 ↓ · 无数据置后';$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
+  $caption.Text='英雄样本胜率 ↓ · 无数据置后';$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
   $controls.PlayersTable.Children.Add($caption) | Out-Null
-  Add-PlayerTableRow @('阵营','英雄','胜率 ↓','场次','当前 K/D/A') $true 0
+  Add-PlayerTableRow @('阵营','英雄','胜率 ↓','强度') $true 0
   $index=0
   foreach($row in $script:snapshot.playerRows){
-   Add-PlayerTableRow @($row.side,$row.champion,$row.winRateText,$row.gamesText,$row.kda) $false $index
+   Add-PlayerTableRow @($row.side,$row.champion,$row.winRateText,$row.tierText) $false $index
    $index++
   }
  }
@@ -550,10 +545,10 @@ try{
     $controls.PageScroll.ScrollToEnd();$controls.PageScroll.UpdateLayout()
     $script:snapshot.chat+="`n又一条消息";Update-Page
     $script:testResult.chatFollowsBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
-    $script:snapshot=[pscustomobject]@{players='英雄战绩';playerRows=@([pscustomobject]@{side='敌';champion='厄斐琉斯';winRateText='75%';gamesText='20';kda='1/2/3'})}
+    $script:snapshot=[pscustomobject]@{players='英雄战绩';playerRows=@([pscustomobject]@{side='敌';champion='厄斐琉斯';winRateText='55%';tierText='T0'})}
     Set-Tab 'players'
     $script:testResult.playerTableVisible=$controls.PlayersTable.Visibility -eq 'Visible' -and $controls.PageText.Visibility -eq 'Collapsed'
-    $script:testResult.playerTableColumns=$controls.PlayersTable.Children[2].Child.ColumnDefinitions.Count -eq 5
+    $script:testResult.playerTableColumns=$controls.PlayersTable.Children[2].Child.ColumnDefinitions.Count -eq 4
     $script:testResult.gameTime=$controls.TimeText.Text
     $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.closed=$script:closing

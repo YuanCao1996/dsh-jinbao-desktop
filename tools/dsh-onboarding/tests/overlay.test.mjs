@@ -7,19 +7,17 @@ import { initialOverlayState, applyOverlayEvent, overlayView, clock, createOverl
 import { stateEvent, createRosterStats } from '../../lol-companion/collector-state.mjs';
 import { createSetupServer } from '../server.mjs';
 
-test('opponent rows omit player identifiers and sort valid recent win rates descending with unknowns last',()=>{
- const s=initialOverlayState();s.game='lol';
- s.allies=[{champion:'锐雯',puuid:'a',riotId:'隐藏名字A#123',name:'隐藏昵称A',k:1,d:2,a:3}];
- s.enemies=[{champion:'安妮',puuid:'b',riotId:'隐藏名字B#123'},{champion:'布隆',puuid:'c'},{champion:'娜美',puuid:'d'},{champion:'诺克萨斯之手',puuid:'e'}];
- s.playerStats=[{puuid:'a',winRate:50,games:20},{puuid:'b',winRate:80,games:20},{puuid:'c',winRate:100,games:0},{puuid:'d',winRate:0,games:20},{puuid:'e',winRate:100,games:20,error:'查询失败'}];
- const v=overlayView(s);
- assert.deepEqual(v.playerRows.map(r=>r.champion),['安妮','锐雯','娜美','布隆','诺克萨斯之手']);
- assert.deepEqual(v.playerRows.map(r=>r.winRate),[80,50,0,null,null]);
- assert.equal(v.playerRows[1].kda,'1/2/3');assert.equal(v.playerRows[0].kda,'—');
- assert.doesNotMatch(JSON.stringify({players:v.players,rows:v.playerRows}),/隐藏|puuid|riotId|昵称/);
- const merged=overlayView(s,{rows:[{_viewKind:'hero',name:'安妮',winRate:55,tier:1}]});
- assert.match(merged.players,/英雄样本胜率\n安妮 · T1 · 55%/);assert.match(merged.players,/双方近期胜率/);
- s.playerStats[0].winRate='';assert.equal(overlayView(s).playerRows.find(r=>r.champion==='锐雯').winRate,null);
+test('win rate page uses hero sample rates and tiers, ignores player history, and omits counts',()=>{
+ const s=initialOverlayState();s.game='lol';s.me.champion='安妮';
+ s.allies=[{champion:'锐雯',puuid:'a',riotId:'隐藏名字A#123'}];
+ s.enemies=[{champion:'安妮',puuid:'b'},{champion:'布隆',puuid:'c'},{champion:'娜美',puuid:'d'}];
+ s.playerStats=[{puuid:'a',winRate:99,games:20},{puuid:'b',winRate:1,games:20},{puuid:'c',winRate:100,games:20}];
+ const v=overlayView(s,{rows:[{_viewKind:'hero',name:'安妮',winRate:55.21,tier:0},{_viewKind:'hero',name:'锐雯',winRate:50,tier:'T1'},{_viewKind:'hero',name:'娜美',winRate:0,tier:3},{_type:'augments',champion:'布隆',winRate:80,tier:'T1'}]});
+ assert.deepEqual(v.playerRows.map(r=>r.champion),['安妮','锐雯','娜美','布隆']);
+ assert.deepEqual(v.playerRows.map(r=>r.winRate),[55.21,50,0,null]);
+ assert.deepEqual(v.playerRows.map(r=>r.tierText),['T0','T1','T3','暂无']);
+ assert.doesNotMatch(JSON.stringify({players:v.players,rows:v.playerRows,stats:v.stats}),/隐藏|puuid|riotId|gamesText|kda|场次|近期胜率|99%|100%/);
+ assert.match(v.players,/双方英雄胜率/);assert.match(v.players,/55.21%/);
 });
 
 test('mid-game capture uses elapsed seconds, ends at GameEnd, resets across matches and does not invent win rates',()=>{
@@ -30,7 +28,7 @@ test('mid-game capture uses elapsed seconds, ends at GameEnd, resets across matc
  const v=overlayView(s,{rows:[{name:'锐雯',title:'放逐之刃',_viewKind:'hero',winRate:47.3},{champion:'放逐之刃 锐雯',_type:'coreBuilds',items:'["星蚀","焚天"]',winRate:48.9},{champion:'放逐之刃 锐雯',_type:'augments',name:'全凭身法',winRate:49.85,desc:'冲刺技能急速'}]});
  assert.equal(v.gameTime,'01:59');assert.equal(v.advice,'保持站位');
  assert.match(v.equipment,/星蚀、焚天/);assert.match(v.augments,/全凭身法/);assert.match(v.stats,/47.3%/);assert.doesNotMatch(v.stats,/48.9%/);
- assert.match(v.stats,/没有玩家战绩/);assert.doesNotMatch(v.players,/0%/);
+ assert.doesNotMatch(v.stats,/玩家战绩|场次/);assert.doesNotMatch(v.players,/0%/);
  applyOverlayEvent(s,{game:'lol',t:2000,kind:'event',name:'GameEnd',time:559},'match1');
  applyOverlayEvent(s,{game:'lol',t:2001,kind:'state',state:{time:560}},'match1');
  assert.equal(overlayView(s).gameTime,'09:20');assert.equal(s.ended,true);

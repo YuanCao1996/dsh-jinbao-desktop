@@ -74,3 +74,18 @@ test('a delayed slot lookup never restores replaced choices and rerolls reuse he
  assert.equal(calls.filter(q=>q.filter?._type==='coreBuilds').length,1);
  assert.equal(calls.filter(q=>q.filter?.name==='二号').length,1);
 });
+
+
+test('roster hero queries are cached across rerolls and populate hero tiers without player statistics',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-hero-rates-'));await mkdir(join(dir,'logs'));
+ const file=join(dir,'logs/live.jsonl');const calls=[];let at=Date.now();
+ await writeFile(file,JSON.stringify({game:'lol',t:at,kind:'game_start',me:{champion:'安妮'},allies:[{champion:'安妮'}],enemies:[{champion:'锐雯'}]})+'\n');
+ const service=await createOverlayService({stateDir:dir,pollMs:10,complete:async()=> '{}',search:async q=>{
+  calls.push(q);return {results:q.dataset==='aram-ranking'?[{data:{name:q.query,winRate:q.query==='安妮'?55:52,tier:q.query==='安妮'?0:1}}]:[]};
+ }});t.after(service.close);
+ await until(()=>service.view().playerRows.every(r=>r.winRate!==null));
+ assert.deepEqual(service.view().playerRows.map(r=>r.tierText),['T0','T1']);
+ await appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options:['一号','二号','三号']})+'\n');
+ await until(()=>calls.some(q=>q.filter?.name==='三号'));
+ assert.equal(calls.filter(q=>q.dataset==='aram-ranking').length,2);
+});

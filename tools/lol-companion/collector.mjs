@@ -3,14 +3,13 @@ import { readCredentials } from './lockfile.mjs';
 import { lcuRequest } from './lcu.mjs';
 import { getAllGameData,compactState,diffEvents } from './live.mjs';
 import { createEventLog } from './eventlog.mjs';
-import { stateEvent,createRosterStats } from './collector-state.mjs';
+import { stateEvent } from './collector-state.mjs';
 import { createAugmentObserver,captureAugmentPanel,augmentNames } from './augment-observer.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 const folder=process.env.JINBAO_LOG_DIR??join(homedir(),'.dsh','jinbao','logs');
 let log=createEventLog(folder,'client-'+Date.now()),phase=null,lastEvent=-1,gameTime=null;
-const lookupStats=createRosterStats(readCredentials);
 let nextMatch=true;
 console.log('LoL collector started; waiting for client. Logs: '+folder);
 let running=true,lastLiveState=null,capturing=false,lastCaptureAvailable=null,nextCaptureAt=0,captureGeneration=0;
@@ -46,8 +45,6 @@ while(running){
    if(nextMatch||gameTime===null||time<gameTime){
     nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
     log.append({kind:'game_start',me:state.me??{},queue:state.mode,gameTime:state.gameTime,allies:state.allies,enemies:state.enemies});
-    const matchLog=log;
-    void lookupStats(state).then(event=>{if(log===matchLog)matchLog.append(event);}).catch(()=>{});
    }
    gameTime=time;log.append(stateEvent(state));
    const changed=diffEvents(lastEvent,all);lastEvent=changed.maxId;

@@ -139,24 +139,28 @@ function items(value) {
   }
   return list(value).map(i => typeof i === 'string' ? i : i?.name ?? i?.champion ?? '').filter(Boolean).join('、');
 }
+const normalizeHero=value=>String(value??'').replace(/[\s·・]/g,'').toLowerCase();
+function heroStatMatches(row,champion){
+ const target=normalizeHero(champion);
+ return !!target&&[row.name,row.title,row.champion].some(value=>{const hero=normalizeHero(value);return !!hero&&(hero===target||target.includes(hero));});
+}
+const tierText=value=>value!==null&&value!==undefined&&/^(?:T)?\d+$/i.test(String(value).trim())?'T'+String(value).trim().replace(/^T/i,''):'暂无';
+const rosterChampions=state=>[...new Set([state.me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion)].filter(v=>typeof v==='string'&&v.trim()))].slice(0,11);
 export function overlayView(state, knowledge = {}) {
   const me = state.me;
   const rows = knowledge.rows ?? [];
-  const hero = rows.find(row => row._viewKind==='hero' && row.winRate != null);
+  const hero = rows.find(row => row._viewKind==='hero' && heroStatMatches(row,me.champion));
   const own = items(me.items);
   const players = [...state.allies.map(p => ({ ...p, side: '友' })), ...state.enemies.map(p => ({ ...p, side: '敌' }))];
-  const statRows = state.playerStats;
+  if(!players.length&&me.champion)players.push({...me,side:'我'});
   const playerRows = players.map(p => {
-    const r = statRows.find(s => (p.puuid && s.puuid === p.puuid) || (p.riotId && s.riotId === p.riotId));
-    const rate = r && !r.error && r.games > 0 && r.winRate != null && r.winRate !== '' ? Number(r.winRate) : NaN;
-    const winRate = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : null;
-    return { side: p.side, champion: p.champion || '未知英雄',
-      kda: [p.k,p.d,p.a].every(Number.isFinite) ? `${p.k}/${p.d}/${p.a}` : '—',
-      winRate, winRateText: winRate !== null ? `${Number(winRate.toFixed(1))}%` : r?.error ? '查询失败' : r && !r.games ? '暂无记录' : '待查询',
-      gamesText: r && !r.error && r.games > 0 ? String(r.games) : '—' };
-  }).sort((a,b) => (b.winRate ?? -1) - (a.winRate ?? -1));
-  const roster = playerRows.map(p => `${p.side} ${p.champion} · ${p.winRateText} · ${p.gamesText}局 · ${p.kda}`);
-  const stats = statRows.map(r => `${r.team === 'enemy' ? '敌' : '友'} ${r.champion ?? ''} · ${r.riotId ?? ''}\n  ${r.error ? '查询失败：' + r.error : r.games ? percent(r.winRate) + ' / ' + r.games + '局 · KDA ' + (r.kda ?? '—') : '近期无大乱斗记录'}`);
+    const r=rows.find(row=>row._viewKind==='hero'&&heroStatMatches(row,p.champion));
+    const rate=r?.winRate!=null&&r.winRate!==''?Number(r.winRate):NaN;
+    const winRate=Number.isFinite(rate)&&rate>=0&&rate<=100?rate:null;
+    return {side:p.side,champion:p.champion||'未知英雄',winRate,
+      winRateText:winRate!==null?`${Number(winRate.toFixed(2))}%`:'暂无数据',tierText:tierText(r?.tier)};
+  }).sort((a,b)=>(b.winRate??-1)-(a.winRate??-1));
+  const roster=playerRows.map(p=>`${p.side} ${p.champion} · ${p.winRateText} · ${p.tierText}`);
   const builds = rows.filter(r => r._type === 'coreBuilds').map(r => `${items(r.items)}\n  样本胜率 ${percent(r.winRate)} · 使用率 ${percent(r.pickRate)}`);
   const ranked = rankedAugments(rows, me.champion);
   const augments = ranked.slice(0,5).map(augmentLine);
@@ -166,7 +170,7 @@ export function overlayView(state, knowledge = {}) {
   const current = state.broadcasts.at(-1)?.text || '等待新的游戏策略建议…';
   const augmentTitle=(offered.length?'当前三选一':'英雄适配海克斯')+' · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
   const augmentBody=offered.length ? candidates.join('\n') : augments.join('\n')||knowledge.message||'进入对局后自动检索，或点击刷新推荐。';
-  const heroStats = '英雄样本胜率\n' + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?'T'+String(hero.tier).replace(/^T/,''):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
+  const heroStats = '英雄样本胜率\n' + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?tierText(hero.tier):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
   return {
     game: state.game, match: state.match, gameTime: clock(state.gameSeconds), ended: state.ended,
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
@@ -176,10 +180,10 @@ export function overlayView(state, knowledge = {}) {
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在出装和团战页查看建议，或通过聊天咨询当前局势。':
       augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+(state.augmentCaptureAvailable===false?'本机缺少可用的中文文字识别，可在聊天中输入选项。':'等待识别游戏内三选一面板'))+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志'),
-    players: heroStats+'\n\n双方近期胜率（按胜率从高到低）\n'+(roster.join('\n\n') || '等待双方英雄和战绩数据。'),
+    players: heroStats+'\n\n双方英雄胜率（按胜率从高到低）\n'+(roster.join('\n\n') || '等待双方英雄数据。'),
     heroStats,
     playerRows,
-    stats: '英雄样本胜率\n' + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?'T'+String(hero.tier).replace(/^T/,''):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索') + '\n\n个人近期战绩（与英雄样本胜率分开）\n' + (stats.join('\n\n') || (state.game==='wzry'?'当前王者日志没有个人历史胜率，无法据此计算。':'当前日志没有玩家战绩。新版采集器通过本机 LoL 客户端查询近20局记录。')),
+    stats: heroStats+'\n\n'+roster.join('\n'),
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
     events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待局内事件',
     chat: state.chat.map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
@@ -195,8 +199,8 @@ export async function createOverlayService({ stateDir, complete, search, pollMs 
   let restoredChat;
   try{const saved=JSON.parse(await readFile(join(stateDir,'overlay-chat.json'),'utf8'));if(saved&&Array.isArray(saved.chat))restoredChat=saved;}catch{}
   let knowledge = {}, knowledgeKey = '', refreshTask = null, refreshQueued = false, scanning = false, closed = false, busy = false;
-  let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map() };
-  const contextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+state.me.champion+':'+JSON.stringify([offerNames(state.offers).sort(),[...state.ownedAugments].sort()]);
+  let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
+  const contextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+state.me.champion+':'+JSON.stringify([offerNames(state.offers).sort(),[...state.ownedAugments].sort(),rosterChampions(state).sort()]);
   async function save() {
     if (closed) return;
     await writeFile(output + '.tmp', JSON.stringify(overlayView(state, knowledge)), { mode: 0o600 });
@@ -220,7 +224,7 @@ export async function createOverlayService({ stateDir, complete, search, pollMs 
     const key = contextKey();
     const baseKey = game+':'+state.match+':'+state.matchStartedAt+':'+champion;
     const force = forceRefresh; forceRefresh = false;
-    if(cached.key!==baseKey)cached={key:baseKey,rows:[],candidates:new Map()};
+    if(cached.key!==baseKey)cached={key:baseKey,rows:[],candidates:new Map(),heroes:new Map()};
     const cache = cached;
     const stillCurrent = () => !closed && key === contextKey();
     knowledge = { ...knowledge, loading: true }; await flush();
@@ -231,16 +235,20 @@ export async function createOverlayService({ stateDir, complete, search, pollMs 
         const results=await Promise.all(game==='wzry'?[search({game,query:champion,limit:3})]:[
           search({game,query:champion,filter:{_type:'coreBuilds'},limit:3}),
           search({game,query:champion,filter:{_type:'augments'},limit:5}),
-          search({game,query:champion,dataset:'aram-ranking',limit:1}),
         ]);
-        cache.rows=results.flatMap((r,index)=>(r.results??[]).map(item=>({...item.data,...(index===2?{_viewKind:'hero'}:{})})));
+        cache.rows=results.flatMap(r=>(r.results??[]).map(item=>item.data));
       };
-      await Promise.all([base(),...offered.filter(name=>game==='lol'&&(force||!cache.candidates.has(name))).map(async name=>{
+      await Promise.all([base(),...rosterChampions(state).filter(name=>game==='lol'&&(force||!cache.heroes.has(name))).map(async name=>{
+        try{
+          const result=await search({game,query:name,dataset:'aram-ranking',limit:1});
+          cache.heroes.set(name,(result.results??[]).map(item=>({...item.data,_viewKind:'hero'})).filter(row=>heroStatMatches(row,name)));
+        }catch{if(!cache.heroes.has(name))cache.heroes.set(name,[]);}
+      }),...offered.filter(name=>game==='lol'&&(force||!cache.candidates.has(name))).map(async name=>{
         const result=await search({game,query:champion,filter:{_type:'augments',name},limit:1});
         cache.candidates.set(name,(result.results??[]).map(item=>item.data));
         if(cache.candidates.size>100)cache.candidates.delete(cache.candidates.keys().next().value);
       })]);
-      if (stillCurrent()) knowledge = { rows: [...offered.flatMap(name=>cache.candidates.get(name)??[]),...cache.rows].filter(row => (typeof row?.champion === 'string' && row.champion.includes(champion))||row?.name===champion||row?.title===champion), message: '未查到匹配记录，可在聊天中咨询。' };
+      if (stillCurrent()) knowledge = { rows: [...offered.flatMap(name=>cache.candidates.get(name)??[]),...cache.rows,...[...cache.heroes.values()].flat()].filter(row => row?._viewKind==='hero'|| (typeof row?.champion === 'string' && row.champion.includes(champion))||row?.name===champion||row?.title===champion), message: '未查到匹配记录，可在聊天中咨询。' };
     } catch (e) {
       if(stillCurrent())knowledge = { message: e.status === 401 || e.status === 403 ? '请在设置页登录并开通攻略检索权限；自带模型密钥与检索权限独立。' : '推荐检索暂时不可用，请稍后点击刷新推荐。' };
     } finally {

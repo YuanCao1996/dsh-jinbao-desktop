@@ -4,6 +4,7 @@ import { lcuRequest } from './lcu.mjs';
 import { getAllGameData,compactState,diffEvents } from './live.mjs';
 import { createEventLog } from './eventlog.mjs';
 import { stateEvent } from './collector-state.mjs';
+import { createChampionSelectionReader } from './champ-select.mjs';
 import { createAugmentObserver,captureAugmentPanel,augmentNames } from './augment-observer.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +12,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const folder=process.env.JINBAO_LOG_DIR??join(homedir(),'.dsh','jinbao','logs');
 let log=createEventLog(folder,'client-'+Date.now()),phase=null,lastEvent=-1,gameTime=null;
 let nextMatch=true;
+const readSelection=createChampionSelectionReader(lcuRequest);
+let selectionLog=null,selectionMatch=null;
 console.log('LoL collector started; waiting for client. Logs: '+folder);
 let running=true,lastLiveState=null,capturing=false,lastCaptureAvailable=null,nextCaptureAt=0,captureGeneration=0;
 const captureStop=new AbortController();
@@ -37,8 +40,18 @@ while(running){
   const credentials=readCredentials();
   if(credentials.ok){const result=await lcuRequest(credentials,'/lol-gameflow/v1/gameflow-phase');
    if(result.status===200&&result.data!==phase){phase=result.data;log.append({kind:'phase',phase});if(['ChampSelect','EndOfGame','Lobby','None'].includes(phase))nextMatch=true;}
+   if(phase==='ChampSelect'){
+    const selection=await readSelection(credentials);
+    if(selection){
+     if(!selectionLog){selectionMatch='select-'+Date.now();selectionLog=createEventLog(folder,selectionMatch);}
+     selectionLog.append({kind:'champ_select',match:selectionMatch,...selection});
+    }
+   }else if(selectionLog){
+    selectionLog.append({kind:'champ_select_end',match:selectionMatch,cancelled:['Lobby','None','EndOfGame'].includes(phase)});
+    selectionLog=null;selectionMatch=null;
+   }
   }
-  const all=await getAllGameData(),state=compactState(all);
+  const all=phase==='ChampSelect'?null:await getAllGameData(),state=compactState(all);
   lastLiveState=state;
   if(state){
    const time=all.gameData.gameTime;

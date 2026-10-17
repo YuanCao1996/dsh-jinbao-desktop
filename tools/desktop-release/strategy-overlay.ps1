@@ -260,7 +260,7 @@ function Update-Page {
  if($tableVisible){
   $controls.PlayersTable.Children.Clear()
   $caption=New-Object Windows.Controls.TextBlock
-  $caption.Text='英雄样本胜率 ↓ · 无数据置后';$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
+  $caption.Text=if($script:snapshot.game -eq 'lol'){'大乱斗英雄样本胜率 ↓ · 无数据置后'}else{'英雄样本胜率 ↓ · 无数据置后'};$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
   $controls.PlayersTable.Children.Add($caption) | Out-Null
   Add-PlayerTableRow @('阵营','英雄','胜率 ↓','强度') $true 0
   $index=0
@@ -300,8 +300,11 @@ function Update-State {
    $script:scrollPositions=@{};$script:renderedTab=$null
   }
   $changed=(!$script:snapshot -or !$script:renderedTab -or [string]$next.($script:tab) -ne [string]$script:snapshot.($script:tab))
-  $script:snapshot=$next;$controls.TitleText.Text=[string]$next.title
-  $controls.TimeText.Text=if($next.gameTime -and $next.gameTime -ne '等待对局'){'对局 '+$next.gameTime+$(if($next.ended){' · 已结束'}else{''})}else{'等待对局'}
+  $enteredSelection=$next.phase -eq 'ChampSelect' -and (!$script:snapshot -or $script:snapshot.phase -ne 'ChampSelect')
+  $script:snapshot=$next
+  if($enteredSelection){Set-Tab 'players'}
+  $controls.TitleText.Text=[string]$next.title
+  $controls.TimeText.Text=if($next.phase -eq 'ChampSelect'){'正在选择英雄'}elseif($next.gameTime -and $next.gameTime -ne '等待对局'){'对局 '+$next.gameTime+$(if($next.ended){' · 已结束'}else{''})}else{'等待对局'}
   $controls.SummaryText.Text=[string]$next.summary
   if($changed){Update-Page}
  }catch{}
@@ -316,7 +319,7 @@ function Update-State {
    $controls.ActionButton.Tag=[string]$launcher.action
    $controls.ActionButton.Content=[string]$launcher.actionLabel
    $controls.ActionButton.Visibility=if($launcher.action){'Visible'}else{'Collapsed'}
-   if(!$script:snapshot -or $script:snapshot.ended -or $now-[double]$script:snapshot.updatedAt -gt 30000){
+   if($script:snapshot.phase -ne 'ChampSelect' -and (!$script:snapshot -or $script:snapshot.ended -or $now-[double]$script:snapshot.updatedAt -gt 30000)){
     $controls.TimeText.Text='等待进入游戏'
    }
   }else{$controls.LauncherText.Text='启动管理已停止，请重新打开金宝';$controls.ActionButton.Visibility='Collapsed'}
@@ -546,6 +549,10 @@ try{
     Set-Tab 'players'
     $script:testResult.playerTableVisible=$controls.PlayersTable.Visibility -eq 'Visible' -and $controls.PageText.Visibility -eq 'Collapsed'
     $script:testResult.playerTableColumns=$controls.PlayersTable.Children[2].Child.ColumnDefinitions.Count -eq 4
+    $selectionFixture=@{game='lol';match='select-selftest';phase='ChampSelect';title='金宝';gameTime='等待对局';summary='安妮';players='安妮 · 55% · T0';updatedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();playerRows=@(@{side='备选';champion='安妮';winRateText='55%';tierText='T0'})}
+    [IO.File]::WriteAllText($stateFile,($selectionFixture | ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
+    Update-State
+    $script:testResult.selectionAutoOpens=$script:tab -eq 'players' -and $controls.TimeText.Text -eq '正在选择英雄'
     $script:testResult.gameTime=$controls.TimeText.Text
     $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.closed=$script:closing

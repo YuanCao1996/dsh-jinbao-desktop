@@ -5,6 +5,7 @@ import { getAllGameData,compactState,diffEvents } from './live.mjs';
 import { createEventLog } from './eventlog.mjs';
 import { stateEvent } from './collector-state.mjs';
 import { createChampionSelectionReader } from './champ-select.mjs';
+import { createChatObserver,createChatCatalogReader } from './chat-observer.mjs';
 import { createAugmentObserver,captureAugmentPanel,augmentNames } from './augment-observer.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +18,10 @@ let selectionLog=null,selectionMatch=null;
 console.log('LoL collector started; waiting for client. Logs: '+folder);
 let running=true,lastLiveState=null,capturing=false,lastCaptureAvailable=null,nextCaptureAt=0,captureGeneration=0;
 const captureStop=new AbortController();
-const observer=createAugmentObserver(await augmentNames(),event=>{if(running)log.append(event);});
+const names=await augmentNames();
+const observer=createAugmentObserver(names,event=>{if(running)log.append(event);});
+const chatObserver=createChatObserver(names,event=>{if(running)log.append(event);});
+const readChatCatalog=createChatCatalogReader(lcuRequest);
 const stop=()=>{running=false;captureStop.abort();};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 process.on('message',message=>{if(message?.action==='stop')stop();});
@@ -32,6 +36,7 @@ const captureTimer=setInterval(async()=>{
    if(frame.available!==lastCaptureAvailable){lastCaptureAvailable=frame.available;log.append({kind:'augment_capture_status',available:frame.available});}
    if(!frame.available)nextCaptureAt=Date.now()+60000;
    observer.observe(frame);
+   chatObserver.observe(frame,lastLiveState);
   }
  }catch{}finally{capturing=false;}
 },1500);captureTimer.unref();
@@ -56,10 +61,11 @@ while(running){
   if(state){
    const time=all.gameData.gameTime;
    if(nextMatch||gameTime===null||time<gameTime){
-    nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
+    nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();chatObserver.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
     log.append({kind:'game_start',me:state.me??{},queue:state.mode,gameTime:state.gameTime,allies:state.allies,enemies:state.enemies});
    }
    gameTime=time;log.append(stateEvent(state));
+   if(credentials.ok)void readChatCatalog(credentials,catalog=>chatObserver.setCatalog(catalog)).catch(()=>{});
    const changed=diffEvents(lastEvent,all);lastEvent=changed.maxId;
    for(const e of changed.fresh)log.append({kind:'event',id:e.EventID,name:e.EventName,time:e.EventTime,killer:e.KillerName,victim:e.VictimName,turret:e.TurretKilled,dragon:e.DragonType,...e});
   }

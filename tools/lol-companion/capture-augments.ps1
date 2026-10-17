@@ -43,8 +43,8 @@ public static class JinbaoAugmentCapture {
  if(![JinbaoAugmentCapture]::GetClientRect($handle,[ref]$rect) -or ![JinbaoAugmentCapture]::ClientToScreen($handle,[ref]$origin)){throw 'Game bounds unavailable'}
  $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
  if($w -lt 640 -or $h -lt 480){throw 'Game bounds too small'}
- $left=$origin.X+[int]($w*0.08);$top=$origin.Y+[int]($h*0.15)
- $width=[int]($w*0.84);$height=[int]($h*0.7)
+ $left=$origin.X;$top=$origin.Y
+ $width=$w;$height=$h
  $bitmap=[Drawing.Bitmap]::new($width,$height)
  $graphics=[Drawing.Graphics]::FromImage($bitmap)
  try{$graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size)}finally{$graphics.Dispose()}
@@ -69,7 +69,13 @@ public static class JinbaoAugmentCapture {
   $result=Await-Operation ($engine.RecognizeAsync($software)) ([Windows.Media.Ocr.OcrResult])
   $lines=@($result.Lines | ForEach-Object {
    $words=@($_.Words)
-   if($words.Count){@{text=$_.Text;x=[double]$words[0].BoundingRect.X;y=[double]$words[0].BoundingRect.Y}}
+   if($words.Count){
+    $x=($words | ForEach-Object {$_.BoundingRect.X} | Measure-Object -Minimum).Minimum
+    $y=($words | ForEach-Object {$_.BoundingRect.Y} | Measure-Object -Minimum).Minimum
+    $right=($words | ForEach-Object {$_.BoundingRect.X+$_.BoundingRect.Width} | Measure-Object -Maximum).Maximum
+    $bottom=($words | ForEach-Object {$_.BoundingRect.Y+$_.BoundingRect.Height} | Measure-Object -Maximum).Maximum
+    @{text=$_.Text;x=[double]$x;y=[double]$y;box=@(@($x,$y),@($right,$y),@($right,$bottom),@($x,$bottom))}
+   }
   })
   @{available=$true;foreground=$true;width=$width;height=$height;lines=$lines} | ConvertTo-Json -Depth 5 -Compress
  }finally{if($software){$software.Dispose()};$stream.Dispose()}

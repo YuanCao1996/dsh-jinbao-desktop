@@ -4,6 +4,7 @@ import { WZRY_ADAPTER } from '../dsh-coach-server/lib/adapters/wzry.js';
 import { projectWzryFacts } from '../dsh-coach-server/lib/adapters/wzry-facts.js';
 import { createMatchTracker } from '../dsh-coach-server/lib/match-tracker.js';
 import { rankedAugments, augmentLine, offerNames } from './augment-ranking.mjs';
+import { projectProgressEvent,observeEquipment } from './progress-events.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -19,7 +20,7 @@ export function clock(seconds) {
 }
 export function initialOverlayState() {
   return { game: null, match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',
-    me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [],
+    me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [], equipmentSnapshots:new Map(),
     ownedAugments: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, equipment: '', augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
 }
 // Pure projection shared by live polling and log replay tests. Epoch time only orders
@@ -56,6 +57,7 @@ export function applyOverlayEvent(state, event, file) {
     state.gameSeconds = Number.isFinite(event.gameTime) ? event.gameTime : null;
     state.me = event.me ?? {};
     state.allies = list(event.allies); state.enemies = list(event.enemies);
+    observeEquipment(state);
   }
   if (event.kind === 'state') {
     const s = event.state ?? {};
@@ -66,6 +68,7 @@ export function applyOverlayEvent(state, event, file) {
     state.enemyItems = list(s.enemyItems);
     state.equipment = text(s.build) || state.equipment;
     state.teamfight = text(s.teamfight?.text) || state.teamfight;
+    observeEquipment(state);
   }
   if (event.kind === 'player_stats') state.playerStats = list(event.rows);
   if (event.kind === 'augment_offer') {
@@ -76,10 +79,7 @@ export function applyOverlayEvent(state, event, file) {
   }
   if (event.kind === 'augment_offer_closed') state.offers=[];
   if (event.kind === 'augment_capture_status') state.augmentCaptureAvailable=event.available===true;
-  if (event.kind === 'augment_picked' || event.kind === 'augment_mutate') {
-    const name = text(event.augment ?? event.name);
-    if (name && !state.ownedAugments.includes(name)) state.ownedAugments.push(name);
-  }
+  projectProgressEvent(state,event);
   if (event.kind === 'event') {
     const seconds = Number(event.time ?? event.EventTime);
     const name = event.name ?? event.EventName;
@@ -206,7 +206,7 @@ export function overlayView(state, knowledge = {}) {
     playerRows,
     stats: heroStats+'\n\n'+roster.join('\n'),
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
-    events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：团灭、推塔、水晶和重要目标。',
+    events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：装备购买、海克斯选择、团灭和重要目标。',
     chat: state.chat.map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
     status: knowledge.loading ? '正在检索推荐…' : '', updatedAt: state.at,
   };

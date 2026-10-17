@@ -271,7 +271,7 @@ function Update-Page {
  }
  $controls.ChatPanel.Visibility=if($script:tab -eq 'chat'){'Visible'}else{'Collapsed'}
  $scroll.UpdateLayout()
- if($followChat -or (!$samePage -and $script:tab -eq 'chat' -and !$script:scrollPositions.ContainsKey('chat'))){$scroll.ScrollToEnd()}
+ if($script:tab -eq 'events' -or $followChat -or (!$samePage -and $script:tab -eq 'chat' -and !$script:scrollPositions.ContainsKey('chat'))){$scroll.ScrollToEnd()}
  elseif($samePage){$scroll.ScrollToVerticalOffset($offset)}
  elseif($script:scrollPositions.ContainsKey($script:tab)){$scroll.ScrollToVerticalOffset($script:scrollPositions[$script:tab])}
  else{$scroll.ScrollToTop()}
@@ -545,6 +545,12 @@ try{
     $controls.PageScroll.ScrollToEnd();$controls.PageScroll.UpdateLayout()
     $script:snapshot.chat+="`n又一条消息";Update-Page
     $script:testResult.chatFollowsBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
+    $script:snapshot=[pscustomobject]@{events=$longText}
+    Set-Tab 'events'
+    $script:testResult.eventsOpenAtBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
+    $controls.PageScroll.ScrollToVerticalOffset(100);$controls.PageScroll.UpdateLayout()
+    $script:snapshot.events+="`n最新装备购买事件";Update-Page
+    $script:testResult.eventsFollowNewest=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1 -and $controls.PageText.Text.EndsWith('最新装备购买事件')
     $script:snapshot=[pscustomobject]@{players='英雄战绩';playerRows=@([pscustomobject]@{side='敌';champion='厄斐琉斯';winRateText='55%';tierText='T0'})}
     Set-Tab 'players'
     $script:testResult.playerTableVisible=$controls.PlayersTable.Visibility -eq 'Visible' -and $controls.PageText.Visibility -eq 'Collapsed'

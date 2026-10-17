@@ -33,7 +33,8 @@ const captureTimer=setInterval(async()=>{
  try{
   const frame=await captureAugmentPanel(captureStop.signal);
   if(running&&generation===captureGeneration&&lastLiveState){
-   if(frame.available!==lastCaptureAvailable){lastCaptureAvailable=frame.available;log.append({kind:'augment_capture_status',available:frame.available});}
+   const captureStatus=JSON.stringify([frame.available,frame.reason??'']);
+   if(captureStatus!==lastCaptureAvailable){lastCaptureAvailable=captureStatus;log.append({kind:'augment_capture_status',available:frame.available,reason:frame.reason??''});}
    if(!frame.available)nextCaptureAt=Date.now()+60000;
    observer.observe(frame);
    chatObserver.observe(frame,lastLiveState);

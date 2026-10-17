@@ -23,7 +23,7 @@ export function clock(seconds) {
 export function initialOverlayState() {
   return { game: null, mode: '', match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',
     me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [], equipmentSnapshots:new Map(),
-    ownedAugments: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, equipment: '', augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
+    ownedAugments: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, augmentCaptureReason: '', equipment: '', augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
 }
 // Pure projection shared by live polling and log replay tests. Epoch time only orders
 // records; the displayed clock always comes from the game's elapsed seconds.
@@ -82,7 +82,7 @@ export function applyOverlayEvent(state, event, file) {
     state.offerHistory=[...new Set([...state.offerHistory,...offerNames(state.offers)])].slice(0,6);
   }
   if (event.kind === 'augment_offer_closed') state.offers=[];
-  if (event.kind === 'augment_capture_status') state.augmentCaptureAvailable=event.available===true;
+  if (event.kind === 'augment_capture_status') { state.augmentCaptureAvailable=event.available===true; state.augmentCaptureReason=text(event.reason); }
   projectProgressEvent(state,event);
   if (event.kind === 'event') {
     const seconds = Number(event.time ?? event.EventTime);
@@ -196,16 +196,21 @@ export function overlayView(state, knowledge = {}) {
   const current = state.broadcasts.at(-1)?.text || '等待新的游戏策略建议…';
   const augmentTitle=(offered.length?'当前三选一':'英雄适配海克斯')+' · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
   const augmentBody=offered.length ? candidates.join('\n') : augments.join('\n')||knowledge.message||'进入对局后自动检索，或点击刷新推荐。';
+  const equipmentUpdates=state.events.filter(e=>e.topic==='equipment').slice(-12).map(e=>`${e.time} ${e.text}`).join('\n');
+  const augmentUpdates=state.events.filter(e=>e.topic==='augment-selection').slice(-8).map(e=>`${e.time} ${e.text}`).join('\n');
+  const captureHint=state.augmentCaptureAvailable===false
+    ? state.augmentCaptureReason==='chinese_language_unavailable'?'系统未安装中文识别语言包，可在 Windows 设置添加简体中文文字识别；日志中的强化信息仍会同步。':'文字识别暂不可用，正在自动重试；日志中的强化信息仍会同步。'
+    : state.augmentCaptureReason==='capture_failed'?'游戏画面暂未采集成功，正在自动重试；日志中的强化信息仍会同步。':'等待识别游戏内三选一面板';
   const heroStats = (state.game==='lol'?'大乱斗英雄样本胜率\n':'英雄样本胜率\n') + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?tierText(hero.tier):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
   return {
     game: state.game, match: state.match, gameTime: clock(state.gameSeconds), phase:state.phase, ended: state.ended,
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
     summary: [me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
-    advice: current,
-    equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索，或点击刷新推荐。') + '\n\n敌方装备\n' + (items(state.enemyItems) || '等待敌方装备日志'),
+    advice: current+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
+    equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索，或点击刷新推荐。') + '\n\n敌方装备\n' + (items(state.enemyItems.length?state.enemyItems:state.enemies.flatMap(p=>p.items??[])) || '等待敌方装备日志')+(equipmentUpdates?'\n\n装备动态（购买记录不代表当前仍持有）\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在出装和团战页查看建议，或通过聊天咨询当前局势。':
       augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+
-      (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+(state.augmentCaptureAvailable===false?'本机缺少可用的中文文字识别，可在聊天中输入选项。':'等待识别游戏内三选一面板'))+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志'),
+      (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
     players: heroStats+'\n\n双方英雄胜率（按胜率从高到低）\n'+(roster.join('\n\n') || '等待双方英雄数据。'),
     heroStats,
     playerRows,

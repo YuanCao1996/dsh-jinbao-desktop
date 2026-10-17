@@ -1,6 +1,7 @@
 param([switch]$CheckOnly,[string]$ImagePath)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+$engineReady=$false
 try{
  Add-Type @'
 using System;
@@ -15,12 +16,6 @@ public static class JinbaoAugmentCapture {
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 }
 '@
- if(!$CheckOnly -and !$ImagePath){
-  $handle=[JinbaoAugmentCapture]::GetForegroundWindow();$gamePid=0u
-  [JinbaoAugmentCapture]::GetWindowThreadProcessId($handle,[ref]$gamePid) | Out-Null
-  $process=Get-Process -Id $gamePid -ErrorAction SilentlyContinue
-  if(!$process -or $process.ProcessName -ne 'League of Legends'){Write-Output '{"available":true,"foreground":false}';exit 0}
- }
  Add-Type -AssemblyName System.Runtime.WindowsRuntime,System.Drawing
  $null=[Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
  $null=[Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime]
@@ -31,11 +26,12 @@ public static class JinbaoAugmentCapture {
  $null=[Windows.Media.Ocr.OcrResult,Windows.Foundation,ContentType=WindowsRuntime]
  $language=[Windows.Globalization.Language]::new('zh-Hans')
  $engine=[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($language)
- if(!$engine){Write-Output '{"available":false,"reason":"Chinese OCR language unavailable"}';exit 0}
+ if(!$engine){Write-Output '{"available":false,"reason":"chinese_language_unavailable"}';exit 0}
+ $engineReady=$true
  if($CheckOnly){Write-Output '{"available":true}';exit 0}
  if($ImagePath){$bytes=[IO.File]::ReadAllBytes([IO.Path]::GetFullPath($ImagePath))}else{
  [JinbaoAugmentCapture]::SetProcessDPIAware() | Out-Null
- $handle=[JinbaoAugmentCapture]::GetForegroundWindow();$gamePid=0u
+ $handle=[JinbaoAugmentCapture]::GetForegroundWindow();$gamePid=[uint32]0
  [JinbaoAugmentCapture]::GetWindowThreadProcessId($handle,[ref]$gamePid) | Out-Null
  $process=Get-Process -Id $gamePid -ErrorAction SilentlyContinue
  if(!$process -or $process.ProcessName -ne 'League of Legends'){Write-Output '{"available":true,"foreground":false}';exit 0}
@@ -79,4 +75,7 @@ public static class JinbaoAugmentCapture {
   })
   @{available=$true;foreground=$true;width=$width;height=$height;lines=$lines} | ConvertTo-Json -Depth 5 -Compress
  }finally{if($software){$software.Dispose()};$stream.Dispose()}
-}catch{Write-Output '{"available":false,"reason":"Local OCR unavailable"}'}
+}catch{
+ if($engineReady){Write-Output '{"available":true,"foreground":false,"reason":"capture_failed"}'}
+ else{Write-Output '{"available":false,"reason":"ocr_runtime_unavailable"}'}
+}

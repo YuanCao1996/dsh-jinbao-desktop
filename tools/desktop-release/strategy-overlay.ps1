@@ -78,12 +78,6 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Button x:Name="SendButton" Grid.Column="1" Content="发送"/>
     </Grid>
     <StackPanel x:Name="Footer" Grid.Row="5" Margin="0,8,0,0">
-     <WrapPanel>
-      <Button x:Name="InteractionButton" Content="交互模式"/>
-      <Button x:Name="RefreshButton" Content="刷新推荐"/>
-      <Button x:Name="TacticButton" Content="咨询团战"/>
-      <Button x:Name="AppearanceButton" Content="外观" ToolTip="调整背景透明度和正文大小"/>
-     </WrapPanel>
      <StackPanel x:Name="AppearancePanel" Visibility="Collapsed">
      <StackPanel Orientation="Horizontal" Margin="4,5,4,0">
       <TextBlock Text="背景不透明度" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center"/>
@@ -113,11 +107,11 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 '@
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
-foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','InteractionButton','RefreshButton','TacticButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
-foreach($name in @('ResizeGrip','AppearanceButton','AppearancePanel','FontSlider','FontText')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('ResizeGrip','AppearancePanel','FontSlider','FontText')){$controls[$name]=$window.FindName($name)}
 $script:renderedTab=$null
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
@@ -157,7 +151,6 @@ function Set-PointerMode([bool]$hotzone){
 }
 function Set-Interaction([bool]$enabled){
  $script:interactiveMode=$enabled
- $controls.InteractionButton.Content=if($enabled){'恢复穿透'}else{'交互模式'}
  $controls.HintText.Text=if($enabled){'右下角缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 恢复穿透'}else{'右下角拖动缩放 · Ctrl+滚轮调整正文'}
  Set-PointerMode $false
 }
@@ -203,7 +196,15 @@ Set-BackgroundOpacity
 Set-BodyFontSize
 $controls.OpacitySlider.Add_ValueChanged({Set-BackgroundOpacity;Save-Preferences})
 $controls.FontSlider.Add_ValueChanged({Set-BodyFontSize;Save-Preferences})
-$controls.AppearanceButton.Add_Click({$controls.AppearancePanel.Visibility=if($controls.AppearancePanel.Visibility -eq 'Visible'){'Collapsed'}else{'Visible'}})
+$settingsMenu=New-Object Windows.Controls.ContextMenu
+$controls.AppearanceMenuItem=New-Object Windows.Controls.MenuItem
+$controls.AppearanceMenuItem.Header='外观'
+$controls.AccountMenuItem=New-Object Windows.Controls.MenuItem
+$controls.AccountMenuItem.Header='账号与模型设置'
+$settingsMenu.Items.Add($controls.AppearanceMenuItem) | Out-Null
+$settingsMenu.Items.Add($controls.AccountMenuItem) | Out-Null
+$controls.SettingsButton.ContextMenu=$settingsMenu
+$controls.AppearanceMenuItem.Add_Click({$controls.AppearancePanel.Visibility=if($controls.AppearancePanel.Visibility -eq 'Visible'){'Collapsed'}else{'Visible'}})
 $controls.PageScroll.Add_PreviewMouseWheel({param($sender,$eventArgs)
  if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Control) -ne 0){
   $controls.FontSlider.Value=[Math]::Max(11,[Math]::Min(22,$controls.FontSlider.Value+[Math]::Sign($eventArgs.Delta)))
@@ -281,14 +282,11 @@ function Set-Tab([string]$name){
  if($name -eq 'stats'){$name='players'}
  $script:tab=$name
  foreach($button in $controls.Tabs.Children){$button.Background=if($button.Tag -eq $name){'#2563EB'}else{'#29364E'}}
- if($name -eq 'chat'){
-  Set-Interaction $true
- }
- $controls.TacticButton.Content=switch($name){'equipment'{'咨询出装'}'augments'{'咨询海克斯'}default{'咨询团战'}}
+ Set-Interaction ($name -eq 'chat')
  Update-Page
  if($name -eq 'chat' -and $window.IsVisible){$window.Activate() | Out-Null;$controls.QuestionBox.Focus() | Out-Null;[Windows.Input.Keyboard]::Focus($controls.QuestionBox) | Out-Null}
 }
-foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','胜率'),@('teamfight','团战'),@('events','事件'),@('chat','聊天'))){
+foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','胜率'),@('events','事件'),@('chat','聊天'))){
  $button=New-Object Windows.Controls.Button
  $button.Tag=$entry[0];$button.Content=$entry[1];$button.FontSize=12
  $button.Add_Click({param($sender,$eventArgs) Set-Tab ([string]$sender.Tag)})
@@ -330,7 +328,7 @@ function Update-State {
   if($result -and $result.ok){$script:renderedTab=$null}
   $controls.HintText.Text=if($result -and $result.ok){'已完成'}elseif($result -and $result.message){[string]$result.message}else{'请求失败，请检查设置页的模型和服务状态。'}
   Remove-Job $script:job -Force -ErrorAction SilentlyContinue;$script:job=$null
-  $controls.SendButton.IsEnabled=$true;$controls.RefreshButton.IsEnabled=$true;$controls.TacticButton.IsEnabled=$true
+  $controls.SendButton.IsEnabled=$true
  }
  try{
   $command=[IO.File]::ReadAllText($controlFile) | ConvertFrom-Json
@@ -359,7 +357,7 @@ function Start-Request([string]$route,[hashtable]$payload){
     @{ok=$false;message=$message}
    }
   }
-  $controls.SendButton.IsEnabled=$false;$controls.RefreshButton.IsEnabled=$false;$controls.TacticButton.IsEnabled=$false
+  $controls.SendButton.IsEnabled=$false
   $controls.HintText.Text=if($route -eq 'ask'){'教练思考中…'}else{'正在检索推荐…'}
  }catch{$controls.HintText.Text='请先启动 DSH，再打开金宝设置页。'}
 }
@@ -373,13 +371,6 @@ $controls.SendButton.Add_Click({Send-Question})
 $controls.QuestionBox.Add_PreviewKeyDown({param($sender,$eventArgs)
  if($eventArgs.Key -eq [Windows.Input.Key]::Return -and ([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -eq 0){Send-Question;$eventArgs.Handled=$true}
 })
-$controls.RefreshButton.Add_Click({Start-Request 'refresh' @{}})
-$controls.TacticButton.Add_Click({
- $topic=if($script:tab -in @('equipment','augments')){$script:tab}else{'teamfight'}
- $question=switch($topic){'equipment'{'结合当前英雄、双方装备和金币，推荐下一件装备及购买顺序。'}'augments'{'结合当前英雄和已知强化，推荐海克斯选择思路；没有面板选项时不要假定候选卡片。'}default{'结合当前双方阵容、装备和对局时间，给出本局团战站位、优先目标和进退时机。'}}
- Set-Tab $topic;Start-Request 'ask' @{question=$question;topic=$topic}
-})
-$controls.InteractionButton.Add_Click({Set-Interaction (!$script:interactiveMode)})
 $controls.CollapseButton.Add_Click({Set-Collapsed $true})
 $controls.CloseButton.Add_Click({$window.Close()})
 $controls.BubbleClose.Add_Click({$window.Close()})
@@ -391,7 +382,11 @@ $controls.ActionButton.Add_Click({
  }
 })
 $controls.SettingsButton.Add_Click({
- if($SelfTest){$script:testResult.settings=$true;return}
+ if($SelfTest){$script:testResult.settings=$controls.SettingsButton.ContextMenu.Items.Count -eq 2;return}
+ $controls.SettingsButton.ContextMenu.PlacementTarget=$controls.SettingsButton
+ $controls.SettingsButton.ContextMenu.IsOpen=$true
+})
+$controls.AccountMenuItem.Add_Click({
  try{
   $url=[IO.File]::ReadAllText((Join-Path $StateDir 'settings-link.txt')).Trim()
   if($url -notmatch '^http://127\.0\.0\.1:[0-9]+/#[a-f0-9]{64}$'){throw 'Invalid local URL'}
@@ -491,6 +486,8 @@ try{
     $script:testResult.collapsed=$script:collapsed -and $window.Width -eq 110
     Set-Collapsed $false;$script:testResult.expanded=$window.Width -ge 420
     $script:testResult.tabs=$controls.Tabs.Children.Count
+    $script:testResult.simplifiedNavigation=$controls.Tabs.Children.Count -eq 6 -and @($controls.Tabs.Children | Where-Object {$_.Tag -eq 'teamfight'}).Count -eq 0 -and $null -eq $window.FindName('RefreshButton') -and $null -eq $window.FindName('TacticButton') -and $null -eq $window.FindName('InteractionButton') -and $null -eq $window.FindName('AppearanceButton')
+    $script:testResult.appearanceInSettings=$controls.SettingsButton.ContextMenu.Items[0] -eq $controls.AppearanceMenuItem
     $script:testResult.singleWinRateTab=@($controls.Tabs.Children | Where-Object {$_.Content -eq '胜率'}).Count -eq 1 -and @($controls.Tabs.Children | Where-Object {$_.Content -eq '对手' -or $_.Tag -eq 'stats'}).Count -eq 0
     $script:dragStartX=0;$script:dragStartY=0;$script:dragLeft=100;$script:dragTop=100;$script:dragging=$true;$script:bubbleDrag=$false
     Update-Drag 50 40 $true;$script:testResult.dragMoved=$window.Left -gt 100 -and $window.Top -gt 100
@@ -513,9 +510,9 @@ try{
     $savedFont=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
     $script:testResult.fontZoomSaved=$controls.PageText.FontSize -eq 18 -and $savedFont.bodyFontSize -eq 18
     $controls.FontSlider.Value=14
-    $controls.AppearanceButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    $controls.AppearanceMenuItem.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.MenuItem]::ClickEvent)))
     $script:testResult.appearanceOpens=$controls.AppearancePanel.Visibility -eq 'Visible'
-    $controls.AppearanceButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    $controls.AppearanceMenuItem.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.MenuItem]::ClickEvent)))
     foreach($button in $controls.Tabs.Children){$button.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))}
     $script:testResult.chatInteractive=$script:interactiveMode -and $controls.ChatPanel.Visibility -eq 'Visible'
     $script:testResult.chatFocusable=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x08000000) -eq 0

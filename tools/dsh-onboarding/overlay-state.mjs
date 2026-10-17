@@ -210,6 +210,7 @@ export function overlayView(state, knowledge = {}) {
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
     events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：装备购买、海克斯选择、团灭和重要目标。',
     chat: state.chat.map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
+    chatRows: state.chat.slice(-12).map(r => ({role:r.role,origin:r.origin??'',text:r.text})),
     status: knowledge.loading ? '正在检索推荐…' : '', updatedAt: state.at,
   };
 }
@@ -339,13 +340,13 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   const timer = setInterval(scan, pollMs); timer.unref();
   return {
     view: () => overlayView(state, knowledge), refresh,
-    async ask(question, topic) {
+    async ask(question, topic, metadata = {}) {
       if (busy) throw Object.assign(Error('教练正在回复'), { status: 409 });
       if (typeof question !== 'string' || !question.trim() || question.length > 1000) throw Object.assign(Error('问题格式不正确'), { status: 400 });
       busy = true;
       const match = state.match, started = state.matchStartedAt;
       const stillCurrent = () => state.match === match && state.matchStartedAt === started;
-      const q = { role: 'user', text: question.trim() }; state.chat.push(q);
+      const q = { role: 'user', text: question.trim(), origin: metadata.origin === 'phone' ? 'phone' : 'desktop' }; state.chat.push(q);
       state.chat = state.chat.slice(-20);
       try {
         await memory.record(state, { kind: 'chat', ...q, gameSeconds: state.gameSeconds }, 'overlay-chat');

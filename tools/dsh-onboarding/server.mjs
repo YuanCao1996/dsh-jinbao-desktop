@@ -104,7 +104,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   },
   search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
  });
- const phoneSync=await createPhoneSync({stateDir,view:overlay.view,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
+ const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
  const server=http.createServer(async(req,res)=>{
   const expectedHost='127.0.0.1:'+server.address().port;
   if(req.headers.host!==expectedHost){send(res,403,{error:'invalid_host'});return;}

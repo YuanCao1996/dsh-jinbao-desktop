@@ -2,16 +2,19 @@ import {randomUUID,createHash} from 'node:crypto';
 import {readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {hostname} from 'node:os';
+import {createPhoneChat} from './phone-chat.mjs';
 
 export function phoneSnapshot(view,now=Date.now()){
   const out={};
   for(const key of ['title','summary','gameTime','phase','advice','equipment','augments','players','events','chat','game','match','ended','updatedAt','playerRows'])if(view[key]!==undefined)out[key]=view[key];
   for(const key of ['chat','events'])if(typeof out[key]==='string')out[key]=out[key].slice(-4000);
   out.playerRows=(Array.isArray(view.playerRows)?view.playerRows:[]).slice(0,30).map(row=>({side:row.side,champion:row.champion,winRateText:row.winRateText,tierText:row.tierText}));
+  out.chatRows=(Array.isArray(view.chatRows)?view.chatRows:[]).slice(-12).map(row=>({role:row.role,origin:row.origin,text:String(row.text??'').slice(0,4000)}));
+  while(Buffer.byteLength(JSON.stringify(out))>90000&&out.chatRows.length)out.chatRows.shift();
   out.matchActive=!!view.match&&!view.ended&&view.gameTime!=='等待对局'&&now-view.updatedAt<30000;
   return out;
 }
-export async function createPhoneSync({stateDir,view,getToken,serviceBaseUrl,fetchImpl=fetch,pollMs=3000,now=Date.now}){
+export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl,fetchImpl=fetch,pollMs=3000,now=Date.now}){
   const file=join(stateDir,'sync-device.json'),preferences=join(stateDir,'sync-preferences.json');
   let device;
   try{device=JSON.parse(await readFile(file,'utf8'));}catch{}
@@ -36,6 +39,7 @@ export async function createPhoneSync({stateDir,view,getToken,serviceBaseUrl,fet
       current={...current,linked:true};
       if(!enabled){current={...current,state:'disabled',message:'手机同步已关闭'};return;}
       const snapshot=phoneSnapshot(view(),now()),hash=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+      snapshot.chatCapable=typeof ask==='function';
       if(hash===lastHash&&now()-lastSent<10000)return;
       await request('PUT',token,{deviceName:device.name,snapshot});
       if(closed)return;
@@ -47,6 +51,7 @@ export async function createPhoneSync({stateDir,view,getToken,serviceBaseUrl,fet
   }
   const run=()=>{if(!busy)task=tick();return task;};
   const timer=setInterval(run,pollMs);timer.unref();void run();
+  const chat=typeof ask==='function'?await createPhoneChat({stateDir,deviceId:device.id,getToken,view,ask,serviceBaseUrl,fetchImpl,enabled:()=>enabled&&!closed,pollMs}):null;
   return {
     status:()=>({...current,enabled}),tick:run,
     async enable(){enabled=true;await writeFile(preferences,JSON.stringify({enabled:true}),{mode:0o600});nextAttempt=0;lastHash='';return run();},
@@ -55,6 +60,6 @@ export async function createPhoneSync({stateDir,view,getToken,serviceBaseUrl,fet
       const token=await getToken();if(/^jd_[a-f0-9]{64}$/.test(token??''))await request('DELETE',token).catch(()=>{});
       current={...current,enabled:false,state:'disabled',message:'手机同步已关闭'};
     },
-    async close(){closed=true;clearInterval(timer);await task.catch(()=>{});},
+    async close(){closed=true;clearInterval(timer);await task.catch(()=>{});await chat?.close();},
   };
 }

@@ -7,6 +7,11 @@ import { rankedAugments, augmentLine, offerNames } from './augment-ranking.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
+const keyEventLabels = {
+  GameStart:'对局开始',GameEnd:'对局结束',Ace:'团灭',TurretKilled:'防御塔被摧毁',
+  InhibKilled:'水晶被摧毁',InhibRespawningSoon:'水晶即将重生',InhibRespawned:'水晶已重生',
+  DragonKill:'小龙被击败',BaronKill:'大龙被击败',HeraldKill:'峡谷先锋被击败',
+};
 export function clock(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return '等待对局';
   const n = Math.floor(seconds);
@@ -79,8 +84,16 @@ export function applyOverlayEvent(state, event, file) {
     const seconds = Number(event.time ?? event.EventTime);
     const name = event.name ?? event.EventName;
     if (name === 'GameEnd') state.ended = true;
-    state.events.push({ time: clock(seconds), text: [name, event.killer, event.victim, event.turret].filter(Boolean).join(' · ') });
-    state.events = state.events.slice(-12);
+    const label=Object.hasOwn(keyEventLabels,name)?keyEventLabels[name]:null;
+    if(label){
+      const id=event.id??event.EventID;
+      const key=Number.isInteger(id)?name+':'+id:JSON.stringify([name,seconds,event.turret??event.TurretKilled,event.InhibKilled??event.InhibitorKilled]);
+      if(!state.events.some(e=>e.key===key)){
+        const result=name==='GameEnd'?(event.Result==='Win'?'胜利':event.Result==='Lose'?'失败':null):null;
+        state.events.push({key,time:clock(seconds),text:label+(result?' · '+result:'')});
+        state.events=state.events.slice(-40);
+      }
+    }
   }
   if (event.kind === 'brief' && event.text) {
     const m = event.text.match(/(\d{1,3}):(\d{2})/);
@@ -193,7 +206,7 @@ export function overlayView(state, knowledge = {}) {
     playerRows,
     stats: heroStats+'\n\n'+roster.join('\n'),
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
-    events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待局内事件',
+    events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：团灭、推塔、水晶和重要目标。',
     chat: state.chat.map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
     status: knowledge.loading ? '正在检索推荐…' : '', updatedAt: state.at,
   };

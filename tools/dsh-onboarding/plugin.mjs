@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 export const name='jinbao-onboarding';
 export const inject=['credentials','tools','systemPrompt'];
-export const Config=z.object({port:z.number().default(3084),stateDir:z.string().default(join(homedir(),'.dsh','jinbao')),serviceBaseUrl:z.string().default('https://api.jinbaoai.top')});
+export const Config=z.object({port:z.number().default(3084),coachPort:z.number().default(3081),stateDir:z.string().default(join(homedir(),'.dsh','jinbao')),serviceBaseUrl:z.string().default('https://api.jinbaoai.top')});
 export async function apply(ctx,cfg) {
  const setup=await createSetupServer({...cfg,credentials:ctx.credentials});
  ctx.effect(()=>()=>setup.close());

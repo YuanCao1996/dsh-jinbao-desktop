@@ -33,9 +33,12 @@ import { createMonitorBank } from "./monitor-bank.js";
 import { createMatchTracker } from "./match-tracker.js";
 import { projectWzryFacts } from "./adapters/wzry-facts.js";
 import { openCoachSession } from "./session-runtime.js";
+import { createGameMemory } from './game-memory.js';
+import { registerGameMemoryTools } from './game-memory-tools.js';
+import { dispatchGameChat, buildGameChatMessage } from './chat-bridge.js';
 
 const name = "coach-server";
-const inject = ["tools", "systemPrompt", "llm", "agentLoop", "sessions", "web"];
+const inject = ["tools", "systemPrompt", "llm", "agentLoop", "sessions", "web", "credentials"];
 
 // 自建 web_search provider(opencode 网关检索):DSH 默认 web-search-deepseek 依赖
 // DeepSeek 官方 key(已失效);这里用 Bing RSS(免 key)直接检索真实结果。
@@ -1096,6 +1099,15 @@ function apply(ctx, config) {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
     try {
+      if (req.method === 'POST' && path === '/coach/chat') {
+        const raw = await readBody(req, 8192);
+        let body;
+        try { body = JSON.parse(raw.toString('utf8')); } catch { sendJson(res, 400, { error: 'invalid_json' }); return; }
+        try {
+          sendJson(res, 200, await dispatchGameChat({ req, body, credentials: ctx.credentials, monitors: liveMonitor }));
+        } catch (error) { sendJson(res, error.status ?? 503, { error: 'agent_chat_unavailable' }); }
+        return;
+      }
       if (req.method === "GET" && path === "/health") {
         sendJson(res, 200, { ok: true, coach: true, version: "0.1.0" });
         return;
@@ -1401,7 +1413,7 @@ function apply(ctx, config) {
       let briefCount = 0;
       let broadcastCount = 0;
       liveMonitor = createMonitorBank((game,source) => createMonitor(ctx, { ...cfg, defaultGame: game,
-        monitorSessionId:'coach-live-'+createHash('sha256').update(game+':'+source).digest('hex').slice(0,24) }, resolveGame));
+        monitorMatch: source, monitorSessionId:'coach-live-'+createHash('sha256').update(game+':'+source).digest('hex').slice(0,24) }, resolveGame));
       liveMonitor.get(cfg.defaultGame ?? "wzry", "waiting");
       const monitorBank = liveMonitor;
       ctx.effect(() => () => monitorBank.close());
@@ -1773,6 +1785,7 @@ function apply(ctx, config) {
 //   直接调用会抛 "resolveGame is not defined",而那是 createAgent 阶段,
 //   表现为会话建不出来、侧边栏什么都没有(2026-10-02 实测)。
 function createMonitor(ctx, cfg, resolveGame) {
+  const memory = createGameMemory(cfg.sessionCwd);
   const lifetime = new AbortController();
   let liveReplyState = null;
   const pendingTexts = [];
@@ -1824,6 +1837,7 @@ function createMonitor(ctx, cfg, resolveGame) {
     },
     /** 提交一个 interaction:进入队列,串行触发 agent 真实回合。返回播报文本 Promise。 */
     submitInteraction(event, sourceFile, body) {
+      if (queue.length >= 20) return Promise.reject(Object.assign(new Error('Coach queue is full'), { status: 429 }));
       // 自愈:冷却期已过 → 借这条事件重建会话(否则一次失败会让整个 DSH 生命周期静默)。
       if (monitorFailed !== null && Date.now() >= retryAt) {
         console.warn(`[coach-server] coach-live 重建会话(上次失败: ${monitorFailed.message})`);
@@ -1838,7 +1852,8 @@ function createMonitor(ctx, cfg, resolveGame) {
         return Promise.reject(new Error(`coach-live 会话不可用: ${monitorFailed.message}`));
       }
       return new Promise((resolve, reject) => {
-        queue.push({ event, sourceFile, body, resolve, reject });
+        const job = { event, sourceFile, body, resolve, reject };
+        if (body?.chat) queue.unshift(job); else queue.push(job);
         // 队列积压告警:正常情况串行消费不会积压超过几条;
         // 持续增长说明 agent 卡住或未就绪 —— 这时必须出声。
         if (queue.length === 20 || (queue.length > 20 && queue.length % 50 === 0)) {
@@ -1912,13 +1927,15 @@ function createMonitor(ctx, cfg, resolveGame) {
    *  返回值。这里轮询 agent.status:send 后先等它进入 running,再等它回到 idle
    *  (此时 turn/end 已写入会话历史、tool result 已持久化),才 resolve、放下一个。
    *  coach_reply 只把最终播报文本记入 liveReplyState,回合结束后读取。 */
-  function runAgentTurn(job) {
+  async function runAgentTurn(job) {
     // ⚠ 按 game 解析适配器,不要写死 WZRY_ADAPTER ——
     //   写死的后果是玩 LoL 时拿到**王者荣耀的人设与播报规则**(称谓/该看什么全不对)。
     //   别处都是正确解析的(见 resolveGame / adapterOfEvent),只有这里漏了。
     const passive=pendingTexts.splice(0).map(line=>line.slice(0,400));
     const body=passive.length?{...job.body,prompt:String(job.body.prompt??'')+'\n【额外观察数据】\n'+JSON.stringify(passive)}:job.body;
-    const msg = buildCoachMessage(body, resolveGame(job.body?.game));
+    const context = await memory.context(job.body?.game ?? cfg.defaultGame, job.body?.match_id ?? cfg.monitorMatch);
+    const msg = job.body?.chat ? buildGameChatMessage(job.body.question, context)
+      : buildCoachMessage({ ...body, prompt: String(body.prompt ?? '') + '\n【共享对局与历史数据 JSON】\n' + JSON.stringify(context) }, resolveGame(job.body?.game));
     // 修复 #6:mark/trace 原定义在 drainQueue() 作用域,这里引用不到 → 定时器每跳
     //   必抛未捕获 ReferenceError 杀死宿主(桌面版打不开)。本函数补一套相同埋点三件套。
     const t0 = Date.now();
@@ -1927,7 +1944,7 @@ function createMonitor(ctx, cfg, resolveGame) {
       trace += ` | ${m}@+${Date.now() - t0}ms`;
       try { diagLog(`   · ${m} (+${Date.now() - t0}ms)`, cfg); } catch { /* 埋点不该影响主链路 */ }
     };
-    const state = { text: null };
+    const state = { text: null, question: job.body?.chat ? job.body.question : '' };
     liveReplyState = state; // This source's coach_reply tool writes into its own turn.
     liveTextSink.lastText = ""; // 修复 #4:本回合 assistant 文本从零开始记录
     // Phase 2 广播:回合开始时告诉所有 /coach/stream 客户端"思考中"
@@ -1960,6 +1977,10 @@ function createMonitor(ctx, cfg, resolveGame) {
           mark(`**超时** deadline=${cfg.liveTimeoutMs ?? cfg.deepTimeoutMs ?? 20000}+5000ms`);
           try { diagLog(`✗ 回合超时全轨迹: ${trace}`, cfg); } catch {}
           try { updateLiveState({ turnTrace: trace }, cfg); } catch {}
+          // A timed-out turn must stop before the queue advances to the next request.
+          try { agent?.cancel?.(new Error('Coach turn timeout'), { keepInbox: false }); } catch {}
+          // Discard this handle so late tool results cannot be consumed by another job.
+          failMonitor(new Error('Coach turn timeout; retry after cooldown'));
           reject(new Error("coach-live turn timeout"));
           return;
         }
@@ -2062,6 +2083,7 @@ function createMonitor(ctx, cfg, resolveGame) {
         const presets = agentCtx.get("agentPresets");
         if (presets) await presets.mount(agentCtx, cfg.coachPreset);
         configureGameAgent(agentCtx, cfg.coachPreset);
+        registerGameMemoryTools(agentCtx, memory, cfg.defaultGame, cfg.monitorMatch, () => liveReplyState?.question ?? '');
         // 修复 #2:coach_reply 提交后拒绝同回合的收尾 step(省一次 LLM 往返)
         installReplyStepGuard(agentCtx, liveReplyGuard);
         // 修复 #4:捕获本回合最后一条 assistant 文本(未调 coach_reply 时的兜底播报依据)
@@ -2137,6 +2159,9 @@ function createMonitor(ctx, cfg, resolveGame) {
    *  3) 安排自愈 —— 冷却期后由下一条事件触发重建。 */
   function failMonitor(rawError) {
     clearTimeout(startTimer);
+    const staleHandle = ownedHandle;
+    ownedHandle = null;
+    void staleHandle?.dispose?.().catch(error => diagLog(`会话释放失败: ${error.message}`, cfg));
     const err = rawError instanceof Error ? rawError : new Error(String(rawError));
     const first = monitorFailed === null;
     monitorFailed = err;

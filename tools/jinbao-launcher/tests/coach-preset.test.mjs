@@ -12,6 +12,16 @@ test('game preset uses native DSH compaction with budgets valid for the configur
   const compact = preset.plugins.find(p => p.name.endsWith('dsh-compaction-basic')).config;
   assert.ok(compact.headroomTokens + compact.maxTokens < 32768);
   assert.ok(compact.retainRatio < compact.thresholdRatio);
+  const web = preset.plugins.find(p => p.name.endsWith('dsh-tool-web'));
+  assert.equal(web.config.search, true); assert.equal(web.config.fetch, true);
+});
+
+test('preset-owned web tools remain in the native agent capability filter', () => {
+  let filter;
+  const names = ['site_datasets', 'site_query', 'web_search', 'web_fetch'];
+  const ctx = { tools: { get: name => names.includes(name), view: () => ({ restrictableNames: new Set(names) }), restrict: value => filter = value, presentAs() {} } };
+  configureGameAgent(ctx, 'jinbao-game');
+  assert.deepEqual(filter.allow, names);
 });
 
 test('agent keeps available retrieval tools and uses native schemas without exposing unrelated host tools', () => {

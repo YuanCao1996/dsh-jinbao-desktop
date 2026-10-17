@@ -45,7 +45,7 @@ test('a delayed chat reply cannot overwrite the next match or its advice',async 
  const file=join(dir,'logs','lol-live.jsonl');
  await writeFile(file,JSON.stringify({game:'lol',t:1,kind:'game_start',gameTime:5})+'\n');
  let finish;
- const service=await createOverlayService({stateDir:dir,pollMs:10,complete:()=>new Promise(resolve=>{finish=resolve;}),search:()=>{throw Error('unexpected query')}});t.after(service.close);
+ const service=await createOverlayService({stateDir:dir,pollMs:10,agentChat:()=>new Promise(resolve=>{finish=resolve;}),search:()=>{throw Error('unexpected query')}});t.after(service.close);
  const request=service.ask('上一局怎么出装','equipment');
  const rejected=assert.rejects(request,error=>error.status===409);
  for(let i=0;!finish&&i<100;i++)await new Promise(r=>setTimeout(r,10));
@@ -70,7 +70,7 @@ test('collector preserves both teams and resolves missing puuid through tagged p
  assert.ok(calls.some(path=>path.includes(encodeURIComponent('玩家#123'))));assert.ok(calls.some(path=>path.includes('/mine/matches')));
 });
 
-test('snapshot polling retains partial UTF8 lines; chat and knowledge use authenticated settings routes and selected provider',async t=>{
+test('chat uses authenticated native Agent bridge in both BYOK and cloud modes; knowledge remains independently authenticated',async t=>{
  const dir=await mkdtemp(join(tmpdir(),'jinbao-overlay-'));await mkdir(join(dir,'logs'));
  const now=Date.now();await writeFile(join(dir,'logs','lol-live.jsonl'),JSON.stringify({game:'lol',t:now,kind:'state',me:{champion:'锐雯'},state:{time:119}})+'\n');
  const values=new Map([['JINBAO_SERVICE_TOKEN','cloud-token'],['JINBAO_USER_MODEL_API_KEY','private-model-key']]);
@@ -78,6 +78,7 @@ test('snapshot polling retains partial UTF8 lines; chat and knowledge use authen
  const calls=[];const credentials={resolve:async k=>values.has(k)?{value:values.get(k)}:undefined,set:async(k,v)=>values.set(k,v)};
  const setup=await createSetupServer({stateDir:dir,port:0,credentials,fetchImpl:async(url,opts)=>{
   calls.push({url:String(url),opts});
+  if(new URL(url).pathname==='/coach/chat')return Response.json({answer:'等队友先手再进场'});
   if(new URL(url).pathname==='/site/search')return Response.json({results:[{data:{champion:'锐雯',_type:JSON.parse(opts.body).filter?._type,name:'全凭身法',items:'["星蚀"]',winRate:50}}]});
   return Response.json({choices:[{message:{content:'等队友先手再进场'}}]});
  }});t.after(setup.close);
@@ -85,14 +86,16 @@ test('snapshot polling retains partial UTF8 lines; chat and knowledge use authen
  assert.equal((await fetch(base+'/api/overlay/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"question":"怎么打"}'})).status,403);
  const headers={'x-jinbao-setup':nonce,'Content-Type':'application/json'};
  const answer=await fetch(base+'/api/overlay/ask',{method:'POST',headers,body:JSON.stringify({question:'怎么打团',topic:'teamfight'})});assert.equal(answer.status,200);
- const call=calls.find(c=>c.url==='https://vendor.test/v1/chat/completions');assert.equal(call.opts.headers.Authorization,'Bearer private-model-key');
- assert.equal(JSON.parse(call.opts.body).model,'my-model');assert.equal(JSON.parse(call.opts.body).store,false);
+ const call=calls.find(c=>c.url==='http://127.0.0.1:3081/coach/chat');assert.equal(call.opts.headers.Authorization,'Bearer '+values.get('JINBAO_LOCAL_ACCESS_KEY'));
+ assert.equal(JSON.parse(call.opts.body).question,'怎么打团');assert.ok(JSON.parse(call.opts.body).match);
+ assert.equal(calls.some(c=>c.url==='https://vendor.test/v1/chat/completions'),false);
  const view=await(await fetch(base+'/api/overlay',{headers})).json();assert.equal(view.gameTime,'01:59');assert.match(view.chat,/怎么打团/);assert.equal(view.teamfight,'等队友先手再进场');
  assert.ok(!JSON.stringify(view).includes('private-model-key'));assert.ok(!JSON.stringify(view).includes('cloud-token'));
  const modelRequest=JSON.stringify(call.opts.body);assert.ok(!modelRequest.includes('private-model-key'));assert.ok(!modelRequest.includes('cloud-token'));
  await fetch(base+'/api/model',{method:'POST',headers,body:JSON.stringify({mode:'cloud'})});
  const cloudAnswer=await fetch(base+'/api/overlay/ask',{method:'POST',headers,body:JSON.stringify({question:'下一步出装呢？'})});assert.equal(cloudAnswer.status,200);
- const cloudCall=calls.find(c=>c.url==='https://api.jinbaoai.top/v1/chat/completions');assert.equal(cloudCall.opts.headers.Authorization,'Bearer cloud-token');assert.equal(JSON.parse(cloudCall.opts.body).model,'game-fast');
+ assert.equal(calls.filter(c=>c.url==='http://127.0.0.1:3081/coach/chat').length,2);
+ assert.equal(calls.some(c=>c.url==='https://api.jinbaoai.top/v1/chat/completions'),false);
 });
 
 test('offline logs populate all factual pages without model traffic; split UTF8 is read once complete',async t=>{

@@ -30,6 +30,7 @@ for(const target of targets){
  else doc.contents.add(doc.createNode({insert:[target]}));
 }
 function override(id,config){let node=all.find(n=>n?.get?.('id')===id);if(!node){node=doc.createNode({id,config:{}});doc.contents.add(node);}const previous=node.get('config')?.toJSON?.()??{};node.set('config',{...previous,...config});return node;}
+override('web',{searchProvider:'opencode-go-search',fetchProvider:'http'});
 const llm=all.find(n=>n?.get?.('id')==='llm-pi-ai')?.get('config')?.toJSON?.()??{};
 override('llm-pi-ai',{providers:{...(llm.providers??{}),'jinbao-local':{displayName:'金宝游戏模型',api:'openai-completions',apiKeyEnv:'JINBAO_LOCAL_ACCESS_KEY',baseURL:'http://127.0.0.1:3084/v1',defaultInput:['text'],compat:{supportsStore:false,supportsDeveloperRole:false,supportsReasoningEffort:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'},models:[{id:'jinbao-strategy',name:'游戏策略（本机设置路由）',contextWindow:32768,maxTokens:2048}]}}});
 let presets=all.find(n=>n?.get?.('id')==='agent-presets');

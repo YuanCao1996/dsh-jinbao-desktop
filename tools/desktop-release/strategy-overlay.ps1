@@ -352,7 +352,7 @@ function Start-Request([string]$route,[hashtable]$payload){
   $script:job=Start-Job -ArgumentList $endpoint,$nonce,$body -ScriptBlock {
    param($endpoint,$nonce,$body)
    try{
-    Invoke-RestMethod -Uri $endpoint -Method Post -Headers @{'x-jinbao-setup'=$nonce} -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 70 | Out-Null
+    Invoke-RestMethod -Uri $endpoint -Method Post -Headers @{'x-jinbao-setup'=$nonce} -ContentType 'application/json' -Body ([Text.Encoding]::UTF8.GetBytes($body)) -TimeoutSec 310 | Out-Null
     @{ok=$true}
    }catch{
     $status=0;try{$status=[int]$_.Exception.Response.StatusCode}catch{}

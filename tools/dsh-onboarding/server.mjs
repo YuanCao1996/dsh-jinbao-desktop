@@ -12,7 +12,9 @@ const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buff
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
 async function body(req,max=512*1024,onBytes){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){onBytes?.(declared);req.resume();throw error(413);}let size=0;const chunks=[];for await(const c of req){size+=c.length;onBytes?.(size);if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
-export async function createSetupServer({credentials,stateDir,port=3084,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch}) {
+export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch}) {
+ if(!Number.isInteger(coachPort)||coachPort<1||coachPort>65535)throw Error('Invalid coach port');
+ const coachOrigin='http://127.0.0.1:'+coachPort;
  const service=serviceUrl(serviceBaseUrl),nonce=randomBytes(32).toString('hex');
  await mkdir(join(stateDir,'logs'),{recursive:true});
  const filename=join(stateDir,'settings.json');
@@ -84,22 +86,23 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
   for(const name of files){const info=await stat(join(stateDir,'logs',name));if(!recent||info.mtimeMs>recent.modifiedAt)recent={name,modifiedAt:info.mtimeMs,bytes:info.size};}
   let validTail=false;
   if(recent&&recent.bytes){const f=await open(join(stateDir,'logs',recent.name),'r');try{const n=Math.min(recent.bytes,65536),buffer=Buffer.alloc(n);await f.read(buffer,0,n,recent.bytes-n);const lines=buffer.toString('utf8').trim().split('\n');if(recent.bytes>n)lines.shift();validTail=lines.slice(-10).every(line=>{try{return !!JSON.parse(line);}catch{return false;}});}finally{await f.close();}}
-  let coachReady=false;try{const r=await fetchImpl('http://127.0.0.1:3081/coach/state',{signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
+  let coachReady=false;try{const r=await fetchImpl(coachOrigin+'/coach/state',{signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
   const snapshot=overlay.view();
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
    activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000};
  }
  const overlay=await createOverlayService({stateDir,
-  search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
-  complete:async messages=>{
+  agentChat:async request=>{
    if(config.mode==='demo')throw error(409);
-   const token=await resolve(config.mode==='byok'?'byok':'cloud');if(!token)throw error(401);
-   const endpoint=config.mode==='byok'?chatUrl(config.baseUrl):new URL('/v1/chat/completions',service);
-   const response=await fetchImpl(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messages,model:config.mode==='byok'?config.model:'game-fast',max_tokens:1800,stream:false,store:false}),redirect:'error',signal:AbortSignal.timeout(60000)});
+   let response;
+   try { response=await fetchImpl(coachOrigin+'/coach/chat',{method:'POST',headers:{Authorization:'Bearer '+local,'Content-Type':'application/json'},body:JSON.stringify(request),redirect:'error',signal:AbortSignal.timeout(300000)}); }
+   catch { throw error(503); }
    if(!response.ok){await response.body?.cancel();throw error(response.status);}
-   const result=await limitedJson(response,128*1024),answer=result.choices?.[0]?.message?.content;
-   if(typeof answer!=='string'||!answer.trim())throw error(502);return answer;
-  }
+   const result=await limitedJson(response,64*1024);
+   if(typeof result.answer!=='string'||!result.answer.trim())throw error(502);
+   return result.answer;
+  },
+  search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
  });
  const phoneSync=await createPhoneSync({stateDir,view:overlay.view,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
  const server=http.createServer(async(req,res)=>{

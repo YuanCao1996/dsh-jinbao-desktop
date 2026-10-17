@@ -6,7 +6,8 @@ import { hostname } from 'node:os';
 import { once } from 'node:events';
 import { serviceUrl,chatUrl,limitedJson } from '../dsh-game-services/client.mjs';
 import { createOverlayService } from './overlay-state.mjs';
-const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY'};
+import { createPhoneSync } from './phone-sync.mjs';
+const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY',sync:'JINBAO_SYNC_TOKEN'};
 const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
@@ -22,12 +23,15 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
  let pairing=null,mutation=Promise.resolve();
  let wechat={enabled:false,checkedAt:0};
  let nextRenewAttempt=0;
+ let nextSyncRenewAttempt=0;
  const locked=fn=>{const next=mutation.then(fn);mutation=next.catch(()=>{});return next;};
  const resolve=async key=>(await credentials.resolve(refs[key]))?.value;
  async function saveConfig(next){await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;}
  async function acceptCloud(result){
   if(typeof result.sessionToken!=='string'||!/^j[cdw]_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
+  const previous=await resolve('cloud');
   await credentials.set(refs.cloud,result.sessionToken);
+  if(previous&&previous===await resolve('sync')&&result.sessionToken.startsWith('jd_'))await acceptSync(result);
   nextRenewAttempt=0;
   if(Number.isFinite(result.expiresIn)&&result.expiresIn>0&&result.expiresIn<=2592000){
    await writeFile(join(stateDir,'cloud-login.json'),JSON.stringify({expiresAt:Date.now()+result.expiresIn*1000,renewAfter:Date.now()+86400000}));
@@ -35,6 +39,39 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
   // A deliberate BYOK choice survives account linking. New installations default to cloud.
   if(config.mode!=='byok')await saveConfig({mode:'cloud',baseUrl:'',model:''});
   pairing=null;
+ }
+ async function acceptSync(result){
+  if(typeof result.sessionToken!=='string'||!/^jd_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
+  await credentials.set(refs.sync,result.sessionToken);nextSyncRenewAttempt=0;
+  if(Number.isFinite(result.expiresIn)&&result.expiresIn>0&&result.expiresIn<=2592000){
+   await writeFile(join(stateDir,'sync-login.json'),JSON.stringify({expiresAt:Date.now()+result.expiresIn*1000,renewAfter:Date.now()+86400000}));
+  }else await rm(join(stateDir,'sync-login.json'),{force:true});
+ }
+ async function acceptLinkedLogin(result){
+  const current=await resolve('cloud');
+  await acceptSync(result);
+  // Existing trial/activation billing stays independent of WeChat device association.
+  if(!current?.startsWith('jc_'))await acceptCloud(result);
+  pairing=null;void phoneSync.enable().catch(()=>{});
+ }
+ async function syncToken(){
+  let token=await resolve('sync')??await resolve('cloud');
+  if(!token?.startsWith('jd_'))return null;
+  try{
+   const path=join(stateDir,await resolve('sync')?'sync-login.json':'cloud-login.json');
+   const lifetime=JSON.parse(await readFile(path,'utf8'));
+   if(Date.now()>lifetime.renewAfter&&Date.now()<lifetime.expiresAt&&Date.now()>=nextSyncRenewAttempt){
+    await locked(async()=>{
+     const current=await resolve('sync')??await resolve('cloud');
+     if(current!==token||Date.now()<nextSyncRenewAttempt)return;
+     nextSyncRenewAttempt=Date.now()+300000;
+     const result=await remote('/desktop/auth/session/renew',current,{});
+     if(current===await resolve('cloud'))await acceptCloud(result);
+     await acceptSync(result);
+    });token=await resolve('sync')??await resolve('cloud');
+   }
+  }catch{}
+  return token;
  }
  async function remote(path,token,data){
   const response=await fetchImpl(new URL(path,service),{method:data===undefined?'GET':'POST',headers:{...(token?{Authorization:'Bearer '+token}:{}),...(data===undefined?{}:{'Content-Type':'application/json'})},...(data===undefined?{}:{body:JSON.stringify(data)}),redirect:'error',signal:AbortSignal.timeout(10000)});
@@ -64,6 +101,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
    if(typeof answer!=='string'||!answer.trim())throw error(502);return answer;
   }
  });
+ const phoneSync=await createPhoneSync({stateDir,view:overlay.view,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
  const server=http.createServer(async(req,res)=>{
   const expectedHost='127.0.0.1:'+server.address().port;
   if(req.headers.host!==expectedHost){send(res,403,{error:'invalid_host'});return;}
@@ -126,11 +164,17 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
     if(token)try{account=await remote('/desktop/account',token);}catch(e){accountError=e.status??503;}
     let update=null;
     try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<8192){const saved=JSON.parse(await readFile(path,'utf8'));update={state:saved.state,version:saved.version,message:saved.message};}}catch{}
-    send(res,200,{...config,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,...await diagnostic()});return;
+    send(res,200,{...config,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
+   if(req.url==='/api/logout')await phoneSync.disable();
    const value=await locked(async()=>{
+    if(req.url==='/api/sync/disable'){
+     // Avoid calling credential renewal while holding the mutation lock.
+     return {disableSync:true};
+    }
+    if(req.url==='/api/sync/enable')return {enableSync:true};
     if(req.url==='/api/model'){
      if(!['demo','byok','cloud'].includes(b.mode))throw error(400);
      const next={mode:b.mode,baseUrl:'',model:''};
@@ -170,20 +214,24 @@ export async function createSetupServer({credentials,stateDir,port=3084,serviceB
     if(req.url==='/api/login/poll'){
      if(!pairing)throw error(410);
      const result=await remote('/desktop/auth/device/poll',null,{deviceSecret:pairing.deviceSecret});
-     if(result.status==='approved'){await acceptCloud(result);return {status:'approved'};}
+     if(result.status==='approved'){await acceptLinkedLogin(result);return {status:'approved'};}
      return {status:'pending'};
     }
     if(req.url==='/api/logout'){
      const token=await resolve('cloud');if(token)await remote('/desktop/auth/logout',token,{});
+     const linked=await resolve('sync');if(linked&&linked!==token)await remote('/desktop/auth/logout',linked,{}).catch(()=>{});
+     await credentials.unset(refs.sync);await rm(join(stateDir,'sync-login.json'),{force:true});
      await credentials.unset(refs.cloud);await rm(join(stateDir,'cloud-login.json'),{force:true});nextRenewAttempt=0;pairing=null;return {loggedOut:true};
     }
     throw error(404);
    });
+   if(value?.disableSync){await phoneSync.disable();send(res,200,{disabled:true});return;}
+   if(value?.enableSync){await phoneSync.enable();send(res,200,{enabled:true});return;}
    send(res,200,value);
   }catch(e){if(res.headersSent){res.destroy();return;}const status=[400,401,403,404,409,410,413,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:status===401?'请登录或配置模型密钥':status===403?'配置访问被拒绝':status===409?'请先配置模型或重新生成配对码':status===410?'配对码已过期':status===429?'首批体验名额已满或请求过于频繁':status===400?'配置格式不正确':'连接失败，请稍后重试'});}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;
  await writeFile(join(stateDir,'settings-link.txt'),url,{mode:0o600});
- return {url,port:server.address().port,close:async()=>{await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
+ return {url,port:server.address().port,close:async()=>{await phoneSync.close();await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
 }

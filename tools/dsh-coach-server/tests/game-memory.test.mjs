@@ -84,3 +84,16 @@ test('oversized context remains valid JSON and leaves original history available
   assert.ok(JSON.stringify(context).length < 16000);
   assert.equal(JSON.parse(JSON.stringify(context)).current.game, 'lol');
 });
+
+test('startup replay cannot overwrite newer facts or erase archived chat summaries', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jinbao-memory-replay-'));
+  const original = createGameMemory(dir);
+  const state = { ...initialOverlayState(), game: 'lol', match: 'replay', at: 20, gameSeconds: 600,
+    chat: [{ role: 'user', text: '上一局要记住的问题' }], events: [{ time: '10:00', text: '已购买装备' }] };
+  await original.snapshot(state);
+  const restarted = createGameMemory(dir);
+  await restarted.snapshot({ ...state, at: 10, gameSeconds: 0, events: [], chat: [] });
+  assert.equal((await restarted.context('lol', 'replay')).current.gameSeconds, 600);
+  await restarted.snapshot({ ...state, chat: [] });
+  assert.equal((await restarted.context('lol', 'replay')).current.chat[0].text, '上一局要记住的问题');
+});

@@ -113,6 +113,11 @@ export function createGameMemory(stateDir) {
       const encoded = JSON.stringify(value);
       if (snapshots.get(key) === encoded) return queue;
       return ordered(async () => {
+        const previous = await load(value.game, value.match);
+        if (previous && previous.at > value.at) return;
+        // Replaying observation logs does not replay user chat messages. Keep the
+        // persisted conversation until live chat explicitly supplies its history.
+        if (!value.chat?.length && previous?.chat?.length) value.chat = previous.chat;
         await atomic(join(root, key + '.json'), value);
         snapshots.set(key, encoded);
         if (snapshots.size > 64) snapshots.delete(snapshots.keys().next().value);

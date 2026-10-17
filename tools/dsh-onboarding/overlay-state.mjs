@@ -319,8 +319,9 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       await memory.flush();
       state=router.state();
       if(state.match&&restoredChat){
-        if(restoredChat.game===state.game&&restoredChat.match===state.match&&restoredChat.matchStartedAt===state.matchStartedAt)state.chat=restoredChat.chat.slice(-20);
-        restoredChat=null;
+        if(restoredChat.game===state.game&&restoredChat.match===state.match&&restoredChat.matchStartedAt===state.matchStartedAt){
+          state.chat=restoredChat.chat.slice(-20);restoredChat=null;
+        }
       }
       try {
         const coach = JSON.parse(await readFile(join(stateDir, 'coach_live_state.json'), 'utf8'));

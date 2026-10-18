@@ -41,7 +41,7 @@ $owned=$false
 try{$owned=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$owned=$true}
 if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already running.';exit 0}
 [xml]$xaml=@'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="金宝策略悬浮窗" Width="580" Height="600" MinWidth="420" MinHeight="380" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="CanResize">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="金宝策略悬浮窗" Width="580" Height="600" MinWidth="420" MinHeight="220" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="CanResize">
  <Window.Resources>
   <Style TargetType="Button"><Setter Property="Background" Value="#29364E"/><Setter Property="Foreground" Value="#E2E8F0"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,4"/><Setter Property="Margin" Value="3"/><Setter Property="Cursor" Value="Hand"/></Style>
  </Window.Resources>
@@ -57,7 +57,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Button x:Name="CloseButton" Grid.Column="3" Content="×" FontSize="19" ToolTip="退出悬浮窗"/>
     </Grid>
     <StackPanel Grid.Row="1" Margin="3,4,3,2">
-     <WrapPanel>
+     <WrapPanel Visibility="Collapsed">
      <TextBlock x:Name="TimeText" Text="等待进入游戏" Foreground="#93C5FD" FontSize="14"/>
      <TextBlock x:Name="SummaryText" Text="正在检测游戏和教练服务…" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" Margin="8,2,0,0"/>
      </WrapPanel>
@@ -135,7 +135,7 @@ if(!$SelfTest){
  try{
   $saved=[IO.File]::ReadAllText($boundsFile) | ConvertFrom-Json
   if($saved.width -ge 420 -and $saved.width -le $area.Width){$window.Width=[double]$saved.width}
-  if($saved.height -ge 380 -and $saved.height -le $area.Height){$window.Height=[double]$saved.height}
+  if($saved.height -ge 220 -and $saved.height -le $area.Height){$window.Height=[double]$saved.height}
   $window.Left=[Math]::Max($area.Left,[Math]::Min([double]$saved.left,$area.Right-$window.Width))
   $window.Top=[Math]::Max($area.Top,[Math]::Min([double]$saved.top,$area.Bottom-$window.Height))
  }catch{}
@@ -162,7 +162,7 @@ function Set-Collapsed([bool]$on){
   $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed'
  }else{
   $window.Width=$script:expandedWidth;$window.Height=$script:expandedHeight
-  $window.MinWidth=420;$window.MinHeight=380;$window.ResizeMode='CanResize';$controls.ResizeGrip.Visibility='Visible'
+  $window.MinWidth=420;$window.MinHeight=220;$window.ResizeMode='CanResize';$controls.ResizeGrip.Visibility='Visible'
   $controls.Expanded.Visibility='Visible';$controls.Bubble.Visibility='Collapsed'
   $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
   $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
@@ -261,6 +261,8 @@ function Update-Page {
   $controls.PlayersTable.Children.Clear()
   $caption=New-Object Windows.Controls.TextBlock
   $caption.Text=if($script:snapshot.game -eq 'lol'){'大乱斗英雄样本胜率 ↓ · 无数据置后'}else{'英雄样本胜率 ↓ · 无数据置后'};$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
+  if($script:snapshot.teamWinRates){$caption.Text=[string]$script:snapshot.teamWinRates+"`n五名英雄样本胜率的算术平均，非本局预测`n"+$caption.Text}
+  $caption.TextWrapping='Wrap'
   $controls.PlayersTable.Children.Add($caption) | Out-Null
   Add-PlayerTableRow @('阵营','英雄','胜率 ↓','强度') $true 0
   $index=0
@@ -505,8 +507,9 @@ try{
     Set-PointerMode (Test-PointerHotzone ($controls.ResizeGrip.PointToScreen((New-Object Windows.Point(13,13)))))
     $script:testResult.resizeReceivesMouse=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x20) -eq 0
     Resize-Window -10000 -10000;$window.UpdateLayout()
-    $script:testResult.resizeMinimum=$window.Width -eq 420 -and $window.Height -eq 380 -and $controls.PageScroll.ActualHeight -gt 140
-    Resize-Window 160 220;$window.UpdateLayout();Save-Bounds
+    $script:testResult.resizeMinimum=$window.Width -eq 420 -and $window.Height -eq 220 -and $controls.PageScroll.ActualHeight -gt 60
+    $script:testResult.summaryOnlyInBattle=$controls.TimeText.Parent.Visibility -eq 'Collapsed'
+    Resize-Window 160 380;$window.UpdateLayout();Save-Bounds
     $savedBounds=[IO.File]::ReadAllText($boundsFile) | ConvertFrom-Json
     $script:testResult.resizeSaved=$savedBounds.width -eq 580 -and $savedBounds.height -eq 600
     $controls.FontSlider.Value=18

@@ -108,7 +108,7 @@ export function createGameMemory(stateDir) {
       const value = cleanGameData({ game: state.game, mode: state.mode, match: state.match, at: state.at, matchStartedAt: state.matchStartedAt,
         gameSeconds: state.gameSeconds, ended: state.ended, phase: state.phase, me: state.me,
         allies: state.allies, enemies: state.enemies, bench: state.bench, offers: state.offers,
-        offerHistory: state.offerHistory, ownedAugments: state.ownedAugments,
+        offerHistory: state.offerHistory, ownedAugments: state.ownedAugments, augmentRounds:state.augmentRounds,
         events: state.events, broadcasts: state.broadcasts, chat: state.chat, knowledge });
       const encoded = JSON.stringify(value);
       if (snapshots.get(key) === encoded) return queue;
@@ -134,7 +134,8 @@ export function createGameMemory(stateDir) {
           offers: current.offers, ownedAugments: current.ownedAugments, events: current.events?.slice(-12),
           broadcasts: current.broadcasts?.slice(-3), chat: current.chat?.slice(-4), contextReduced: true };
       }
-      if (JSON.stringify(result).length > 16000) result.current = { game, mode: current?.mode, match, champion: current?.me?.champion, contextReduced: true };
+      if (JSON.stringify(result).length > 16000) result.current = { game, mode: current?.mode, match, champion: current?.me?.champion,
+        events:current?.events?.slice(-8).map(e=>({time:e.time,text:String(e.text??'').slice(0,240)})),ownedAugments:current?.ownedAugments?.slice(-12),contextReduced: true };
       return result;
     },
     history,

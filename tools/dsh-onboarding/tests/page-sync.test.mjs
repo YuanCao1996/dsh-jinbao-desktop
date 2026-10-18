@@ -16,7 +16,7 @@ test('purchase and augment stream events populate their pages without confusing 
   {kind:'augment_picked',time:'01:08',name:'终极唤醒',source:'ocr-inferred',confidence:'low'}]});
  const v=overlayView(s);
  assert.match(v.equipment,/当前装备\n长剑\n/);assert.match(v.equipment,/装备动态.*\n01:05 安妮购买装备：残疫/);
- assert.match(v.equipment,/敌方装备\n无尽之刃/);
+ assert.doesNotMatch(v.equipment,/敌方装备|无尽之刃/);
  assert.deepEqual(s.ownedAugments,['珠光护手']);assert.match(v.augments,/强化动态\n01:06.*珠光护手/);
  assert.match(v.augments,/锐雯 · 双刀流/);assert.match(v.augments,/疑似海克斯选择.*终极唤醒/);
  assert.match(v.advice,/本局已选海克斯\n珠光护手/);assert.doesNotMatch(v.advice,/双刀流|终极唤醒/);

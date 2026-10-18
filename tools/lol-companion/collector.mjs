@@ -33,13 +33,14 @@ const captureTimer=setInterval(async()=>{
  try{
   const frame=await captureAugmentPanel(captureStop.signal);
   if(running&&generation===captureGeneration&&lastLiveState){
-   const captureStatus=JSON.stringify([frame.available,frame.reason??'']);
-   if(captureStatus!==lastCaptureAvailable){lastCaptureAvailable=captureStatus;log.append({kind:'augment_capture_status',available:frame.available,reason:frame.reason??''});}
-   if(!frame.available)nextCaptureAt=Date.now()+60000;
    observer.observe(frame);
+   const diagnostic=observer.status();
+   const captureStatus=JSON.stringify([frame.available,frame.foreground===true,frame.reason??'',diagnostic.recognized,diagnostic.method]);
+   if(captureStatus!==lastCaptureAvailable){lastCaptureAvailable=captureStatus;log.append({kind:'augment_capture_status',available:frame.available,foreground:frame.foreground===true,reason:frame.reason??'',...diagnostic});}
+   if(!frame.available)nextCaptureAt=Date.now()+60000;
    chatObserver.observe(frame,lastLiveState);
   }
- }catch{}finally{capturing=false;}
+ }catch{if(running&&lastCaptureAvailable!=='capture-error'){lastCaptureAvailable='capture-error';log.append({kind:'augment_capture_status',available:true,reason:'capture_failed'});}}finally{capturing=false;}
 },1500);captureTimer.unref();
 while(running){
  try{

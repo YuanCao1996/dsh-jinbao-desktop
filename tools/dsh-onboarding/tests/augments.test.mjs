@@ -89,3 +89,13 @@ test('roster hero queries are cached across rerolls and populate hero tiers with
  await until(()=>calls.some(q=>q.filter?.name==='三号'));
  assert.equal(calls.filter(q=>q.dataset==='aram-ranking').length,2);
 });
+
+test('enlarged card-title OCR drives current choices when full-screen OCR finds no Chinese',()=>{
+ const emitted=[],o=createAugmentObserver(['吃过路兵','精怪魔法','最终形态','咒语裂变'],e=>emitted.push(e));
+ const frame=names=>({available:true,foreground:true,width:1920,height:1080,method:'full-and-card-titles',lines:[{text:'FPS: 211',x:1800,y:38}],titleLines:names.map((name,i)=>({text:[...name].join(' '),x:550+i*370,y:435,slot:i}))});
+ const before=frame(['吃过路兵','精怪魔法','最终形态']);o.observe(before);assert.equal(emitted.length,0);o.observe(before);
+ assert.deepEqual(emitted[0].options.map(o=>o.name),['吃过路兵','精怪魔法','最终形态']);assert.equal(o.status().recognized,3);
+ const after=frame(['吃过路兵','精怪魔法','咒语裂变']);o.observe(after);o.observe(after);
+ assert.equal(emitted[1].roll,1);assert.equal(emitted[1].reroll,true);assert.deepEqual(emitted[1].options.map(o=>o.name),['吃过路兵','精怪魔法','咒语裂变']);
+ const empty={...before,titleLines:[]};for(let i=0;i<3;i++)o.observe(empty);assert.equal(emitted.at(-1).kind,'augment_offer_closed');
+});

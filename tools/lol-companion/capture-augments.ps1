@@ -1,4 +1,4 @@
-param([switch]$CheckOnly,[string]$ImagePath)
+﻿param([switch]$CheckOnly,[string]$ImagePath)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $engineReady=$false
@@ -53,11 +53,12 @@ public static class JinbaoAugmentCapture {
  }
  $asTask=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {$_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1} | Select-Object -First 1
  function Await-Operation($operation,[Type]$type){$task=$asTask.MakeGenericMethod($type).Invoke($null,@($operation));$task.Wait();return $task.Result}
- $stream=[Windows.Storage.Streams.InMemoryRandomAccessStream]::new()
+ function Read-OcrImage([byte[]]$imageBytes){
+  $stream=[Windows.Storage.Streams.InMemoryRandomAccessStream]::new()
  $software=$null
  try{
   $writer=[Windows.Storage.Streams.DataWriter]::new($stream)
-  $writer.WriteBytes($bytes);Await-Operation ($writer.StoreAsync()) ([uint32]) | Out-Null
+  $writer.WriteBytes($imageBytes);Await-Operation ($writer.StoreAsync()) ([uint32]) | Out-Null
   $writer.DetachStream() | Out-Null;$writer.Dispose();$stream.Seek(0)
   $decoder=Await-Operation ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
   $width=$decoder.PixelWidth;$height=$decoder.PixelHeight
@@ -73,8 +74,35 @@ public static class JinbaoAugmentCapture {
     @{text=$_.Text;x=[double]$x;y=[double]$y;box=@(@($x,$y),@($right,$y),@($right,$bottom),@($x,$bottom))}
    }
   })
-  @{available=$true;foreground=$true;width=$width;height=$height;lines=$lines} | ConvertTo-Json -Depth 5 -Compress
+  return @{width=$width;height=$height;lines=$lines}
  }finally{if($software){$software.Dispose()};$stream.Dispose()}
+ }
+ $frame=Read-OcrImage $bytes
+ $titleLines=@()
+ # Full-screen OCR can skip all three stylized titles even though OCR is available.
+ # Independently enlarge each card's title region, preserving full-frame coordinates.
+ $inputStream=[IO.MemoryStream]::new($bytes,$false)
+ $inputBitmap=$null
+ try{
+  $inputBitmap=[Drawing.Bitmap]::new($inputStream)
+  for($slot=0;$slot -lt 3;$slot++){
+   $crop=$null;$enlarged=$null;$encoded=[IO.MemoryStream]::new()
+   try{
+    $x=[int]($inputBitmap.Width/2+$inputBitmap.Height*(-0.4713+0.3413*$slot));$y=[int]($inputBitmap.Height*0.35)
+    $w=[int]($inputBitmap.Height*0.302);$h=[int]($inputBitmap.Height*0.11)
+    $rect=[Drawing.Rectangle]::new($x,$y,$w,$h)
+    $crop=$inputBitmap.Clone($rect,$inputBitmap.PixelFormat)
+    $enlarged=[Drawing.Bitmap]::new($crop,[Drawing.Size]::new($w*3,$h*3))
+    $enlarged.Save($encoded,[Drawing.Imaging.ImageFormat]::Png)
+    $local=Read-OcrImage $encoded.ToArray()
+    foreach($line in $local.lines){
+     $titleLines+=@{text=$line.text;x=($x+$line.x/3);y=($y+$line.y/3);slot=$slot}
+    }
+   }finally{if($crop){$crop.Dispose()};if($enlarged){$enlarged.Dispose()};$encoded.Dispose()}
+  }
+ }finally{if($inputBitmap){$inputBitmap.Dispose()};$inputStream.Dispose()}
+ @{available=$true;foreground=$true;width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-titles'} | ConvertTo-Json -Depth 5 -Compress
+
 }catch{
  if($engineReady){Write-Output '{"available":true,"foreground":false,"reason":"capture_failed"}'}
  else{Write-Output '{"available":false,"reason":"ocr_runtime_unavailable"}'}

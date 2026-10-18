@@ -9,11 +9,13 @@ const normalize = value => String(value??'').replace(/[\s:：!！·•,，。.]/
 export function createAugmentObserver(names, emit) {
   const catalog = new Map(names.map(name=>[normalize(name),name]));
   let current=[],history=[],round=0,misses=0,pending='',confirmations=0,slots=[];
+  let diagnostic={recognized:0,method:'none'};
   return {
-    reset(){current=[];history=[];round=0;misses=0;pending='';confirmations=0;slots=[];},
+    status(){return {...diagnostic};},
+    reset(){current=[];history=[];round=0;misses=0;pending='';confirmations=0;slots=[];diagnostic={recognized:0,method:'none'};},
     observe(frame){
-      if(!frame?.foreground || !frame.available)return;
-      const lines=frame.lines??[];
+      if(!frame?.foreground || !frame.available){diagnostic={recognized:0,method:frame?.method??'none'};return;}
+      const lines=[...(frame.titleLines??[]),...(frame.lines??[])];
       const found=lines.map(line=>({...line,name:catalog.get(normalize(line.text))})).filter(line=>line.name);
       // Windows OCR can wrap a card title into two lines. Join only nearby
       // lines in the same card; never fuzzy-match an arbitrary description.
@@ -27,6 +29,7 @@ export function createAugmentObserver(names, emit) {
         const band=found.filter(line=>Math.abs(line.y-seed.y)<frame.height*0.07).sort((a,b)=>a.x-b.x).filter((line,i,all)=>!all.slice(0,i).some(old=>old.name===line.name&&Math.abs(old.x-line.x)<frame.width*0.07));
         if(band.length===3&&new Set(band.map(line=>line.name)).size===3&&band[1].x-band[0].x>frame.width*0.12&&band[2].x-band[1].x>frame.width*0.12){candidates=band.map(line=>line.name);break;}
       }
+      diagnostic={recognized:candidates.length||Math.min(2,new Set(found.map(line=>line.name)).size),method:frame.method??'full'};
       if(candidates.length!==3){
         pending='';confirmations=0;
         if(found.length>=2){misses=0;return;}

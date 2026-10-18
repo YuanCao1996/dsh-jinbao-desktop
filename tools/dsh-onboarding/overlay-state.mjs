@@ -9,6 +9,7 @@ import { createGameMemory } from '../dsh-coach-server/lib/game-memory.js';
 import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
 import {trackAugmentRound,updateAugmentRecommendations,createEquipmentCoach} from './equipment-context.mjs';
 import {augmentConfirmation} from './augment-confirmation.mjs';
+import {teamStrength,TEAM_STRENGTH_NOTE} from './team-strength.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -191,8 +192,8 @@ export function overlayView(state, knowledge = {}) {
       winRateText:winRate!==null?`${Number(winRate.toFixed(2))}%`:'暂无数据',tierText:tierText(r?.tier)};
   }).sort((a,b)=>(b.winRate??-1)-(a.winRate??-1));
   const roster=playerRows.map(p=>`${p.side} ${p.champion} · ${p.winRateText} · ${p.tierText}`);
-  const average=side=>{const team=playerRows.filter(p=>p.side===side);const known=team.filter(p=>p.winRate!==null);return team.length===5&&known.length===5?`${Number((known.reduce((n,p)=>n+p.winRate,0)/5).toFixed(2))}%`:`暂无（${known.length}/5）`;};
-  const teamWinRates=state.game==='lol'?`我方平均胜率 ${average('友')} · 敌方平均胜率 ${average('敌')}`:'';
+  const weighted=side=>{const result=teamStrength(playerRows,side);return result.value===null?`待补齐 ${result.known}/5`:`${Number(result.value.toFixed(1))}%`;};
+  const teamWinRates=state.game==='lol'?`加权样本 · 我方 ${weighted('友')}｜敌方 ${weighted('敌')}`:'';
   const builds = rows.filter(r => r._type === 'coreBuilds').map(r => `${items(r.items)}\n  样本胜率 ${percent(r.winRate)} · 使用率 ${percent(r.pickRate)}`);
   const ranked = rankedAugments(rows, me.champion);
   const augments = ranked.slice(0,5).map(augmentLine);
@@ -224,8 +225,9 @@ export function overlayView(state, knowledge = {}) {
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
       augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n资料库推荐组合\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
-    players: (teamWinRates?teamWinRates+'\n五名英雄样本胜率的算术平均，非本局预测\n\n':'')+heroStats+'\n\n双方英雄胜率（按胜率从高到低）\n'+(roster.join('\n\n') || '等待双方英雄数据。'),
+    players: (teamWinRates?teamWinRates+'\n\n':'')+'英雄胜率 ↓\n'+(roster.join('\n') || '等待双方英雄数据。'),
     teamWinRates,
+    teamWinRatesNote:TEAM_STRENGTH_NOTE,
     confirmation:augmentConfirmation(state,rows),
     heroStats,
     playerRows,

@@ -17,7 +17,7 @@ test('win rate page uses hero sample rates and tiers, ignores player history, an
  assert.deepEqual(v.playerRows.map(r=>r.winRate),[55.21,50,0,null]);
  assert.deepEqual(v.playerRows.map(r=>r.tierText),['T0','T1','T3','暂无']);
  assert.doesNotMatch(JSON.stringify({players:v.players,rows:v.playerRows,stats:v.stats}),/隐藏|puuid|riotId|gamesText|kda|场次|近期胜率|99%|100%/);
- assert.match(v.players,/双方英雄胜率/);assert.match(v.players,/55.21%/);
+ assert.match(v.players,/英雄胜率 ↓/);assert.match(v.players,/55.21%/);
 });
 
 test('mid-game capture uses elapsed seconds, ends at GameEnd, resets across matches and does not invent win rates',()=>{

@@ -282,7 +282,7 @@ function Update-Page {
   $controls.PlayersTable.Children.Clear()
   $caption=New-Object Windows.Controls.TextBlock
   $caption.Text=if($script:snapshot.game -eq 'lol'){'大乱斗英雄样本胜率 ↓ · 无数据置后'}else{'英雄样本胜率 ↓ · 无数据置后'};$caption.Foreground='#94A3B8';$caption.FontSize=11;$caption.Margin='0,0,0,8'
-  if($script:snapshot.teamWinRates){$caption.Text=[string]$script:snapshot.teamWinRates+"`n五名英雄样本胜率的算术平均，非本局预测`n"+$caption.Text}
+  if($script:snapshot.teamWinRates){$caption.Text=[string]$script:snapshot.teamWinRates;$caption.ToolTip=[string]$script:snapshot.teamWinRatesNote}
   $caption.TextWrapping='Wrap'
   $controls.PlayersTable.Children.Add($caption) | Out-Null
   Add-PlayerTableRow @('阵营','英雄','胜率 ↓','强度') $true 0

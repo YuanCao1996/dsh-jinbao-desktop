@@ -41,13 +41,13 @@ test('automatic build task is debounced, rate limited, uses enemy items and all 
  s=initialOverlayState();resolve('跨局旧建议');await new Promise(r=>setImmediate(r));assert.notEqual(s.equipment,'跨局旧建议');coach.close();
 });
 
-test('team means require five valid heroes per side and do not include the bench; status belongs in battle text',()=>{
+test('weighted team samples require five valid heroes per side and do not include the bench; status belongs in battle text',()=>{
  const s=initialOverlayState();s.game='lol';s.gameSeconds=512;s.me={champion:'我0',level:11,k:2,d:3,a:8,gold:1200};
  s.allies=Array.from({length:5},(_,i)=>({champion:'我'+i}));s.enemies=Array.from({length:5},(_,i)=>({champion:'敌'+i}));s.bench=[{champion:'备选'}];
- const rows=[...s.allies.map((p,i)=>({_viewKind:'hero',name:p.champion,winRate:50+i})),...s.enemies.map((p,i)=>({_viewKind:'hero',name:p.champion,winRate:40+i})),{_viewKind:'hero',name:'备选',winRate:100}];
- let v=overlayView(s,{rows});assert.equal(v.teamWinRates,'我方平均胜率 52% · 敌方平均胜率 42%');
+ const rows=[...s.allies.map((p,i)=>({_viewKind:'hero',name:p.champion,winRate:50+i,tier:'T2'})),...s.enemies.map((p,i)=>({_viewKind:'hero',name:p.champion,winRate:40+i,tier:'T2'})),{_viewKind:'hero',name:'备选',winRate:100}];
+ let v=overlayView(s,{rows});assert.equal(v.teamWinRates,'加权样本 · 我方 52%｜敌方 42%');
  assert.match(v.advice,/对局 08:32 · 我0 · Lv11 · 2\/3\/8 · 金币 1200/);
- v=overlayView(s,{rows:rows.slice(1)});assert.match(v.teamWinRates,/我方平均胜率 暂无（4\/5）/);assert.match(v.teamWinRates,/敌方平均胜率 42%/);
+ v=overlayView(s,{rows:rows.slice(1)});assert.match(v.teamWinRates,/我方 待补齐 4\/5/);assert.match(v.teamWinRates,/敌方 42%/);
 });
 
 test('event page timeline reaches chat prompt even after oversized context is reduced',async()=>{

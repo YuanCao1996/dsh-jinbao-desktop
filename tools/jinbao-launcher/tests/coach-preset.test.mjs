@@ -10,7 +10,7 @@ test('game preset uses native DSH compaction with budgets valid for the configur
   assert.equal(preset.id, 'jinbao-game');
   assert.ok(!JSON.stringify(preset).includes('terminal'));
   const compact = preset.plugins.find(p => p.name.endsWith('dsh-compaction-basic')).config;
-  assert.ok(compact.headroomTokens + compact.maxTokens < 32768);
+  assert.ok((compact.headroomTokens??0) + compact.maxTokens < 32768);
   assert.ok(compact.retainRatio < compact.thresholdRatio);
   const web = preset.plugins.find(p => p.name.endsWith('dsh-tool-web'));
   assert.equal(web.config.search, true); assert.equal(web.config.fetch, true);

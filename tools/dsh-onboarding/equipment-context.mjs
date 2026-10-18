@@ -28,6 +28,7 @@ export function updateAugmentRecommendations(state,rows=[]){
     if(best)round.recommended=best.name;
   }
 }
+const ownFacts=facts=>JSON.stringify([facts.hero,facts.currentItems,facts.confirmedAugments,facts.assumedAugments]);
 const items=value=>(Array.isArray(value)?value:[]).map(i=>({name:typeof i==='string'?i:i?.name,count:i?.count??1})).filter(i=>i.name);
 export function equipmentContext(state){
   return {hero:state.me.champion,mode:state.mode,currentItems:items(state.me.items),
@@ -47,18 +48,18 @@ export function createEquipmentCoach({getState,agentChat,save,now=Date.now,debou
       const facts=equipmentContext(state);
       if(!facts.currentItems.length&&!facts.enemies.some(e=>e.items.length)&&!facts.unassignedEnemyItems.length&&!facts.confirmedAugments.length&&!facts.assumedAugments.length)return;
       const key=JSON.stringify([state.game,state.match,state.matchStartedAt,facts]);
-      if(key!==pending){pending=key;since=now();if(lastDone){state.equipment='正在结合最新装备与海克斯更新出装建议…';state.equipmentAssumptions=[];}}
+      if(key!==pending){pending=key;since=now();state.equipmentStatus=lastDone?'正在结合最新装备与海克斯更新建议…':'正在生成出装建议…';}
       if(busy||key===lastDone||now()-since<debounceMs||now()-lastAt<cooldownMs)return;
       busy=true;lastAt=now();
       const match=state.match,started=state.matchStartedAt;
       const question='【自动出装建议任务】请结合当前装备、敌方各英雄装备、自己所有已确认海克斯，以及下列明确标注为推测的强化，更新出装建议。先给下一件优先购买的装备，再给后续顺序和针对性调整理由。推测强化必须写成“暂按…考虑，待确认”，不得宣称已拥有；所有已确认强化都要参与取舍。没有可信排名时不要编造推测。不要重复列出敌方装备明细或购买事件。玩法与装备数值不确定时调用工具查证。只用 coach_reply 提交不超过600字的最终建议。\n【装备决策事实 JSON】\n'+JSON.stringify(facts);
-      void agentChat({game:state.game,match,question,topic:'equipment'}).then(async answer=>{
+      void agentChat({game:state.game,match,question,topic:'equipment',automatic:true}).then(async answer=>{
         const current=getState();
-        if(closed||current.match!==match||current.matchStartedAt!==started||JSON.stringify([current.game,current.match,current.matchStartedAt,equipmentContext(current)])!==key)return;
-        if(typeof answer==='string'&&answer.trim()){current.equipment=answer.trim().slice(0,4000);current.equipmentAssumptions=facts.assumedAugments;lastDone=key;await save();}
+        if(closed||current.match!==match||current.matchStartedAt!==started||current.game!==state.game||ownFacts(equipmentContext(current))!==ownFacts(facts))return;
+        if(typeof answer==='string'&&answer.trim()){current.equipment=answer.trim().slice(0,4000);current.equipmentAssumptions=facts.assumedAugments;current.equipmentStatus=JSON.stringify([current.game,current.match,current.matchStartedAt,equipmentContext(current)])===key?'':'敌方装备已变化，稍后更新建议';lastDone=key;await save();}
       }).catch(()=>{
         const current=getState();
-        if(!closed&&current.match===match&&current.matchStartedAt===started&&JSON.stringify([current.game,current.match,current.matchStartedAt,equipmentContext(current)])===key){current.equipment='出装建议更新失败，稍后自动重试。';current.equipmentAssumptions=[];}
+        if(!closed&&current.match===match&&current.matchStartedAt===started&&JSON.stringify([current.game,current.match,current.matchStartedAt,equipmentContext(current)])===key){current.equipmentStatus='出装建议暂未生成，稍后自动重试';}
       }).finally(()=>{busy=false;});
     },
     close(){closed=true;},

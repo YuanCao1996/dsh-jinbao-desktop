@@ -1,3 +1,6 @@
+import {loadRecoverySession,saveRecoverySession} from './recovery-session.js';
+import {turnContext} from './turn-context.js';
+import {createTurnHealth,recoverySessionId,canRetryContext} from './turn-health.js';
 import { configureGameAgent } from './agent-profile.js';
 // dsh-coach-server
 // ----------
@@ -273,6 +276,7 @@ function installReplyStepGuard(agentCtx, state) {
  * 用 session/event 事件流(agent 作用域),只取 text block。
  */
 function installAssistantTextTap(agentCtx, sink, cfg) {
+  const turnHealth=sink.turnHealth;
   try { sink.__diagCfg = cfg; } catch {}
   agentCtx.on("session/event", (_session, event) => {
     // ── 埋点:回合内每条会话事件都记一行(type + 前 90 字) ──
@@ -283,6 +287,7 @@ function installAssistantTextTap(agentCtx, sink, cfg) {
       const _ed = JSON.stringify(event?.data ?? {})?.slice(0, 90) ?? "";
       diagLog(`   [sess] ${_et} ${_ed}`, sink.__diagCfg);
     } catch { /* 埋点不影响主链路 */ }
+    turnHealth?.observe(event);
     if (!event || event.type !== "assistant/message") return;
     const blocks = event.data?.message?.content ?? [];
     const text = blocks
@@ -1862,7 +1867,7 @@ function createMonitor(ctx, cfg, resolveGame) {
       }
       return new Promise((resolve, reject) => {
         const job = { event, sourceFile, body, resolve, reject };
-        if (body?.chat) queue.unshift(job); else queue.push(job);
+        if (body?.chat&&!body?.automatic) queue.unshift(job); else queue.push(job);
         // 队列积压告警:正常情况串行消费不会积压超过几条;
         // 持续增长说明 agent 卡住或未就绪 —— 这时必须出声。
         if (queue.length === 20 || (queue.length > 20 && queue.length % 50 === 0)) {
@@ -1919,7 +1924,11 @@ function createMonitor(ctx, cfg, resolveGame) {
       .then((text) => {
         job.resolve(text);
       })
-      .catch((error) => job.reject(error))
+      .catch((error) => {
+        if(canRetryContext(job,error)&&!lifetime.signal.aborted){
+          job.contextRetried=true;if(job.body?.chat&&!job.body?.automatic)queue.unshift(job);else queue.push(job);monitorFailed=null;retryAt=0;startSession();
+        }else job.reject(error);
+      })
       .finally(() => {
         running = false;
         drainQueue();
@@ -1942,7 +1951,7 @@ function createMonitor(ctx, cfg, resolveGame) {
     //   别处都是正确解析的(见 resolveGame / adapterOfEvent),只有这里漏了。
     const passive=pendingTexts.splice(0).map(line=>line.slice(0,400));
     const body=passive.length?{...job.body,prompt:String(job.body.prompt??'')+'\n【额外观察数据】\n'+JSON.stringify(passive)}:job.body;
-    const context = await memory.context(job.body?.game ?? cfg.defaultGame, job.body?.match_id ?? cfg.monitorMatch);
+    const context = turnContext(await memory.context(job.body?.game ?? cfg.defaultGame, job.body?.match_id ?? cfg.monitorMatch));
     const msg = job.body?.chat ? buildGameChatMessage(job.body.question, context, job.body.game)
       : buildCoachMessage({ ...body, mode:context.current?.mode ?? body.mode, prompt: String(body.prompt ?? '') + '\n【共享对局与历史数据 JSON】\n' + JSON.stringify(context) }, resolveGame(job.body?.game));
     // 修复 #6:mark/trace 原定义在 drainQueue() 作用域,这里引用不到 → 定时器每跳
@@ -1955,6 +1964,7 @@ function createMonitor(ctx, cfg, resolveGame) {
     };
     const state = { text: null, question: job.body?.chat ? job.body.question : '' };
     liveReplyState = state; // This source's coach_reply tool writes into its own turn.
+    liveTextSink.turnHealth.reset();
     liveTextSink.lastText = ""; // 修复 #4:本回合 assistant 文本从零开始记录
     const publishStatus=createAgentStatus(cfg.sessionCwd,job.body?.game??cfg.defaultGame,job.body?.match_id??cfg.monitorMatch);publishStatus('start');
     // Phase 2 广播:回合开始时告诉所有 /coach/stream 客户端"思考中"
@@ -2014,6 +2024,10 @@ function createMonitor(ctx, cfg, resolveGame) {
             if (offTools) { try { offTools(); } catch {} }
             const text = state.text ?? "";
             liveReplyState = null;
+            if(liveTextSink.turnHealth.failedWithoutReply(state.text)){
+              const error=Object.assign(new Error('Agent context blocked; recovering native session'),{code:'AGENT_CONTEXT_BLOCKED',status:503});
+              failMonitor(error,true);publishStatus('complete');reject(error);return;
+            }
             // 修复 #4:模型没调 coach_reply 就结束了回合。此时 assistant 的收尾文本通常是
             // 内部推理("纯状态…已静音处理,请求完成"),直接播报会把推理念给玩家听 ——
             // 所以按静音处理,只记诊断日志(便于发现契约违反)。
@@ -2063,7 +2077,8 @@ function createMonitor(ctx, cfg, resolveGame) {
   const monitorId = cfg.monitorSessionId ?? `coach-live-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   // 与本 agent 的 coach_reply 工具共享的回合状态(修复 #2/#3)
   const liveReplyGuard = { replied: false, game: cfg.defaultGame };
-  const liveTextSink = { lastText: "" };
+  const liveTextSink = { lastText: "", turnHealth:createTurnHealth() };
+  let currentSessionId=loadRecoverySession(cfg.sessionCwd,monitorId);
   // 启动看门狗:createAgent 既不 resolve 也不 reject 时(例如 preset mount 卡住),
   // 旧实现让队列无限增长且毫无痕迹 —— 到点即判定失败,让上层拿到明确错误。
   const START_TIMEOUT_MS = cfg.monitorStartTimeoutMs ?? 90000;
@@ -2089,7 +2104,7 @@ function createMonitor(ctx, cfg, resolveGame) {
     }, START_TIMEOUT_MS);
     openCoachSession(ctx, {
       signal: lifetime.signal,
-      sessionId: monitorId,
+      sessionId: currentSessionId,
       meta: { cwd: cfg.sessionCwd, agentPreset: cfg.coachPreset },
       agentOptions: { provider: cfg.provider, model: cfg.model },
       setup: async (agentCtx) => {
@@ -2101,6 +2116,7 @@ function createMonitor(ctx, cfg, resolveGame) {
         // 修复 #2:coach_reply 提交后拒绝同回合的收尾 step(省一次 LLM 往返)
         installReplyStepGuard(agentCtx, liveReplyGuard);
         // 修复 #4:捕获本回合最后一条 assistant 文本(未调 coach_reply 时的兜底播报依据)
+        liveTextSink.turnHealth=createTurnHealth();
         installAssistantTextTap(agentCtx, liveTextSink, cfg);
         // coach_reply:agent 回合结束时把最终播报文本回传(会话持久、全局唯一入口)
         agentCtx.tools.register(makeLiveReplyTool(liveReplyGuard, resolveGame, () => liveReplyState));
@@ -2121,12 +2137,13 @@ function createMonitor(ctx, cfg, resolveGame) {
     }
     agent = a;
     session = a.session;
+    if(currentSessionId!==monitorId)try{saveRecoverySession(cfg.sessionCwd,monitorId,currentSessionId);}catch(error){diagLog(`恢复会话索引保存失败: ${error.message}`,cfg);}
     readyMs = startAt ? Date.now() - startAt : null;
     startAttempt = 0;
     retryAt = 0;
     // 侧边栏可见性:coach-live 是运行时创建的会话,不会自动进入 workspace 索引,
     // 必须显式 attach 到工作区,否则侧边栏(按 workspace 渲染)看不到它。
-    attachSessionToWorkspace(ctx, cfg, monitorId);
+    attachSessionToWorkspace(ctx, cfg, currentSessionId);
     // 侧边栏可见性:给 coach-live 一个固定标题(保留统一显示名,便于辨认)
     const titleSvc = ctx.get("sessionTitle");
     if (titleSvc && session) {
@@ -2136,8 +2153,8 @@ function createMonitor(ctx, cfg, resolveGame) {
         console.warn(`[coach-server] coach-live title rename failed: ${error?.message ?? error}`);
       }
     }
-    console.log(`[coach-server] coach-live monitor session ready (id=${monitorId})`);
-    diagLog(`✓ coach-live 会话就绪 (id=${monitorId}, ${readyMs ?? "?"}ms)`, cfg);
+    console.log(`[coach-server] coach-live monitor session ready (id=${currentSessionId})`);
+    diagLog(`✓ coach-live 会话就绪 (id=${currentSessionId}, ${readyMs ?? "?"}ms)`, cfg);
     // 侧边栏可见性(关键):DSH 将"从未跑过 agent 回合"的会话视为 blank(空白占位),
     // 客户端 sessionVisible() 会隐藏 blank 会话(只显示当前会话)。coach-live 是纯
     // append 的监控会话,永不自然产生 turn/start → 永远 blank → 侧边栏看不到。
@@ -2171,13 +2188,14 @@ function createMonitor(ctx, cfg, resolveGame) {
    *  1) 结算队列 —— 否则 job 既不 resolve 也不 reject,上层 .then() 永不触发;
    *  2) 记录原因 —— 供 health()/`/coach/state` 暴露,让"教练不说话"有据可查;
    *  3) 安排自愈 —— 冷却期后由下一条事件触发重建。 */
-  function failMonitor(rawError) {
+  function failMonitor(rawError, preserveQueue=false) {
     clearTimeout(startTimer);
     const staleHandle = ownedHandle;
     ownedHandle = null;
     void staleHandle?.dispose?.().catch(error => diagLog(`会话释放失败: ${error.message}`, cfg));
     const err = rawError instanceof Error ? rawError : new Error(String(rawError));
     const first = monitorFailed === null;
+    currentSessionId=recoverySessionId(monitorId,randomUUID());
     monitorFailed = err;
     agent = null;
     session = null;
@@ -2191,7 +2209,7 @@ function createMonitor(ctx, cfg, resolveGame) {
       diagLog(`✗ coach-live 会话不可用(第 ${startAttempt} 次尝试): ${err.message}`, cfg);
       console.warn(`[coach-server] ⚠ 已拒绝队列中 ${queue.length} 个待处理回合;${Math.round(RETRY_COOLDOWN_MS / 1000)}s 后随下一条事件自动重建`);
     }
-    for (const job of queue.splice(0)) {
+    if(!preserveQueue)for (const job of queue.splice(0)) {
       try { job.reject(err); } catch { /* noop */ }
     }
   }

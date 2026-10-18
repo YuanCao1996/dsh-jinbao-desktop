@@ -26,7 +26,7 @@ export function clock(seconds) {
 export function initialOverlayState() {
   return { game: null, mode: '', match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',
     me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [], equipmentSnapshots:new Map(),
-    ownedAugments: [], augmentRounds: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, augmentCaptureReason: '', equipment: '', equipmentAssumptions: [], augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
+    ownedAugments: [], augmentRounds: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, augmentCaptureReason: '', equipment: '', equipmentStatus:'', equipmentAssumptions: [], augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
 }
 // Pure projection shared by live polling and log replay tests. Epoch time only orders
 // records; the displayed clock always comes from the game's elapsed seconds.
@@ -221,7 +221,7 @@ export function overlayView(state, knowledge = {}) {
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
     summary: [me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
     advice: ['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:''].filter(Boolean).join(' · ')+'\n\n'+current+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
-    equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
+    equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(!state.ended&&state.equipmentStatus?'\n'+state.equipmentStatus:'')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
       augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n资料库推荐组合\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
@@ -413,7 +413,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         if(topic==='augments')state.augmentAdvice=text(answer);
         return { answer: text(answer) };
       } catch (e) {
-        if(stillCurrent())state.chat.push({ role: 'assistant', text: e.status === 401 ? '请在设置页保存可用的模型配置后重试。' : e.status === 503 ? 'DSH Agent 尚未就绪，请重新打开金宝后重试。' : '这次回复失败，请稍后重试。' });
+        if(stillCurrent())state.chat.push({ role: 'assistant', text: e.status === 401 ? '请在设置页保存可用的模型配置后重试。' : e.status === 503 ? '教练暂时忙或正在恢复会话，请稍后重试。' : '这次回复失败，请稍后重试。' });
         throw e;
       } finally { busy = false; await flush(); }
     },

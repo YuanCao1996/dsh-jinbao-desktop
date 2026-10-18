@@ -126,7 +126,16 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     res.on('close',()=>controller.abort());
     try{
      const upstream=await fetchImpl(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({...b,model:config.mode==='byok'?config.model:'game-fast',max_tokens:Math.min(Number.isInteger(b.max_tokens)?b.max_tokens:2048,2048)}),redirect:'error',signal:controller.signal});
-     if(!upstream.ok){await upstream.body?.cancel();throw error(upstream.status);}
+     if(!upstream.ok){
+      if(upstream.status===400){
+       let problem;try{problem=await limitedJson(upstream,4096);}catch{}
+       const code=problem?.error?.code,message=String(problem?.error?.message??'');
+       if(['context_length_exceeded','context_window_exceeded','CONTEXT_WINDOW_EXCEEDED'].includes(code)||/maximum.{0,30}context|context.{0,30}(length|window).{0,30}(exceed|limit)/i.test(message)){
+        diagnostic.errorCode='context_length_exceeded';send(res,400,{error:{type:'invalid_request_error',code:'context_length_exceeded',message:'maximum context length exceeded'}});return;
+       }
+      }else await upstream.body?.cancel();
+      throw error(upstream.status);
+     }
      res.writeHead(200,{'Content-Type':b.stream?'text/event-stream':'application/json','Cache-Control':'no-store'});
      let bytes=0;for await(const chunk of upstream.body){bytes+=chunk.length;if(bytes>2*1024*1024)throw error(502);if(!res.write(chunk))await once(res,'drain',{signal:controller.signal});}res.end();
     }finally{clearTimeout(timer);}

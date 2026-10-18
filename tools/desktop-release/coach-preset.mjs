@@ -13,7 +13,7 @@ export function installCoachPreset(doc, entries) {
       fetchMaxOutputChars: 12000, searchTimeoutMs: 30000, fetchTimeoutMs: 30000,
     } },
     { id: 'compaction', name: '@deepseek-ai/dsh-compaction-basic', isolate: { compaction: true }, config: {
-      auto: true, thresholdRatio: 0.55, headroomTokens: 4096, retainRatio: 0.16, maxTokens: 2048,
+      auto: true, thresholdRatio: 0.7, retainRatio: 0.12, maxTokens: 4096,
     } },
   ] };
   const current = entries.find(node => node?.get?.('id') === 'preset-jinbao-game');

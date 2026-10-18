@@ -14,7 +14,7 @@ export async function dispatchGameChat({ req, body, credentials, monitors }) {
   if (!monitors) deny(503);
   const answer = await monitors.get(body.game, body.match).submitInteraction(
     { kind: 'chat', match: body.match }, body.match,
-    { game: body.game, match_id: body.match, chat: true, question: body.question.trim(), prompt: body.question.trim() });
+    { game: body.game, match_id: body.match, chat: true, automatic:body.topic==='equipment'&&body.automatic===true, question: body.question.trim(), prompt: body.question.trim() });
   if (!answer?.trim()) deny(502);
   return { answer };
 }

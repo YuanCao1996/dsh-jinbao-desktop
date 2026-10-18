@@ -70,3 +70,8 @@ test('live overlay automatically updates equipment through the shared Agent brid
  assert.equal(calls.length,1);assert.match(calls[0].question,/无尽之刃/);assert.match(calls[0].question,/已拥有强化/);assert.match(calls[0].question,/"name":"乙"/);
  assert.doesNotMatch(service.view().chat,/自动出装建议任务/);assert.match(service.view().augments,/尚未收到强化选择日志|已拥有强化/);
 });
+
+test('enemy inventory changes during generation do not discard every equipment answer; last useful plan remains visible',async()=>{
+ let time=10000,resolve;const s=initialOverlayState();Object.assign(s,{game:'lol',match:'one',matchStartedAt:1,at:time,me:{champion:'安妮',items:[{name:'残疫'}]},enemies:[{champion:'锐雯',items:[{name:'无尽之刃'}]}]});
+ const coach=createEquipmentCoach({getState:()=>s,now:()=>time,debounceMs:0,cooldownMs:0,save:async()=>{},agentChat:()=>new Promise(r=>resolve=r)});coach.tick();s.enemies[0].items.push({name:'水银之靴'});resolve('优先购买法穿装备');await new Promise(r=>setImmediate(r));assert.equal(s.equipment,'优先购买法穿装备');assert.match(s.equipmentStatus,/敌方装备已变化/);coach.tick();assert.equal(s.equipment,'优先购买法穿装备');coach.close();resolve('后续建议');
+});

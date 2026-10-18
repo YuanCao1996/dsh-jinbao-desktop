@@ -227,6 +227,7 @@ export function overlayView(state, knowledge = {}) {
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
     players: (teamWinRates?teamWinRates+'\n\n':'')+'英雄胜率 ↓\n'+(roster.join('\n') || '等待双方英雄数据。'),
     teamWinRates,
+    knowledgeStatus:knowledge.failed?knowledge.message:'',
     teamWinRatesNote:TEAM_STRENGTH_NOTE,
     confirmation:augmentConfirmation(state,rows),
     heroStats,
@@ -240,7 +241,7 @@ export function overlayView(state, knowledge = {}) {
   };
 }
 
-export async function createOverlayService({ stateDir, agentChat, search, pollMs = 1000, equipmentDebounceMs=2000, equipmentCooldownMs=30000 }) {
+export async function createOverlayService({ stateDir, agentChat, search, pollMs = 1000, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000 }) {
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
   const router=createOverlayRouter(), offsets = new Map();
@@ -282,35 +283,39 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
     const cache = cached;
     const stillCurrent = () => !closed && key === contextKey();
     knowledge = { ...knowledge, loading: true }; await flush();
+    const errors=[];
+    const failed=e=>errors.push(Number(e?.status)||503);
     try {
       const offered = offerNames(state.offers).slice(0,3);
       const base = async () => {
-        if(selecting||(!force&&cache.rows.length))return;
+        if(selecting||(!force&&cache.baseLoaded))return;
         const results=await Promise.allSettled(game==='wzry'?[search({game,query:champion,limit:3})]:[
           search({game,query:champion,filter:{_type:'coreBuilds'},limit:3}),
           search({game,query:champion,filter:{_type:'augments'},limit:5}),
           search({game,query:champion,filter:{_type:'combos'},limit:5}),
         ]);
-        if(results.every(r=>r.status==='rejected'))throw results[0].reason;
-        cache.rows=results.flatMap(r=>r.status==='fulfilled'?(r.value.results??[]).map(item=>item.data):[]);
+        for(const r of results)if(r.status==='rejected')failed(r.reason);
+        const fresh=results.flatMap(r=>r.status==='fulfilled'?(r.value.results??[]).map(item=>item.data):[]);
+        if(fresh.length||results.every(r=>r.status==='fulfilled'))cache.rows=fresh;
+        cache.baseLoaded=results.every(r=>r.status==='fulfilled');
       };
       await Promise.all([base(),...rosterChampions(state).filter(name=>game==='lol'&&(force||!cache.heroes.has(name))).map(async name=>{
         try{
           const result=await search({game,query:name,dataset:'aram-ranking',limit:1});
           cache.heroes.set(name,(result.results??[]).map(item=>({...item.data,_viewKind:'hero'})).filter(row=>heroStatMatches(row,name)));
-        }catch{if(!cache.heroes.has(name))cache.heroes.set(name,[]);}
+        }catch(e){failed(e);}
       }),...offered.filter(name=>game==='lol'&&(force||!cache.candidates.has(name))).map(async name=>{
         try{
         const result=await search({game,query:champion,filter:{_type:'augments',name},limit:1});
-        const rows=(result.results??[]).map(item=>item.data);if(rows.length)cache.candidates.set(name,rows);
+        const rows=(result.results??[]).map(item=>item.data);cache.candidates.set(name,rows);
         if(cache.candidates.size>100)cache.candidates.delete(cache.candidates.keys().next().value);
-        }catch{ /* One failed slot must not discard other candidates and builds. */ }
+        }catch(e){failed(e); /* Keep successful candidates and retry this slot later. */ }
       })]);
-      if (stillCurrent()) knowledge = { rows: [...offered.flatMap(name=>cache.candidates.get(name)??[]),...cache.rows,...[...cache.heroes.values()].flat()].filter(row => row?._viewKind==='hero'|| (typeof row?.champion === 'string' && row.champion.includes(champion))||row?.name===champion||row?.title===champion), message: '未查到匹配记录，可在聊天中咨询。' };
+      if (stillCurrent()) knowledge = { rows: [...offered.flatMap(name=>cache.candidates.get(name)??[]),...cache.rows,...[...cache.heroes.values()].flat()].filter(row => row?._viewKind==='hero'|| (typeof row?.champion === 'string' && row.champion.includes(champion))||row?.name===champion||row?.title===champion), message: errors.includes(429)?'检索请求受限，稍后重试':errors.some(s=>s===401||s===403)?'检索授权暂不可用，请查看设置':errors.length?'检索暂时失败，正在重试':'未收录匹配的英雄数据', failed:errors.length>0 };
     } catch (e) {
       if(stillCurrent())knowledge = { message: e.status === 401 || e.status === 403 ? '请在设置页登录并开通攻略检索权限；自带模型密钥与检索权限独立。' : '推荐检索暂时不可用，可在聊天中咨询。' };
     } finally {
-      retryKnowledgeAt=Date.now()+15000;
+      retryKnowledgeAt=Date.now()+(errors.includes(429)?Math.max(60000,knowledgeRetryMs):knowledgeRetryMs);
       updateAugmentRecommendations(state,knowledge.rows??[]);
       await flush();
       if(!stillCurrent()&&state.me.champion&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
@@ -368,8 +373,8 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         knowledgeKey=key;knowledge={};
         if((state.me.champion||(state.phase==='ChampSelect'&&rosterChampions(state).length))&&!state.ended&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
       }
-      else if(!refreshTask&&Date.now()>=retryKnowledgeAt&&state.me.champion&&!state.ended&&Date.now()-state.at<30000&&(!cached.rows.length||offerNames(state.offers).some(name=>!cached.candidates.has(name)))){
-        retryKnowledgeAt=Date.now()+15000;void refresh(false).catch(()=>{});
+      else if(!refreshTask&&Date.now()>=retryKnowledgeAt&&state.me.champion&&!state.ended&&Date.now()-state.at<30000&&(!cached.baseLoaded||rosterChampions(state).some(name=>!cached.heroes.has(name))||offerNames(state.offers).some(name=>!cached.candidates.has(name)))){
+        retryKnowledgeAt=Date.now()+knowledgeRetryMs;void refresh(false).catch(()=>{});
       }
       await flush();
       equipmentCoach.tick();

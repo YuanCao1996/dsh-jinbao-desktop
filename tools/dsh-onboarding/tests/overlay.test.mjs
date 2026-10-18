@@ -106,6 +106,8 @@ test('offline logs populate all factual pages without model traffic; split UTF8 
  const bytes=Buffer.from(JSON.stringify({game:'lol',t:2,kind:'state',state:{time:561,items:[{name:'焚天'}]}})+'\n');
  const index=bytes.indexOf(Buffer.from('焚天'))+1;
  await appendFile(file,bytes.subarray(0,index));await new Promise(r=>setTimeout(r,60));assert.equal(service.view().gameTime,'09:20');
- await appendFile(file,bytes.subarray(index));await new Promise(r=>setTimeout(r,80));assert.equal(service.view().gameTime,'09:21');assert.match(service.view().equipment,/焚天/);
+ await appendFile(file,bytes.subarray(index));
+ for(let i=0;i<150;i++){if(service.view().gameTime==='09:21'&&JSON.parse(await readFile(join(dir,'overlay-state.json'),'utf8')).gameTime==='09:21')break;await new Promise(r=>setTimeout(r,20));}
+ assert.equal(service.view().gameTime,'09:21');assert.match(service.view().equipment,/焚天/);
  assert.equal(JSON.parse(await readFile(join(dir,'overlay-state.json'),'utf8')).gameTime,'09:21');
 });

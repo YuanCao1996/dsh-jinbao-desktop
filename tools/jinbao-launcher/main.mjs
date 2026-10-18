@@ -27,7 +27,9 @@ async function publish(phase, message, extra = {}) {
   const path = join(stateDir, 'launcher-state.json');
   let update;
   try { update = JSON.parse(await readFile(join(stateDir, 'updates/status.json'), 'utf8')); } catch { /* First launch. */ }
-  await writeFile(path + '.tmp', JSON.stringify({ phase, message, ...extra, update, updatedAt: Date.now() }));
+  let version=null;
+  try{version=JSON.parse(await readFile(join(root,'manifest.json'),'utf8')).version;}catch{}
+  await writeFile(path + '.tmp', JSON.stringify({ phase, message, version, ...extra, update, updatedAt: Date.now() }));
   await rename(path + '.tmp', path);
 }
 export function settingsAddress(value) {
@@ -91,6 +93,7 @@ async function main() {
         if (command.at > lastAction) { lastAction = command.at; action = command.action; }
       } catch { /* No pending UI action. */ }
       if (action === 'download') await psRun(platform, ['-Action', 'open', '-Target', 'https://deepseek.com/harness/']);
+      if (action === 'check-update') updateTask = updater.check(shutdown.signal);
       if (Date.now() > nextHostCheck) { host = await inspect(); nextHostCheck = Date.now() + 10000; }
       if (host.legacyOverlay?.length) {
         await psRun(platform, ['-Action', 'legacy-show']);

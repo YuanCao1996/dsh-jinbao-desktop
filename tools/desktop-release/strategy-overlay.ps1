@@ -175,6 +175,8 @@ function Set-Collapsed([bool]$on){
  if($on){
   $script:expandedWidth=$window.Width;$script:expandedHeight=$window.Height
   $window.MinWidth=0;$window.MinHeight=0;$window.Width=110;$window.Height=52
+  $window.Left=$area.Right-$window.Width
+  $window.Top=[Math]::Max($area.Top,[Math]::Min($window.Top,$area.Bottom-$window.Height))
   $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed'
  }else{
   $window.Width=$script:expandedWidth;$window.Height=$script:expandedHeight
@@ -455,6 +457,7 @@ function Update-Drag([double]$x,[double]$y,[bool]$pressed){
   if(!$pressed){
    $script:dragging=$false
    if($script:bubbleDrag -and !$script:moved){Set-Collapsed $false}
+   elseif($script:collapsed){$window.Left=$area.Right-$window.Width}
   }else{
    $transform=$script:source.CompositionTarget.TransformFromDevice
    $dx=($x-$script:dragStartX)*$transform.M11;$dy=($y-$script:dragStartY)*$transform.M22
@@ -529,6 +532,7 @@ try{
     $controls.SettingsButton.RaiseEvent($click)
     $controls.CollapseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.collapsed=$script:collapsed -and $window.Width -eq 110
+    $script:testResult.collapsedRightEdge=[Math]::Abs($window.Left+$window.Width-$area.Right) -lt 1
     Set-Collapsed $false;$script:testResult.expanded=$window.Width -ge 420
     $script:testResult.tabs=$controls.Tabs.Children.Count
     $script:testResult.simplifiedNavigation=$controls.Tabs.Children.Count -eq 6 -and @($controls.Tabs.Children | Where-Object {$_.Tag -eq 'teamfight'}).Count -eq 0 -and $null -eq $window.FindName('RefreshButton') -and $null -eq $window.FindName('TacticButton') -and $null -eq $window.FindName('InteractionButton') -and $null -eq $window.FindName('AppearanceButton')

@@ -1108,7 +1108,7 @@ function apply(ctx, config) {
     const path = url.pathname;
     try {
       if (req.method === 'POST' && path === '/coach/chat') {
-        const raw = await readBody(req, 8192);
+        const raw = await readBody(req, 64 * 1024);
         let body;
         try { body = JSON.parse(raw.toString('utf8')); } catch { sendJson(res, 400, { error: 'invalid_json' }); return; }
         try {

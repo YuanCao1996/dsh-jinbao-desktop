@@ -119,6 +119,7 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
       busy = true; let archive, staging;
       try {
         const current = JSON.parse(await readFile(join(root,'manifest.json'),'utf8'));
+        await status({state:'checking',version:current.version,message:'正在检查更新…'});
         const response = await fetchImpl(UPDATE_FEED,{redirect:'error',signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
         const envelope = JSON.parse(await boundedResponse(response,16384));
         const release = verifyRelease(envelope,await key());

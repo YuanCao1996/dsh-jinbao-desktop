@@ -10,7 +10,7 @@ export async function dispatchGameChat({ req, body, credentials, monitors }) {
       !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) deny(401);
   if (req.headers.origin || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) deny(403);
   if (!body || !['lol', 'wzry'].includes(body.game) || typeof body.match !== 'string' || !body.match || body.match.length > 300 ||
-      typeof body.question !== 'string' || !body.question.trim() || body.question.length > 1000) deny(400);
+      typeof body.question !== 'string' || !body.question.trim() || body.question.length > (body.topic === 'equipment' ? 16000 : 1000)) deny(400);
   if (!monitors) deny(503);
   const answer = await monitors.get(body.game, body.match).submitInteraction(
     { kind: 'chat', match: body.match }, body.match,

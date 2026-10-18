@@ -196,6 +196,11 @@ export function overlayView(state, knowledge = {}) {
   const builds = rows.filter(r => r._type === 'coreBuilds').map(r => `${items(r.items)}\n  样本胜率 ${percent(r.winRate)} · 使用率 ${percent(r.pickRate)}`);
   const ranked = rankedAugments(rows, me.champion);
   const augments = ranked.slice(0,5).map(augmentLine);
+  const combinations=rows.filter(r=>r._type==='combos').sort((a,b)=>Number(b.winRate)-Number(a.winRate)).slice(0,5).map(r=>{
+    let cards=r.augments;try{if(typeof cards==='string')cards=JSON.parse(cards);}catch{cards=[];}
+    const names=offerNames(Array.isArray(cards)?cards:[]);
+    return names.length>1?names.join(' + ')+' · 样本胜率 '+percent(r.winRate):'';
+  }).filter(Boolean);
   const offered = offerNames(state.offers);
   const candidates = ranked.filter(row => offered.includes(row.name)).map(augmentLine);
   for(const name of offered)if(!ranked.some(row=>row.name===name))candidates.push(name+' · 暂无该英雄排名');
@@ -217,7 +222,7 @@ export function overlayView(state, knowledge = {}) {
     advice: ['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:''].filter(Boolean).join(' · ')+'\n\n'+current+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
-      augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+
+      augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n资料库推荐组合\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
     players: (teamWinRates?teamWinRates+'\n五名英雄样本胜率的算术平均，非本局预测\n\n':'')+heroStats+'\n\n双方英雄胜率（按胜率从高到低）\n'+(roster.join('\n\n') || '等待双方英雄数据。'),
     teamWinRates,
@@ -243,6 +248,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   try{const saved=JSON.parse(await readFile(join(stateDir,'overlay-chat.json'),'utf8'));if(saved&&Array.isArray(saved.chat))restoredChat=saved;}catch{}
   let knowledge = {}, knowledgeKey = '', refreshTask = null, refreshQueued = false, scanning = false, closed = false, busy = false;
   let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
+  let retryKnowledgeAt=Infinity;
   const contextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+state.me.champion+':'+JSON.stringify([offerNames(state.offers).sort(),[...state.ownedAugments].sort(),rosterChampions(state).sort()]);
   async function save() {
     if (closed) return;
@@ -278,11 +284,13 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       const offered = offerNames(state.offers).slice(0,3);
       const base = async () => {
         if(selecting||(!force&&cache.rows.length))return;
-        const results=await Promise.all(game==='wzry'?[search({game,query:champion,limit:3})]:[
+        const results=await Promise.allSettled(game==='wzry'?[search({game,query:champion,limit:3})]:[
           search({game,query:champion,filter:{_type:'coreBuilds'},limit:3}),
           search({game,query:champion,filter:{_type:'augments'},limit:5}),
+          search({game,query:champion,filter:{_type:'combos'},limit:5}),
         ]);
-        cache.rows=results.flatMap(r=>(r.results??[]).map(item=>item.data));
+        if(results.every(r=>r.status==='rejected'))throw results[0].reason;
+        cache.rows=results.flatMap(r=>r.status==='fulfilled'?(r.value.results??[]).map(item=>item.data):[]);
       };
       await Promise.all([base(),...rosterChampions(state).filter(name=>game==='lol'&&(force||!cache.heroes.has(name))).map(async name=>{
         try{
@@ -290,14 +298,17 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
           cache.heroes.set(name,(result.results??[]).map(item=>({...item.data,_viewKind:'hero'})).filter(row=>heroStatMatches(row,name)));
         }catch{if(!cache.heroes.has(name))cache.heroes.set(name,[]);}
       }),...offered.filter(name=>game==='lol'&&(force||!cache.candidates.has(name))).map(async name=>{
+        try{
         const result=await search({game,query:champion,filter:{_type:'augments',name},limit:1});
-        cache.candidates.set(name,(result.results??[]).map(item=>item.data));
+        const rows=(result.results??[]).map(item=>item.data);if(rows.length)cache.candidates.set(name,rows);
         if(cache.candidates.size>100)cache.candidates.delete(cache.candidates.keys().next().value);
+        }catch{ /* One failed slot must not discard other candidates and builds. */ }
       })]);
       if (stillCurrent()) knowledge = { rows: [...offered.flatMap(name=>cache.candidates.get(name)??[]),...cache.rows,...[...cache.heroes.values()].flat()].filter(row => row?._viewKind==='hero'|| (typeof row?.champion === 'string' && row.champion.includes(champion))||row?.name===champion||row?.title===champion), message: '未查到匹配记录，可在聊天中咨询。' };
     } catch (e) {
       if(stillCurrent())knowledge = { message: e.status === 401 || e.status === 403 ? '请在设置页登录并开通攻略检索权限；自带模型密钥与检索权限独立。' : '推荐检索暂时不可用，可在聊天中咨询。' };
     } finally {
+      retryKnowledgeAt=Date.now()+15000;
       updateAugmentRecommendations(state,knowledge.rows??[]);
       await flush();
       if(!stillCurrent()&&state.me.champion&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
@@ -354,6 +365,9 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       if(key!==knowledgeKey){
         knowledgeKey=key;knowledge={};
         if((state.me.champion||(state.phase==='ChampSelect'&&rosterChampions(state).length))&&!state.ended&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
+      }
+      else if(!refreshTask&&Date.now()>=retryKnowledgeAt&&state.me.champion&&!state.ended&&Date.now()-state.at<30000&&(!cached.rows.length||offerNames(state.offers).some(name=>!cached.candidates.has(name)))){
+        retryKnowledgeAt=Date.now()+15000;void refresh(false).catch(()=>{});
       }
       await flush();
       equipmentCoach.tick();

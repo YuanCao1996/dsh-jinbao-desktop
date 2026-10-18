@@ -169,11 +169,18 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     }catch{ /* A failed renewal does not invalidate an otherwise valid session. */ }
     if(token)try{account=await remote('/desktop/account',token);}catch(e){accountError=e.status??503;}
     let update=null;
-    try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<8192){const saved=JSON.parse(await readFile(path,'utf8'));update={state:saved.state,version:saved.version,message:saved.message};}}catch{}
-    send(res,200,{...config,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<8192){const saved=JSON.parse(await readFile(path,'utf8'));update={state:saved.state,version:saved.version,message:saved.message,at:saved.at};}}catch{}
+    let version=null;try{const launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));version=launcher.version??null;}catch{}
+    send(res,200,{...config,version,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
+   if(req.url==='/api/update/check'){
+    let launcher;try{launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));}catch{}
+    if(!launcher||Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase))throw error(409);
+    const path=join(stateDir,'launcher-control.json');await writeFile(path+'.tmp',JSON.stringify({action:'check-update',at:Date.now()}));await rename(path+'.tmp',path);
+    send(res,202,{message:'已请求检查更新，下载完成后下次启动生效。'});return;
+   }
    if(req.url==='/api/logout')await phoneSync.disable();
    const value=await locked(async()=>{
     if(req.url==='/api/sync/disable'){

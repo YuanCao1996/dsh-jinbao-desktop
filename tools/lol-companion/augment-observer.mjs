@@ -13,13 +13,22 @@ export function createAugmentObserver(names, emit) {
     reset(){current=[];history=[];round=0;misses=0;pending='';confirmations=0;slots=[];},
     observe(frame){
       if(!frame?.foreground || !frame.available)return;
-      const found=(frame.lines??[]).map(line=>({...line,name:catalog.get(normalize(line.text))})).filter(line=>line.name);
+      const lines=frame.lines??[];
+      const found=lines.map(line=>({...line,name:catalog.get(normalize(line.text))})).filter(line=>line.name);
+      // Windows OCR can wrap a card title into two lines. Join only nearby
+      // lines in the same card; never fuzzy-match an arbitrary description.
+      for(const a of lines)for(const b of lines){
+        if(b.y<=a.y||b.y-a.y>frame.height*0.07||Math.abs(a.x-b.x)>frame.width*0.07)continue;
+        const name=catalog.get(normalize(a.text+b.text));
+        if(name)found.push({...a,name});
+      }
       let candidates=[];
       for(const seed of found){
-        const band=found.filter(line=>Math.abs(line.y-seed.y)<frame.height*0.07).sort((a,b)=>a.x-b.x);
+        const band=found.filter(line=>Math.abs(line.y-seed.y)<frame.height*0.07).sort((a,b)=>a.x-b.x).filter((line,i,all)=>!all.slice(0,i).some(old=>old.name===line.name&&Math.abs(old.x-line.x)<frame.width*0.07));
         if(band.length===3&&new Set(band.map(line=>line.name)).size===3&&band[1].x-band[0].x>frame.width*0.12&&band[2].x-band[1].x>frame.width*0.12){candidates=band.map(line=>line.name);break;}
       }
       if(candidates.length!==3){
+        pending='';confirmations=0;
         if(found.length>=2){misses=0;return;}
         if(++misses>=3&&current.length){emit({kind:'augment_offer_closed',roll:round});current=[];history=[];slots=[];pending='';confirmations=0;}
         return;

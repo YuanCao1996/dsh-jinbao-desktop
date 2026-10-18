@@ -36,3 +36,11 @@ test('host recovery waits for startup, retries failures, and recovers a later cr
   time = 31000;
   assert.equal(recovery.shouldStart(false), true);
 });
+
+test('a running configured host defers upgrades instead of blocking; normal shutdown allows installation',async()=>{
+ const {installationAction}=await import('../installation.mjs');
+ assert.equal(installationAction({current:false,hostRunning:true,pluginInstalled:true}),'defer');
+ assert.equal(installationAction({current:false,hostRunning:false,pluginInstalled:true}),'install');
+ assert.equal(installationAction({current:false,hostRunning:true,pluginInstalled:false}),'wait');
+ assert.equal(installationAction({current:true,hostRunning:true,pluginInstalled:true}),'reuse');
+});

@@ -1,6 +1,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
+import {createPhoneAdb} from './phone-adb.mjs';
 
 const exec = promisify(execFile);
 export function parseDevices(output) {
@@ -9,8 +10,11 @@ export function parseDevices(output) {
 }
 
 // Only this instance's children are stopped. Do not use taskkill by process name.
-export function createSupervisor({ root, stateDir, run = exec, spawnImpl = spawn, now = Date.now, signal }) {
+export function createSupervisor({ root, stateDir, run = exec, spawnImpl = spawn, now = Date.now, signal, getPhoneEnabled=async()=>false, adbController }) {
   const adb = join(root, 'runtime/platform-tools/adb.exe');
+  const phoneAdb=adbController??createPhoneAdb({adb,run,spawnImpl});
+  const shutdown=new AbortController();
+  const runSignal=signal?AbortSignal.any([signal,shutdown.signal]):shutdown.signal;
   const children = new Map();
   const retries = new Map();
   const stoppingChildren = new Set();
@@ -48,13 +52,16 @@ export function createSupervisor({ root, stateDir, run = exec, spawnImpl = spawn
       ticking = true;
       try {
         start('lol', 'tools/lol-companion/collector.mjs');
+        if(!await getPhoneEnabled()){stop('wzry');phoneSerial=null;await phoneAdb.close();return {status:'waiting',message:'等待进入游戏'};}
+        if(closed)return {status:'stopped'};
         let devices;
         try {
-          const result = await run(adb, ['devices'], { windowsHide: true, timeout: 5000, maxBuffer: 8192, signal });
+          const result = await phoneAdb.run(['devices'], { windowsHide: true, timeout: 5000, maxBuffer: 8192, signal:runSignal });
           devices = parseDevices(result.stdout);
         } catch {
           stop('wzry'); return { status: 'adb-unavailable', message: '等待进入游戏；手机采集暂不可用' };
         }
+        if(closed)return {status:'stopped'};
         const authorized = devices.filter(device => device.status === 'device');
         if (authorized.length !== 1) {
           stop('wzry');
@@ -65,24 +72,25 @@ export function createSupervisor({ root, stateDir, run = exec, spawnImpl = spawn
         if (phoneSerial !== serial) { stop('wzry'); phoneSerial = serial; }
         let appRunning = false;
         try {
-          const result = await run(adb, ['-s', serial, 'shell', 'pidof', 'com.example.jinbao'], { windowsHide: true, timeout: 5000, maxBuffer: 8192, signal });
+          const result = await phoneAdb.run(['-s', serial, 'shell', 'pidof', 'com.example.jinbao'], { windowsHide: true, timeout: 5000, maxBuffer: 8192, signal:runSignal });
           appRunning = /^\d+(?:\s+\d+)*\s*$/.test(result.stdout.trim());
         } catch { /* Phone disconnected, or app not running. */ }
         if (closed) return { status: 'stopped' };
-        if (appRunning) start('wzry', 'tools/desktop-release/capture-wzry.mjs', { JINBAO_ADB_SERIAL: serial });
+        if (appRunning) start('wzry', 'tools/desktop-release/capture-wzry.mjs', { JINBAO_ADB_SERIAL: serial, ...phoneAdb.env() });
         else stop('wzry');
         return { status: appRunning ? 'connected' : 'app-required', message: appRunning ? '等待进入游戏' : '手机已连接，请打开金宝 APP 并启动游戏识别' };
       } finally { ticking = false; }
     },
     async close() {
-      closed = true;
+      closed = true;shutdown.abort();
       for (const key of children.keys()) stop(key);
-      if (!stoppingChildren.size) return;
+      if (!stoppingChildren.size){await phoneAdb.close();return;}
       await Promise.all([...stoppingChildren].map(child => new Promise(resolve => {
         if (!stoppingChildren.has(child)) return resolve();
         const timer = setTimeout(resolve, 5500);
         child.once('exit', () => { clearTimeout(timer); resolve(); });
       })));
+      await phoneAdb.close();
     },
   };
 }

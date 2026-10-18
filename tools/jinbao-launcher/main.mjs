@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createSupervisor } from './supervisor.mjs';
-import { installationCurrent, createHostRecovery } from './installation.mjs';
+import { installationCurrent, installationAction, createHostRecovery } from './installation.mjs';
 import { createUpdater } from './update.mjs';
 
 const exec = promisify(execFile);
@@ -18,6 +18,7 @@ const ps = join(process.env.SystemRoot ?? 'C:/Windows', 'System32/WindowsPowerSh
 const platform = join(root, 'tools/jinbao-launcher/platform.ps1');
 const shutdown = new AbortController();
 const updater = createUpdater({ root, stateDir });
+let pluginUpdatePending=false;
 async function psRun(script, extra = []) {
   return exec(ps, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...extra], { windowsHide: true, timeout: 60000, maxBuffer: 65536 });
 }
@@ -29,7 +30,7 @@ async function publish(phase, message, extra = {}) {
   try { update = JSON.parse(await readFile(join(stateDir, 'updates/status.json'), 'utf8')); } catch { /* First launch. */ }
   let version=null;
   try{version=JSON.parse(await readFile(join(root,'manifest.json'),'utf8')).version;}catch{}
-  await writeFile(path + '.tmp', JSON.stringify({ phase, message, version, ...extra, update, updatedAt: Date.now() }));
+  await writeFile(path + '.tmp', JSON.stringify({ phase, message, version, pluginUpdatePending, ...extra, update, updatedAt: Date.now() }));
   await rename(path + '.tmp', path);
 }
 export function settingsAddress(value) {
@@ -74,7 +75,7 @@ async function main() {
     try { if (await exists(join(stateDir, 'overlay-stopped'))) stop(); }
     finally { checkingStop = false; }
   }, 250);
-  const supervisor = createSupervisor({ root, stateDir, signal: shutdown.signal });
+  const supervisor = createSupervisor({ root, stateDir, signal: shutdown.signal, getPhoneEnabled:async()=>{try{return JSON.parse(await readFile(join(stateDir,'phone-capture.json'),'utf8')).enabled===true;}catch{return false;}} });
   let updateTask = updater.check(shutdown.signal);
   const updateTimer = setInterval(() => { updateTask = updater.check(shutdown.signal); }, 6 * 60 * 60 * 1000);
   let updateHealthy = false;
@@ -107,13 +108,16 @@ async function main() {
         await publish('install-required', '首次使用需要安装 DeepSeek Harness，安装后金宝会自动继续。', { action: 'download', actionLabel: '下载 DSH' });
         await sleep(2000); continue;
       }
+      if(pluginUpdatePending&&!host.running)installed=false;
       if (!installed) {
         const current = await installationCurrent(root, profiles);
-        if (!current && host.running) {
-          await publish('restart-required', '请保存工作并关闭 DSH，金宝将自动配置并重新启动。');
+        const action=installationAction({current,hostRunning:host.running,pluginInstalled:await exists(join(profiles,'node_modules/dsh-onboarding/plugin.mjs'))});
+        pluginUpdatePending=action==='defer';
+        if (action==='wait') {
+          await publish('install-required', '首次安装金宝扩展，请在方便时退出 DSH 一次，金宝将完成配置。');
           await sleep(2000); continue;
         }
-        if (!current) {
+        if (action==='install') {
           await publish('starting', '正在安装金宝扩展…');
           await psRun(join(root, 'tools/desktop-release/install.ps1'), ['-NodePath', process.execPath, '-ProfilesRoot', profiles, '-StateDir', stateDir, '-KeepOverlay']);
         }

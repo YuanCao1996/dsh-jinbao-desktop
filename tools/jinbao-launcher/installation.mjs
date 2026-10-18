@@ -2,6 +2,11 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const plugins = ['dsh-onboarding', 'dsh-coach-server', 'dsh-game-services'];
+export function installationAction({current,hostRunning,pluginInstalled}){
+  if(current)return 'reuse';
+  if(!hostRunning)return 'install';
+  return pluginInstalled?'defer':'wait';
+}
 
 // Match the installer's copy filter; compare every shipped module, including new files.
 export async function installationCurrent(root, profiles) {

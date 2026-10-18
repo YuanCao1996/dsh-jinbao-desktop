@@ -170,11 +170,16 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     if(token)try{account=await remote('/desktop/account',token);}catch(e){accountError=e.status??503;}
     let update=null;
     try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<8192){const saved=JSON.parse(await readFile(path,'utf8'));update={state:saved.state,version:saved.version,message:saved.message,at:saved.at};}}catch{}
-    let version=null;try{const launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));version=launcher.version??null;}catch{}
-    send(res,200,{...config,version,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    let phoneCaptureEnabled=false;try{phoneCaptureEnabled=JSON.parse(await readFile(join(stateDir,'phone-capture.json'),'utf8')).enabled===true;}catch{}
+    let pluginUpdatePending=false;let version=null;try{const launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));version=launcher.version??null;pluginUpdatePending=launcher.pluginUpdatePending===true;}catch{}
+    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
+   if(req.url==='/api/phone/capture'){
+    if(typeof b.enabled!=='boolean')throw error(400);
+    await locked(async()=>{const path=join(stateDir,'phone-capture.json');await writeFile(path+'.tmp',JSON.stringify({enabled:b.enabled}));await rename(path+'.tmp',path);});send(res,200,{enabled:b.enabled});return;
+   }
    if(req.url==='/api/update/check'){
     let launcher;try{launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));}catch{}
     if(!launcher||Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase))throw error(409);

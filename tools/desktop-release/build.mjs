@@ -23,13 +23,13 @@ async function bundle(name){
  for(const file of walk(dir).filter(f=>f.endsWith('.js')||f.endsWith('.mjs')||f.endsWith('.cjs'))){
   const text=readFileSync(file,'utf8');
   for(const m of text.matchAll(/(?:from\s*|import\s*\(|require\s*\(|import\s*)['"]([^'"]+)['"]/g)){
-   const spec=m[1];if(spec.startsWith('.')||spec.startsWith('/')||spec.startsWith('node:')||!spec.includes('/')){if(!spec.startsWith('.')&&['yaml','chokidar','cosmokit','cordis','schemastery'].includes(spec))await bundle(spec);continue;}
+   const spec=m[1];if(/\s/.test(spec)||!/^(@[\w.-]+\/)?[\w.-]+(?:\/[\w./-]+)?$/.test(spec))continue;if(spec.startsWith('.')||spec.startsWith('/')||spec.startsWith('node:')||!spec.includes('/')){if(!spec.startsWith('.')&&['yaml','chokidar','cosmokit','cordis','schemastery','undici','ipaddr.js'].includes(spec))await bundle(spec);continue;}
    await bundle(spec.startsWith('@')?spec.split('/').slice(0,2).join('/'):spec.split('/')[0]);
   }
  }
 }
 function requireSeparator(){return process.platform==='win32'?'\\':'/';}
-for(const name of ['@deepseek-ai/schemastery','@deepseek-ai/dsh-tools','@deepseek-ai/dsh-session','yaml'])await bundle(name);
+for(const name of ['@deepseek-ai/schemastery','@deepseek-ai/dsh-tools','@deepseek-ai/dsh-session','@deepseek-ai/dsh-web-fetch-http','yaml'])await bundle(name);
 mkdirSync(join(out,'runtime'),{recursive:true});copyFileSync(process.execPath,join(out,'runtime','node.exe'));
 const license=join(dirname(process.execPath),'LICENSE');
 const nodeLicense=existsSync(license)?license:join(root,'third-party/node-LICENSE.txt');

@@ -114,7 +114,9 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     if(!same(req.headers.authorization,'Bearer '+local))throw error(401);
     const diagnostic={at:Date.now(),bytes:0};
     res.once('finish',()=>{void writeFile(join(stateDir,'model-proxy-diagnostics.json'),JSON.stringify({...diagnostic,status:res.statusCode})).catch(()=>{});});
-    const b=await body(req,512*1024,size=>diagnostic.bytes=size);if(!Array.isArray(b.messages))throw error(400);
+    const b=await body(req,1024*1024,size=>diagnostic.bytes=size);if(!Array.isArray(b.messages))throw error(400);
+    const textOnly={...b,messages:b.messages.map(m=>({...m,content:Array.isArray(m.content)?m.content.map(p=>p?.type==='image_url'?{type:'image_url',image_url:{url:'[inline image]'}}:p):m.content}))};
+    if(Buffer.byteLength(JSON.stringify(textOnly))>512*1024)throw error(413);
     diagnostic.messageCount=b.messages.length;diagnostic.toolCount=Array.isArray(b.tools)?b.tools.length:0;diagnostic.systemBytes=Buffer.byteLength(JSON.stringify(b.messages.filter(m=>m.role==='system')));
     if(config.mode==='demo')throw error(409);
     const token=await resolve(config.mode==='byok'?'byok':'cloud');if(!token)throw error(401);
@@ -137,6 +139,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    if(!same(req.headers['x-jinbao-setup'],nonce))throw error(403);
    if(req.headers.origin&&req.headers.origin!=='http://'+expectedHost)throw error(403);
    if(req.url==='/api/overlay'&&req.method==='GET'){send(res,200,overlay.view());return;}
+   if(req.url==='/api/overlay/confirm'&&req.method==='POST'){send(res,200,await overlay.confirm(await body(req,4096)));return;}
    if(['/api/overlay/ask','/api/overlay/refresh'].includes(req.url)&&req.method==='POST'){
     if(!String(req.headers['content-type']).startsWith('application/json'))throw error(400);
     const b=await body(req,8192);

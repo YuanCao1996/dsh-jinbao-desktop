@@ -37,6 +37,9 @@ import { createGameMemory } from './game-memory.js';
 import { registerGameMemoryTools } from './game-memory-tools.js';
 import { dispatchGameChat, buildGameChatMessage } from './chat-bridge.js';
 import { gameModePrompt } from './game-mode-prompt.js';
+import {registerScreenTool} from './screen-tool.js';
+import {cacheSearchProvider,registerGameFetch,relevantGameSource} from './game-web.js';
+import {createAgentStatus} from './agent-status.js';
 
 const name = "coach-server";
 const inject = ["tools", "systemPrompt", "llm", "agentLoop", "sessions", "web", "credentials"];
@@ -814,7 +817,7 @@ function createSearchProvider(ctx, cfg) {
         const rewritten = await rewriteSearchQuery(ctx, cfg, query, signal);
         if (Array.isArray(rewritten) && rewritten.length > 0) {
           // 改写词优先(原长句常含"请问/想了解"等噪音词,Bing 检索效果差)
-          queries = [...rewritten, query].filter((q, i, a) => a.indexOf(q) === i).slice(0, 3);
+          queries = [...rewritten.map(q=>/海克斯大乱斗|ARAM Mayhem/i.test(query)&&!/海克斯大乱斗|ARAM Mayhem/i.test(q)?q+' 海克斯大乱斗 ARAM Mayhem 当前版本':q), query].filter((q, i, a) => a.indexOf(q) === i).slice(0, 3);
         }
       } catch { /* keep raw query */ }
       // 2) Bing RSS 抓取
@@ -834,6 +837,7 @@ function createSearchProvider(ctx, cfg) {
         for (const it of items) {
           if (sources.length >= max) break;
           if (seen.has(it.url)) continue;
+          if(!relevantGameSource(it,query))continue;
           seen.add(it.url);
           sources.push(it);
         }
@@ -928,7 +932,8 @@ function apply(ctx, config) {
   const webSvc = ctx.get("web");
   if (webSvc && typeof webSvc.registerSearchProvider === "function") {
     try {
-      webSvc.registerSearchProvider(createSearchProvider(ctx, cfg));
+      webSvc.registerSearchProvider(cacheSearchProvider(createSearchProvider(ctx,cfg),{readState:async()=>{try{return JSON.parse(await (await import('node:fs/promises')).readFile(joinPath(cfg.sessionCwd,'overlay-state.json'),'utf8'));}catch{return {};}}}));
+      void registerGameFetch(webSvc).catch(()=>console.warn('[coach-server] Chinese web decoder unavailable'));
       console.log(`[coach-server] registered web search provider "${OPENCODE_SEARCH_PROVIDER_ID}"`);
     } catch (error) {
       console.warn(`[coach-server] web search provider register failed: ${error?.message ?? error}`);
@@ -1357,6 +1362,7 @@ function apply(ctx, config) {
       // body: { image: "<本地路径>" } 或 { imageBase64, mediaType }
       // 响应: { ok, data: {game, screen, mode, me, allies, enemies, state, confidence, uncertain}, ms }
       if (req.method === "POST" && path === "/vision/analyze") {
+        if(cfg.coachPreset==='jinbao-game'){sendJson(res,403,{ok:false,error:'use_scoped_agent_screen_tool'});return;}
         const raw = await readBody(req, 20 * 1024 * 1024);
         let body;
         try { body = JSON.parse(raw.toString("utf8")); } catch { sendJson(res, 400, { ok: false, error: "invalid json" }); return; }
@@ -1950,6 +1956,7 @@ function createMonitor(ctx, cfg, resolveGame) {
     const state = { text: null, question: job.body?.chat ? job.body.question : '' };
     liveReplyState = state; // This source's coach_reply tool writes into its own turn.
     liveTextSink.lastText = ""; // 修复 #4:本回合 assistant 文本从零开始记录
+    const publishStatus=createAgentStatus(cfg.sessionCwd,job.body?.game??cfg.defaultGame,job.body?.match_id??cfg.monitorMatch);publishStatus('start');
     // Phase 2 广播:回合开始时告诉所有 /coach/stream 客户端"思考中"
     sseHub.write("phase", { name: "thinking", text: `回合开始(${job.event?.key ?? "?"})` });
     // 工具广播:监听 tools/result(host 层按 agent 过滤),推工具帧
@@ -1959,6 +1966,7 @@ function createMonitor(ctx, cfg, resolveGame) {
       const name = typeof exec.name === "string" ? exec.name : (exec.tool ?? "tool");
       if (name !== "coach_reply") {
         sseHub.write("tool", { name, arguments: exec.arguments ?? exec.args ?? null });
+        publishStatus('tool',name);
       }
     });
     return new Promise((resolve, reject) => {
@@ -2026,6 +2034,7 @@ function createMonitor(ctx, cfg, resolveGame) {
             try { diagLog(`✓ 回合完成轨迹: ${trace}`, cfg); } catch {}
             try { updateLiveState({ turnTrace: trace }, cfg); } catch {}
             resolve(text); // 回合真正结束,取 coach_reply 记录的文本
+            publishStatus('complete');
           }
         }
         } catch (error) {
@@ -2042,6 +2051,7 @@ function createMonitor(ctx, cfg, resolveGame) {
         mark(`send 已返回, agent.status=${agent?.status}`);
       } catch (error) {
         mark(`**send 抛异常**: ${error?.message ?? error}`);
+        publishStatus('complete');
         clearInterval(timer);
         if (offTools) { try { offTools(); } catch {} }
         liveReplyState = null;
@@ -2087,6 +2097,7 @@ function createMonitor(ctx, cfg, resolveGame) {
         if (presets) await presets.mount(agentCtx, cfg.coachPreset);
         configureGameAgent(agentCtx, cfg.coachPreset);
         registerGameMemoryTools(agentCtx, memory, cfg.defaultGame, cfg.monitorMatch, () => liveReplyState?.question ?? '');
+        registerScreenTool(agentCtx,{stateDir:cfg.sessionCwd,game:cfg.defaultGame,match:cfg.monitorMatch});
         // 修复 #2:coach_reply 提交后拒绝同回合的收尾 step(省一次 LLM 往返)
         installReplyStepGuard(agentCtx, liveReplyGuard);
         // 修复 #4:捕获本回合最后一条 assistant 文本(未调 coach_reply 时的兜底播报依据)

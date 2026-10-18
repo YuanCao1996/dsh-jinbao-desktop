@@ -14,6 +14,7 @@ public static class JinbaoOverlayNative {
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X,Y; }
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] public static extern bool SetWindowDisplayAffinity(IntPtr handle,uint affinity);
     [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr handle,int index);
     [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr handle,int index,int value);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr handle,IntPtr after,int x,int y,int w,int h,uint flags);
@@ -66,12 +67,18 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Button x:Name="ActionButton" Content="微信登录" HorizontalAlignment="Left" Visibility="Collapsed"/>
     </StackPanel>
     <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,2,0,4"/>
-    <ScrollViewer x:Name="PageScroll" Grid.Row="3" Background="Transparent" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
+    <DockPanel Grid.Row="3">
+    <StackPanel x:Name="ConfirmationPanel" DockPanel.Dock="Top" Visibility="Collapsed" Margin="4,2,4,6">
+     <TextBlock x:Name="ConfirmationTitle" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap"/>
+     <WrapPanel x:Name="ConfirmationChoices"/>
+    </StackPanel>
+    <ScrollViewer x:Name="PageScroll" Background="Transparent" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
      <StackPanel>
      <TextBlock x:Name="PageText" Text="等待新的游戏日志…" TextWrapping="Wrap" Foreground="#E2E8F0" FontSize="14" LineHeight="24" Margin="4"/>
      <StackPanel x:Name="PlayersTable" Visibility="Collapsed" Margin="4"/>
      </StackPanel>
     </ScrollViewer>
+    </DockPanel>
     <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,8,0,0" Visibility="Collapsed">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBox x:Name="QuestionBox" MaxLength="1000" MinHeight="35" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="8" Background="#111827" Foreground="#F1F5F9" BorderBrush="#536078" ToolTip="Enter 发送；Shift+Enter 换行"/>
@@ -93,12 +100,19 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <TextBlock x:Name="HintText" Text="右下角拖动缩放 · Ctrl+滚轮调整正文" Foreground="#94A3B8" FontSize="10" TextTrimming="CharacterEllipsis" Margin="4,3,18,0"/>
     </StackPanel>
    </Grid>
+   <Grid x:Name="NarrowPanel" Visibility="Collapsed" Background="#01000000">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+    <Canvas x:Name="NarrowCanvas" ClipToBounds="True" Margin="0,4,4,0"><TextBlock x:Name="NarrowText" Foreground="#E2E8F0" FontSize="15" Text="等待新的策略建议…"/></Canvas>
+    <Button x:Name="NarrowExpand" Grid.Column="1" Content="▣" ToolTip="展开大框" Padding="5,0"/>
+    <Button x:Name="NarrowMenu" Grid.Column="2" Content="⋯" ToolTip="显示模式" Padding="5,0"/>
+    <Button x:Name="NarrowClose" Grid.Column="3" Content="×" ToolTip="退出悬浮窗" Padding="5,0"/>
+   </Grid>
    <Thumb x:Name="ResizeGrip" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-8,-8" Cursor="SizeNWSE" ToolTip="拖动调整窗口大小，会记住你的尺寸">
     <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="#01000000"><Path Data="M 7,22 L 22,7 M 14,22 L 22,14 M 21,22 L 22,21" Stroke="#93C5FD" StrokeThickness="2"/></Grid></ControlTemplate></Thumb.Template>
    </Thumb>
    <Grid x:Name="Bubble" Visibility="Collapsed" Background="#01000000" Cursor="SizeAll">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-    <TextBlock Text="金宝" Foreground="#93C5FD" FontSize="14" VerticalAlignment="Center" ToolTip="点击展开；按住拖动"/>
+    <TextBlock x:Name="BubbleLabel" Text="金宝" Foreground="#93C5FD" FontSize="14" VerticalAlignment="Center" ToolTip="点击展开；按住拖动"/>
     <Button x:Name="BubbleClose" Grid.Column="1" Content="×" Padding="4,0" Margin="0" ToolTip="退出悬浮窗"/>
    </Grid>
   </Grid>
@@ -112,6 +126,8 @@ $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
 foreach($name in @('ResizeGrip','AppearancePanel','FontSlider','FontText')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('ConfirmationPanel','ConfirmationTitle','ConfirmationChoices')){$controls[$name]=$window.FindName($name)}
+$script:confirmationId=''
 $script:renderedTab=$null
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
@@ -167,7 +183,9 @@ function Set-Collapsed([bool]$on){
   $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
   $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
  }
- $script:collapsed=$on;Set-PointerMode $true
+ $script:collapsed=$on
+ if($script:displayMode){if($on){$script:displayMode='silent'}elseif($script:displayMode -eq 'silent'){$script:displayMode='large'};Save-DisplayMode}
+ Set-PointerMode $true
 }
 function Save-Preferences {
  $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value);bodyFontSize=[Math]::Round($controls.FontSlider.Value)} | ConvertTo-Json -Compress
@@ -219,7 +237,7 @@ function Resize-Window([double]$dx,[double]$dy){
  $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
 }
 function Save-Bounds {
- $bounds=@{left=$window.Left;top=$window.Top;width=$(if($script:collapsed){$script:expandedWidth}else{$window.Width});height=$(if($script:collapsed){$script:expandedHeight}else{$window.Height})}|ConvertTo-Json -Compress
+ $bounds=@{left=$window.Left;top=$window.Top;width=$(if($script:collapsed -or $script:displayMode -eq 'narrow'){$script:expandedWidth}else{$window.Width});height=$(if($script:collapsed -or $script:displayMode -eq 'narrow'){$script:expandedHeight}else{$window.Height})}|ConvertTo-Json -Compress
  [IO.File]::WriteAllText($boundsFile,$bounds,[Text.UTF8Encoding]::new($false))
 }
 $controls.ResizeGrip.Add_DragDelta({param($sender,$eventArgs) Resize-Window $eventArgs.HorizontalChange $eventArgs.VerticalChange})
@@ -253,6 +271,7 @@ function Update-Page {
  if($script:snapshot){
   $value=[string]$script:snapshot.($script:tab)
   $controls.PageText.Text=if($value){$value}else{'等待此页面的数据…'}
+  if(Get-Command Set-HighlightedText -ErrorAction SilentlyContinue){Set-HighlightedText $controls.PageText $controls.PageText.Text}
  }
  $tableVisible=$script:tab -eq 'players' -and $null -ne $script:snapshot.playerRows -and @($script:snapshot.playerRows).Count -gt 0
  $controls.PlayersTable.Visibility=if($tableVisible){'Visible'}else{'Collapsed'}
@@ -281,6 +300,7 @@ function Update-Page {
  $script:renderedTab=$script:tab
 }
 function Set-Tab([string]$name){
+ if($name -ne 'chat' -and $script:speechJob){Stop-Job $script:speechJob;Remove-Job $script:speechJob -Force;$script:speechJob=$null}
  if($name -eq 'stats'){$name='players'}
  $script:tab=$name
  foreach($button in $controls.Tabs.Children){$button.Background=if($button.Tag -eq $name){'#2563EB'}else{'#29364E'}}
@@ -304,10 +324,27 @@ function Update-State {
   $changed=(!$script:snapshot -or !$script:renderedTab -or [string]$next.($script:tab) -ne [string]$script:snapshot.($script:tab))
   $enteredSelection=$next.phase -eq 'ChampSelect' -and (!$script:snapshot -or $script:snapshot.phase -ne 'ChampSelect')
   $script:snapshot=$next
+  $confirmation=$next.confirmation
+  $confirmId=if($confirmation){[string]$confirmation.id}else{''}
+  if($confirmId -ne $script:confirmationId){
+   $script:confirmationId=$confirmId;$controls.ConfirmationChoices.Children.Clear()
+   $controls.ConfirmationPanel.Visibility=if($confirmId){'Visible'}else{'Collapsed'}
+   if($confirmId){
+    $controls.ConfirmationTitle.Text=[string]$confirmation.title+'（推荐靠前，按实际选择确认）'
+    foreach($option in $confirmation.options){
+     $choice=New-Object Windows.Controls.Button;$choice.Content=[string]$option.label;$choice.Tag=[string]$option.name;$choice.FontSize=11
+     $choice.Add_Click({param($sender,$e) Start-Request 'confirm' @{id=$script:confirmationId;name=[string]$sender.Tag}})
+     $controls.ConfirmationChoices.Children.Add($choice)|Out-Null
+    }
+    $skip=New-Object Windows.Controls.Button;$skip.Content='都不是 / 暂不确认';$skip.FontSize=11
+    $skip.Add_Click({Start-Request 'confirm' @{id=$script:confirmationId;dismiss=$true}});$controls.ConfirmationChoices.Children.Add($skip)|Out-Null
+   }
+  }
   if($enteredSelection){Set-Tab 'players'}
   $controls.TitleText.Text=[string]$next.title
   $controls.TimeText.Text=if($next.phase -eq 'ChampSelect'){'正在选择英雄'}elseif($next.gameTime -and $next.gameTime -ne '等待对局'){'对局 '+$next.gameTime+$(if($next.ended){' · 已结束'}else{''})}else{'等待对局'}
   $controls.SummaryText.Text=[string]$next.summary
+  if($next.status -and !$script:job){$controls.HintText.Text=[string]$next.status}
   if($changed){Update-Page}
  }catch{}
  try{
@@ -345,6 +382,7 @@ function Update-State {
  }catch{}
 }
 function Start-Request([string]$route,[hashtable]$payload){
+ if($route -eq 'confirm'){Start-Confirmation $payload;return}
  if($script:job){$controls.HintText.Text='正在处理上一个请求…';return}
  try{
   $url=[IO.File]::ReadAllText((Join-Path $StateDir 'settings-link.txt')).Trim()
@@ -387,7 +425,7 @@ $controls.ActionButton.Add_Click({
  }
 })
 $controls.SettingsButton.Add_Click({
- if($SelfTest){$script:testResult.settings=$controls.SettingsButton.ContextMenu.Items.Count -eq 2;return}
+ if($SelfTest){$script:testResult.settings=$controls.SettingsButton.ContextMenu.Items.Count -ge 2;return}
  $controls.SettingsButton.ContextMenu.PlacementTarget=$controls.SettingsButton
  $controls.SettingsButton.ContextMenu.IsOpen=$true
 })
@@ -427,7 +465,7 @@ function Update-Drag([double]$x,[double]$y,[bool]$pressed){
  }
 }
 function Test-PointerHotzone([Windows.Point]$screenPoint) {
- $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.ChatPanel,$controls.ResizeGrip)}
+ $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.ChatPanel,$controls.ResizeGrip,$controls.ConfirmationPanel,$controls.NarrowPanel)}
  foreach($target in $targets){
   if(!$target.IsVisible){continue}
   $local=$target.PointFromScreen($screenPoint)
@@ -449,6 +487,7 @@ $hook=[Windows.Interop.HwndSourceHook]{
 $window.Add_SourceInitialized({
  $script:windowHandle=(New-Object Windows.Interop.WindowInteropHelper($window)).Handle
  $script:source=[Windows.Interop.HwndSource]::FromHwnd($script:windowHandle);$script:source.AddHook($hook)
+ [JinbaoOverlayNative]::SetWindowDisplayAffinity($script:windowHandle,0x11)|Out-Null
  $script:hotkeyRegistered=[JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,701,$(if($SelfTest){7}else{3}),$(if($SelfTest){123}else{74}))
  Set-Interaction $script:interactiveMode
  if(!$SelfTest){
@@ -461,10 +500,11 @@ $window.Add_SourceInitialized({
  }
 })
 $timer=New-Object Windows.Threading.DispatcherTimer;$timer.Interval=[TimeSpan]::FromMilliseconds(1000)
-$timer.Add_Tick({Update-State})
+$timer.Add_Tick({Update-State;Update-OverlayPlayback})
 $pointerTimer=New-Object Windows.Threading.DispatcherTimer;$pointerTimer.Interval=[TimeSpan]::FromMilliseconds(40)
 $pointerTimer.Add_Tick({Pointer-Tick})
 $window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
+. (Join-Path $PSScriptRoot 'overlay-modes.ps1')
 Set-Tab $PreviewTab;Update-State
 try{
  if($PreviewPath){
@@ -563,6 +603,23 @@ try{
     Update-State
     $script:testResult.selectionAutoOpens=$script:tab -eq 'players' -and $controls.TimeText.Text -eq '正在选择英雄'
     $script:testResult.gameTime=$controls.TimeText.Text
+    Set-DisplayMode 'narrow';$window.UpdateLayout()
+    $script:testResult.narrowMode=$controls.NarrowPanel.Visibility -eq 'Visible' -and $controls.Expanded.Visibility -eq 'Collapsed' -and $window.Height -eq 54
+    $lines=@(Split-Subtitle ('安妮现在先清线，等队友先手，再根据强化选择下一件装备。'*4) 180)
+    $script:testResult.subtitleSplits=$lines.Count -gt 2 -and ($lines -join '') -eq ('安妮现在先清线，等队友先手，再根据强化选择下一件装备。'*4)
+    $script:playbackQueue.Add([pscustomobject]@{id='native-test';at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();text='安妮先清线，选择适合当前阵容的强化。'})
+    Playback-Tick;$script:lineStarted-=10000;Playback-Tick
+    $script:testResult.subtitleAdvances=$script:subtitleIndex -gt 0 -or !$script:activePlayback
+    Set-DisplayMode 'silent';$window.UpdateLayout();$script:testResult.silentMode=$script:collapsed -and $controls.Bubble.Visibility -eq 'Visible'
+    Set-DisplayMode 'large';$window.UpdateLayout();$script:testResult.largeRestored=$controls.Expanded.Visibility -eq 'Visible' -and !$script:collapsed -and $window.Height -ge 220
+    $selectionFixture.confirmation=@{id='test-confirm';title='刚才选了哪个海克斯？';options=@(@{name='乙';label='优先推荐 · 乙'},@{name='甲';label='甲'},@{name='丙';label='丙'})}
+    [IO.File]::WriteAllText($stateFile,($selectionFixture|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false));Update-State
+    $script:testResult.confirmationVisible=$controls.ConfirmationPanel.Visibility -eq 'Visible' -and $controls.ConfirmationChoices.Children.Count -eq 4 -and $controls.ConfirmationChoices.Children[0].Tag -eq '乙'
+    Show-QuickConfirmation $selectionFixture.confirmation
+    $script:testResult.quickConfirmationBuilt=$quickConfirm.Child.Child.Children.Count -eq 5 -and $quickConfirm.Child.Child.Children[1].Tag.name -eq '乙'
+    $script:snapshot=[pscustomobject]@{keywords=@('安妮','残疫');summary='安妮'};Set-HighlightedText $controls.PageText '安妮下一件考虑残疫'
+    $script:testResult.keywordHighlight=$controls.PageText.Inlines.Count -gt 1 -and $controls.PageText.Text -eq '安妮下一件考虑残疫'
+    $script:testResult.voiceInputPresent=$mic.Content -eq '语音'
     $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.closed=$script:closing
    });$testing.Start()
@@ -577,6 +634,10 @@ try{
  }
 }finally{
  $timer.Stop();$pointerTimer.Stop()
+ if($modeClock){$modeClock.Stop()}
+ if($quickConfirm){$quickConfirm.IsOpen=$false}
+ foreach($ownedJob in @($script:confirmationJob,$script:speechJob)){if($ownedJob){Stop-Job $ownedJob -ErrorAction SilentlyContinue;Remove-Job $ownedJob -Force -ErrorAction SilentlyContinue}}
+ if($script:synth){$script:synth.SpeakAsyncCancelAll();$script:synth.Dispose()}
  if($script:job){Stop-Job $script:job -ErrorAction SilentlyContinue;Remove-Job $script:job -Force -ErrorAction SilentlyContinue}
  if($script:tray){$script:tray.Visible=$false;$script:tray.Dispose()}
  if($script:hotkeyRegistered){[JinbaoOverlayNative]::UnregisterHotKey($script:windowHandle,701) | Out-Null}

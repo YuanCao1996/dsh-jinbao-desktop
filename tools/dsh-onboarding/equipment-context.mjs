@@ -5,12 +5,13 @@ export function trackAugmentRound(state,event,previousOwned) {
     const id=event.roll??state.offerRound??state.augmentRounds.length+1;
     let round=state.augmentRounds.find(r=>r.id===id);
     if(!round){round={id,options:[],confirmed:[],recommended:null};state.augmentRounds.push(round);}
-    round.options=offerNames(state.offers);round.closed=false;round.recommended=null;
+    round.options=offerNames(state.offers);round.closed=false;round.recommended=null;round.dismissed=false;
     state.augmentRounds=state.augmentRounds.slice(-12);
   }
   if(event.kind==='augment_offer_closed'){
-    const round=state.augmentRounds.find(r=>r.id===(event.roll??state.offerRound));if(round)round.closed=true;
+    const round=state.augmentRounds.find(r=>r.id===(event.roll??state.offerRound));if(round){round.closed=true;round.closedAt=Number(event.t)||Date.now();}
   }
+  if(event.kind==='augment_confirmation_dismissed'){const round=state.augmentRounds.find(r=>r.id===event.roll);if(round)round.dismissed=true;}
   const added=state.ownedAugments.filter(n=>!previousOwned.includes(n));
   if(added.length){
     const rounds=[...state.augmentRounds].reverse();
@@ -61,5 +62,6 @@ export function createEquipmentCoach({getState,agentChat,save,now=Date.now,debou
       }).finally(()=>{busy=false;});
     },
     close(){closed=true;},
+    invalidate(){lastAt=-Infinity;},
   };
 }

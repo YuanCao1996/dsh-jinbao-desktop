@@ -22,7 +22,7 @@ installCoachPreset(doc, all);
 const targets=[
 {id:'jinbao-onboarding',name:'dsh-onboarding',config:{port:3084,stateDir:state}},
 {id:'site-assistant',name:'dsh-game-services',config:{mode:'remote',serviceBaseUrl:'https://api.jinbaoai.top',tokenEnv:'JINBAO_SERVICE_TOKEN'}},
-{id:'coach-server',name:'dsh-coach-server',config:{port:3081,provider:'jinbao-local',model:'jinbao-strategy',watchDir:join(state,'logs'),broadcastFile:join(state,'logs','coach_broadcasts.jsonl'),diagLogFile:join(state,'coach-server.log'),sessionCwd:state,coachPreset:COACH_PRESET,defaultGame:'wzry',visionEnabled:false,watchEnabled:true,liveTimeoutMs:120000}}
+{id:'coach-server',name:'dsh-coach-server',config:{port:3081,provider:'jinbao-local',model:'jinbao-strategy',watchDir:join(state,'logs'),broadcastFile:join(state,'logs','coach_broadcasts.jsonl'),diagLogFile:join(state,'coach-server.log'),sessionCwd:state,coachPreset:COACH_PRESET,defaultGame:'wzry',visionEnabled:true,watchEnabled:true,liveTimeoutMs:120000}}
 ];
 for(const target of targets){
  const found=all.filter(n=>n?.get?.('id')===target.id);if(found.length>1)throw Error('Duplicate plugin id: '+target.id);
@@ -30,9 +30,9 @@ for(const target of targets){
  else doc.contents.add(doc.createNode({insert:[target]}));
 }
 function override(id,config){let node=all.find(n=>n?.get?.('id')===id);if(!node){node=doc.createNode({id,config:{}});doc.contents.add(node);}const previous=node.get('config')?.toJSON?.()??{};node.set('config',{...previous,...config});return node;}
-override('web',{searchProvider:'opencode-go-search',fetchProvider:'http'});
+override('web',{searchProvider:'opencode-go-search',fetchProvider:'jinbao-http'});
 const llm=all.find(n=>n?.get?.('id')==='llm-pi-ai')?.get('config')?.toJSON?.()??{};
-override('llm-pi-ai',{providers:{...(llm.providers??{}),'jinbao-local':{displayName:'金宝游戏模型',api:'openai-completions',apiKeyEnv:'JINBAO_LOCAL_ACCESS_KEY',baseURL:'http://127.0.0.1:3084/v1',defaultInput:['text'],compat:{supportsStore:false,supportsDeveloperRole:false,supportsReasoningEffort:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'},models:[{id:'jinbao-strategy',name:'游戏策略（本机设置路由）',contextWindow:32768,maxTokens:2048}]}}});
+override('llm-pi-ai',{providers:{...(llm.providers??{}),'jinbao-local':{displayName:'金宝游戏模型',api:'openai-completions',apiKeyEnv:'JINBAO_LOCAL_ACCESS_KEY',baseURL:'http://127.0.0.1:3084/v1',defaultInput:['text','image'],compat:{supportsStore:false,supportsDeveloperRole:false,supportsReasoningEffort:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'},models:[{id:'jinbao-strategy',name:'游戏策略（本机设置路由）',contextWindow:32768,maxTokens:2048}]}}});
 let presets=all.find(n=>n?.get?.('id')==='agent-presets');
 if(presets)presets.set('disabled',false);else doc.contents.add(doc.createNode({id:'agent-presets',disabled:false}));
 if(args.includes('--dry-run')){console.log(doc.toString());process.exit(0);}

@@ -1,4 +1,4 @@
-import { mkdir, readdir, stat, open, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readdir, stat, open, readFile, writeFile, rename, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WZRY_ADAPTER } from '../dsh-coach-server/lib/adapters/wzry.js';
 import { projectWzryFacts } from '../dsh-coach-server/lib/adapters/wzry-facts.js';
@@ -8,6 +8,7 @@ import { projectProgressEvent,observeEquipment } from './progress-events.mjs';
 import { createGameMemory } from '../dsh-coach-server/lib/game-memory.js';
 import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
 import {trackAugmentRound,updateAugmentRecommendations,createEquipmentCoach} from './equipment-context.mjs';
+import {augmentConfirmation} from './augment-confirmation.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -33,7 +34,7 @@ export function applyOverlayEvent(state, event, file) {
   const at = eventTimestamp(event);
   if (event.broadcast) {
     if(at<state.matchStartedAt||(event.game&&state.game&&event.game!==state.game)||(event.match&&event.match!==state.match))return;
-    const reply = { at, text: text(event.broadcast) };
+    const reply = { at, text: text(event.broadcast), priority:Number.isInteger(event.priority)?Math.max(0,Math.min(2,event.priority)):0 };
     if (!state.broadcasts.some(r => r.at === at && r.text === reply.text)) {
       state.broadcasts.push(reply); state.broadcasts.sort((a, b) => a.at - b.at);
       state.broadcasts = state.broadcasts.slice(-12);
@@ -208,7 +209,9 @@ export function overlayView(state, knowledge = {}) {
     : state.augmentCaptureReason==='capture_failed'?'游戏画面暂未采集成功，正在自动重试；日志中的强化信息仍会同步。':'等待识别游戏内三选一面板';
   const heroStats = (state.game==='lol'?'大乱斗英雄样本胜率\n':'英雄样本胜率\n') + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?tierText(hero.tier):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
   return {
-    game: state.game, match: state.match, gameTime: clock(state.gameSeconds), phase:state.phase, ended: state.ended,
+    game: state.game, mode:state.mode, match: state.match, gameTime: clock(state.gameSeconds), phase:state.phase, ended: state.ended,
+    playback:state.broadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0})),
+    keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
     summary: [me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
     advice: ['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:''].filter(Boolean).join(' · ')+'\n\n'+current+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
@@ -218,6 +221,7 @@ export function overlayView(state, knowledge = {}) {
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
     players: (teamWinRates?teamWinRates+'\n五名英雄样本胜率的算术平均，非本局预测\n\n':'')+heroStats+'\n\n双方英雄胜率（按胜率从高到低）\n'+(roster.join('\n\n') || '等待双方英雄数据。'),
     teamWinRates,
+    confirmation:augmentConfirmation(state,rows),
     heroStats,
     playerRows,
     stats: heroStats+'\n\n'+roster.join('\n'),
@@ -225,7 +229,7 @@ export function overlayView(state, knowledge = {}) {
     events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：装备购买、海克斯选择、团灭和重要目标。',
     chat: state.chat.map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
     chatRows: state.chat.slice(-12).map(r => ({role:r.role,origin:r.origin??'',text:r.text})),
-    status: knowledge.loading ? '正在检索推荐…' : '', updatedAt: state.at,
+    status: state.agentStatus|| (knowledge.loading ? '正在检索推荐…' : ''), updatedAt: state.at,
   };
 }
 
@@ -336,6 +340,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       for (const observed of observedStates) await memory.snapshot(observed);
       await memory.flush();
       state=router.state();
+      try{const progress=JSON.parse(await readFile(join(stateDir,'agent-status.json'),'utf8'));state.agentStatus=progress.game===state.game&&progress.match===state.match&&Date.now()-progress.at<30000?String(progress.label??''):'';}catch{state.agentStatus='';}
       if(state.match&&restoredChat){
         if(restoredChat.game===state.game&&restoredChat.match===state.match&&restoredChat.matchStartedAt===state.matchStartedAt){
           state.chat=restoredChat.chat.slice(-20);restoredChat=null;
@@ -358,6 +363,14 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   const timer = setInterval(scan, pollMs); timer.unref();
   return {
     view: () => overlayView(state, knowledge), refresh,
+    async confirm({id,name,dismiss=false}={}){
+      const prompt=augmentConfirmation(state,knowledge.rows??[]);
+      if(!prompt||id!==prompt.id||(!dismiss&&!prompt.options.some(o=>o.name===name)))throw Object.assign(Error('确认已过期或选项已变化'),{status:409});
+      const event={game:state.game,match:state.match,t:Date.now(),roll:prompt.round,...(dismiss?{kind:'augment_confirmation_dismissed'}:{kind:'augment_picked',who:'self',augment:name,source:'user-confirmed',confidence:'high',time:state.gameSeconds})};
+      await appendFile(join(logs,'lol-user-confirmations.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
+      router.apply(event,'lol-user-confirmations.jsonl');equipmentCoach.invalidate();await flush();equipmentCoach.tick();
+      return {confirmed:!dismiss};
+    },
     async ask(question, topic, metadata = {}) {
       if (busy) throw Object.assign(Error('教练正在回复'), { status: 409 });
       if (typeof question !== 'string' || !question.trim() || question.length > 1000) throw Object.assign(Error('问题格式不正确'), { status: 400 });

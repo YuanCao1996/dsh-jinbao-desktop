@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {limitedJson} from '../dsh-game-services/client.mjs';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const fingerprint=token=>createHash('sha256').update(token).digest('hex');
-export async function createPhoneChat({stateDir,deviceId,getToken,view,ask,serviceBaseUrl,fetchImpl=fetch,enabled=()=>true,pollMs=3000}){
+export async function createPhoneChat({stateDir,deviceId,getToken,view,ask,serviceBaseUrl,fetchImpl=fetch,enabled=()=>true,pollMs=3000,allowEmail=false}){
   const file=join(stateDir,'phone-chat-receipt.json');
   let receipt=null,closed=false,busy=false,task=Promise.resolve(),nextAttempt=0;
   try{receipt=JSON.parse(await readFile(file,'utf8'));if(receipt?.status==='running')receipt={...receipt,status:'failed',error:'desktop_restarted'};}catch{}
@@ -21,7 +21,7 @@ export async function createPhoneChat({stateDir,deviceId,getToken,view,ask,servi
     if(closed||busy||!enabled()||Date.now()<nextAttempt)return;
     busy=true;
     try{
-      const token=await getToken();if(!/^jd_[a-f0-9]{64}$/.test(token??''))return;
+      const token=await getToken();if(!(allowEmail?/^j[cd]_[a-f0-9]{64}$/:/^jd_[a-f0-9]{64}$/).test(token??''))return;
       if(receipt&&receipt.account!==fingerprint(token)){receipt=null;await rm(file,{force:true});}
       if(!receipt){
         const {request}=await remote('next',token);if(!request)return;

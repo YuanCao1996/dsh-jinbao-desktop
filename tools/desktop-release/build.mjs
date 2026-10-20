@@ -41,7 +41,6 @@ for(const name of ['adb.exe','AdbWinApi.dll','AdbWinUsbApi.dll','NOTICE.txt'])co
 copyFileSync(join(root,'LICENSE'),join(out,'LICENSE'));
 writeFileSync(join(out,'start-jinbao.vbs'),'Option Explicit\r\nDim shell, fs, root, command\r\nSet shell = CreateObject("WScript.Shell")\r\nSet fs = CreateObject("Scripting.FileSystemObject")\r\nroot = fs.GetParentFolderName(WScript.ScriptFullName)\r\ncommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & root & "\\tools\\jinbao-launcher\\start.ps1" & Chr(34)\r\nshell.Run command, 0, False\r\n');
 writeFileSync(join(out,'开始使用.cmd'),'@echo off\r\nwscript.exe "%~dp0start-jinbao.vbs"\r\n');
-copyFileSync(join(root,'tools/desktop-release/menu.cmd'),join(out,'高级维护.cmd'));
 copyFileSync(join(root,'docs/QUICKSTART.md'),join(out,'README.md'));
 const files=walk(out,true).map(f=>({path:f.slice(out.length+1).replaceAll('\\','/'),bytes:statSync(f).size,sha256:createHash('sha256').update(readFileSync(f)).digest('hex')}));
 writeFileSync(join(out,'manifest.json'),JSON.stringify({version:JSON.parse(readFileSync(join(root,'package.json'))).version,node:process.version,packages:[...packages],files},null,2));

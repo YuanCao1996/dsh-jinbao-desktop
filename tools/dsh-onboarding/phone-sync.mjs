@@ -14,7 +14,8 @@ export function phoneSnapshot(view,now=Date.now()){
   out.matchActive=!!view.match&&!view.ended&&view.gameTime!=='等待对局'&&now-view.updatedAt<30000;
   return out;
 }
-export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl,fetchImpl=fetch,pollMs=3000,now=Date.now}){
+export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl,fetchImpl=fetch,pollMs=3000,now=Date.now,allowEmail=false}){
+  const validToken=token=>(allowEmail?/^j[cd]_[a-f0-9]{64}$/:/^jd_[a-f0-9]{64}$/).test(token??'');
   const file=join(stateDir,'sync-device.json'),preferences=join(stateDir,'sync-preferences.json');
   let device;
   try{device=JSON.parse(await readFile(file,'utf8'));}catch{}
@@ -35,7 +36,7 @@ export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl
     busy=true;
     try{
       const token=await getToken();
-      if(!/^jd_[a-f0-9]{64}$/.test(token??'')){current={...current,linked:false,state:'unlinked',message:'绑定微信账号后，可在手机查看电脑对局'};return;}
+      if(!validToken(token)){current={...current,linked:false,state:'unlinked',message:'邮箱登录后，可开启手机同步'};return;}
       current={...current,linked:true};
       if(!enabled){current={...current,state:'disabled',message:'手机同步已关闭'};return;}
       const snapshot=phoneSnapshot(view(),now()),hash=createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
@@ -43,21 +44,21 @@ export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl
       if(hash===lastHash&&now()-lastSent<10000)return;
       await request('PUT',token,{deviceName:device.name,snapshot});
       if(closed)return;
-      lastHash=hash;lastSent=now();current={...current,state:'connected',lastSyncedAt:lastSent,message:'已同步，手机登录同一微信账号即可查看'};
+      lastHash=hash;lastSent=now();current={...current,state:'connected',lastSyncedAt:lastSent,message:'已同步，手机使用同一邮箱登录网页即可查看'};
     }catch(error){
       nextAttempt=now()+([401,403].includes(error.status)?60000:15000);
-      current={...current,state:'error',message:[401,403].includes(error.status)?'微信绑定已失效，请重新绑定':'同步连接失败，正在自动重试'};
+      current={...current,state:'error',message:[401,403].includes(error.status)?'同步账号已失效，请重新登录邮箱':'同步连接失败，正在自动重试'};
     }finally{busy=false;}
   }
   const run=()=>{if(!busy)task=tick();return task;};
   const timer=setInterval(run,pollMs);timer.unref();void run();
-  const chat=typeof ask==='function'?await createPhoneChat({stateDir,deviceId:device.id,getToken,view,ask,serviceBaseUrl,fetchImpl,enabled:()=>enabled&&!closed,pollMs}):null;
+  const chat=typeof ask==='function'?await createPhoneChat({stateDir,deviceId:device.id,getToken,view,ask,serviceBaseUrl,fetchImpl,enabled:()=>enabled&&!closed,pollMs,allowEmail}):null;
   return {
     status:()=>({...current,enabled}),tick:run,
     async enable(){enabled=true;await writeFile(preferences,JSON.stringify({enabled:true}),{mode:0o600});nextAttempt=0;lastHash='';return run();},
     async disable(){
       enabled=false;await writeFile(preferences,JSON.stringify({enabled:false}),{mode:0o600});await task.catch(()=>{});
-      const token=await getToken();if(/^jd_[a-f0-9]{64}$/.test(token??''))await request('DELETE',token).catch(()=>{});
+      const token=await getToken();if(validToken(token))await request('DELETE',token).catch(()=>{});
       current={...current,enabled:false,state:'disabled',message:'手机同步已关闭'};
     },
     async close(){closed=true;clearInterval(timer);await task.catch(()=>{});await chat?.close();},

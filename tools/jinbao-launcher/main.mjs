@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, writeFile, rename, access, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, access, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -82,6 +82,7 @@ async function main() {
   let installed = false;
   const recovery = createHostRecovery();
   let loginOpened = false;
+  let settingsOpened = false;
   let loginPolling = false;
   let lastAction = Date.now();
   let nextHostCheck = 0;
@@ -109,8 +110,10 @@ async function main() {
         await sleep(2000); continue;
       }
       if(pluginUpdatePending&&!host.running)installed=false;
+      const repairRequested=await exists(join(stateDir,'repair-pending.json'));
+      if(repairRequested&&!host.running)installed=false;
       if (!installed) {
-        const current = await installationCurrent(root, profiles);
+        const current = !repairRequested && await installationCurrent(root, profiles);
         const action=installationAction({current,hostRunning:host.running,pluginInstalled:await exists(join(profiles,'node_modules/dsh-onboarding/plugin.mjs'))});
         pluginUpdatePending=action==='defer';
         if (action==='wait') {
@@ -120,6 +123,8 @@ async function main() {
         if (action==='install') {
           await publish('starting', '正在安装金宝扩展…');
           await psRun(join(root, 'tools/desktop-release/install.ps1'), ['-NodePath', process.execPath, '-ProfilesRoot', profiles, '-StateDir', stateDir, '-KeepOverlay']);
+          await rm(join(stateDir,'repair-pending.json'),{force:true});
+          await writeFile(join(stateDir,'maintenance-status.json'),JSON.stringify({state:'complete',message:'扩展已安装或修复完成。'}));
         }
         if (stopping) break;
         installed = true;
@@ -137,6 +142,7 @@ async function main() {
       }
       try {
         const { link, value } = await status();
+        if(!settingsOpened){await psRun(platform,['-Action','open','-Target',link]);settingsOpened=true;loginOpened=true;}
         if (value.coachReady && !updateHealthy) { await updater.healthy().catch(() => {}); updateHealthy = true; }
         if (loginPolling) {
           try { const result = await localRequest(link, 'login/poll'); if (result.status === 'approved') loginPolling = false; }
@@ -146,14 +152,9 @@ async function main() {
         if (!value.coachReady) await publish('starting', '等待教练服务就绪…');
         else if (value.mode !== 'byok' && !value.account) {
           await publish(value.accountError && value.accountError !== 401 ? 'connection-error' : 'login-required',
-            value.accountError && value.accountError !== 401 ? '云端连接失败，请检查网络后重试' : '请完成金宝登录；已在后台等待游戏', { action: 'login', actionLabel: '微信登录', collection });
+            value.accountError && value.accountError !== 401 ? '云端连接失败，请检查网络后重试' : '请在网页完成邮箱登录；已在后台等待游戏', { action: 'login', actionLabel: '邮箱登录', collection });
           if (!loginOpened || action === 'login') {
-            if (value.wechatEnabled) {
-              const login = await localRequest(link, 'login/wechat/start');
-              const authorize = new URL(login.authorizationUrl);
-              if (authorize.origin !== 'https://open.weixin.qq.com' || authorize.pathname !== '/connect/qrconnect') throw Error('Unexpected authorization link');
-              await psRun(platform, ['-Action', 'open', '-Target', authorize.href]); loginPolling = true;
-            } else await psRun(platform, ['-Action', 'open', '-Target', link]);
+            await psRun(platform, ['-Action', 'open', '-Target', link]);
             loginOpened = true;
           }
         } else if (value.mode === 'cloud' && !value.account?.features?.model) {
@@ -166,7 +167,7 @@ async function main() {
         } else await publish('waiting', collection.message, { collection });
         if (action === 'settings') await psRun(platform, ['-Action', 'open', '-Target', link]);
       } catch {
-        if (!stopping) await publish('service-error', '教练服务尚未就绪，请检查 DSH 是否正常启动，或从高级维护菜单查看诊断。');
+        if (!stopping) await publish('service-error', '教练服务尚未就绪，请检查 DSH 是否正常启动；网页“维护与诊断”可查看状态。');
       }
       await sleep(3000, undefined, { signal: shutdown.signal }).catch(() => {});
     }
@@ -177,5 +178,5 @@ async function main() {
   }
 }
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
-  main().catch(async () => { await publish('error', '启动失败，请从高级维护菜单检查安装与服务状态'); process.exitCode = 1; });
+  main().catch(async () => { await publish('error', '启动失败，请检查 DSH 安装，或在设置网页查看维护与诊断'); process.exitCode = 1; });
 }

@@ -24,6 +24,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  if(!local){local=randomBytes(32).toString('hex');await credentials.set(refs.local,local);}
  let pairing=null,mutation=Promise.resolve();
  let wechat={enabled:false,checkedAt:0};
+ let email={enabled:false,checkedAt:0};
  let nextRenewAttempt=0;
  let nextSyncRenewAttempt=0;
  const locked=fn=>{const next=mutation.then(fn);mutation=next.catch(()=>{});return next;};
@@ -57,6 +58,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   pairing=null;void phoneSync.enable().catch(()=>{});
  }
  async function syncToken(){
+  const cloud=await resolve('cloud');
+  if(cloud?.startsWith('jc_')){
+   try{const profile=await remote('/desktop/account',cloud);if(profile.loginMethod==='email')return cloud;}catch{}
+  }
   let token=await resolve('sync')??await resolve('cloud');
   if(!token?.startsWith('jd_'))return null;
   try{
@@ -104,7 +109,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   },
   search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
  });
- const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
+ const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl,allowEmail:true});
  const server=http.createServer(async(req,res)=>{
   const expectedHost='127.0.0.1:'+server.address().port;
   if(req.headers.host!==expectedHost){send(res,403,{error:'invalid_host'});return;}
@@ -161,6 +166,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     send(res,200,{text:typeof reply?.text==='string'?reply.text.slice(0,2000):'',updatedAt:Number.isFinite(reply?.at)?reply.at:null,game:typeof snapshot.game==='string'?snapshot.game.slice(0,32):null});return;
    }
    if(req.url==='/api/status'&&req.method==='GET'){
+    if(Date.now()-email.checkedAt>60000){try{const capability=await remote('/desktop/auth/email/capabilities');email={enabled:capability.enabled===true,checkedAt:Date.now()};}catch{email={enabled:false,checkedAt:Date.now()};}}
     if(Date.now()-wechat.checkedAt>60000){try{const capability=await remote('/desktop/auth/wechat/capabilities');wechat={enabled:capability.enabled===true,checkedAt:Date.now()};}catch{wechat={enabled:false,checkedAt:Date.now()};}}
     let token=await resolve('cloud');let account=null,accountError=null;
     if(token?.startsWith('jd_'))try{
@@ -181,10 +187,24 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<8192){const saved=JSON.parse(await readFile(path,'utf8'));update={state:saved.state,version:saved.version,message:saved.message,at:saved.at};}}catch{}
     let phoneCaptureEnabled=false;try{phoneCaptureEnabled=JSON.parse(await readFile(join(stateDir,'phone-capture.json'),'utf8')).enabled===true;}catch{}
     let pluginUpdatePending=false;let version=null;try{const launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));version=launcher.version??null;pluginUpdatePending=launcher.pluginUpdatePending===true;}catch{}
-    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,wechatEnabled:wechat.enabled,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    let maintenance=null;try{maintenance=JSON.parse(await readFile(join(stateDir,'maintenance-status.json'),'utf8'));}catch{}
+    let emailDisplay=null;if(account?.loginMethod==='email')try{emailDisplay=JSON.parse(await readFile(join(stateDir,'email-account.json'),'utf8')).display;}catch{}
+    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
+   if(req.url==='/api/maintenance'){
+    if(!['repair','exit'].includes(b.action)||Object.keys(b).some(k=>k!=='action'))throw error(400);
+    await locked(async()=>{
+     if(b.action==='repair'){
+      await writeFile(join(stateDir,'repair-pending.json'),JSON.stringify({at:Date.now()}));
+      await writeFile(join(stateDir,'maintenance-status.json'),JSON.stringify({state:'pending',message:'修复已安排，请保存工作并正常退出 DSH，金宝会自动修复扩展。'}));
+     }else{
+      await writeFile(join(stateDir,'overlay-control.json'),JSON.stringify({action:'exit',at:Date.now()}));
+      await writeFile(join(stateDir,'overlay-stopped'),'closed');
+     }
+    });send(res,202,{message:b.action==='repair'?'修复已安排，请保存工作并正常退出 DSH；不会强制关闭。':'金宝悬浮窗和采集正在退出，DSH 保持运行。'});return;
+   }
    if(req.url==='/api/phone/capture'){
     if(typeof b.enabled!=='boolean')throw error(400);
     await locked(async()=>{const path=join(stateDir,'phone-capture.json');await writeFile(path+'.tmp',JSON.stringify({enabled:b.enabled}));await rename(path+'.tmp',path);});send(res,200,{enabled:b.enabled});return;
@@ -220,6 +240,22 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
      await acceptCloud(result);
      return {status:'approved',nickname:result.nickname,seat:result.seat,seats:result.seats,modelLimit:result.modelLimit};
     }
+    if(req.url==='/api/login/email/send'){
+     if(typeof b.email!=='string'||!['login','bind'].includes(b.purpose??'login'))throw error(400);
+     const result=await remote('/desktop/auth/email/send',b.purpose==='bind'?await resolve('cloud'):null,{email:b.email,purpose:b.purpose??'login'});
+     if(typeof result.challengeId!=='string'||!/^[a-f0-9]{48}$/.test(result.challengeId))throw error(502);
+     const address=b.email.trim();
+     await writeFile(join(stateDir,'email-pending.json'),JSON.stringify({challengeId:result.challengeId,display:address.replace(/^(.).*(@.*)$/,'$1***$2')}),{mode:0o600});
+     return {challengeId:result.challengeId,expiresIn:result.expiresIn,retryAfter:result.retryAfter};
+    }
+    if(req.url==='/api/login/email/verify'){
+     let result;try{result=await remote('/desktop/auth/email/verify',await resolve('cloud'),{challengeId:b.challengeId,code:b.code});}
+     catch(e){if(e.status===401){send(res,401,{error:'验证码错误、已过期或已使用，请重试或重新获取。'});return {emailRejected:true};}if(e.status===409){send(res,409,{error:'该邮箱已绑定其他账号，请直接使用邮箱登录。'});return {emailRejected:true};}throw e;}
+     await acceptCloud(result);
+     try{const pending=JSON.parse(await readFile(join(stateDir,'email-pending.json'),'utf8'));if(pending.challengeId===b.challengeId)await writeFile(join(stateDir,'email-account.json'),JSON.stringify({display:pending.display}),{mode:0o600});}catch{}
+     await rm(join(stateDir,'email-pending.json'),{force:true});
+     return {status:'approved'};
+    }
     if(req.url==='/api/login/code'){
      if(typeof b.activationCode!=='string')throw error(400);
      const activationCode=b.activationCode.trim().toUpperCase();
@@ -252,6 +288,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     }
     throw error(404);
    });
+   if(value?.emailRejected)return;
    if(value?.disableSync){await phoneSync.disable();send(res,200,{disabled:true});return;}
    if(value?.enableSync){await phoneSync.enable();send(res,200,{enabled:true});return;}
    send(res,200,value);

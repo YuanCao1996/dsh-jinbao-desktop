@@ -44,6 +44,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 [xml]$xaml=@'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="金宝策略悬浮窗" Width="580" Height="600" MinWidth="420" MinHeight="220" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="CanResize">
  <Window.Resources>
+  <Style x:Key="SubtitleText" TargetType="TextBlock"><Setter Property="Foreground" Value="#F8FAFC"/><Setter Property="TextWrapping" Value="NoWrap"/><Setter Property="Effect"><Setter.Value><DropShadowEffect Color="Black" BlurRadius="5" ShadowDepth="1" Opacity="0.9"/></Setter.Value></Setter></Style>
   <Style TargetType="Button"><Setter Property="Background" Value="#29364E"/><Setter Property="Foreground" Value="#E2E8F0"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,4"/><Setter Property="Margin" Value="3"/><Setter Property="Cursor" Value="Hand"/></Style>
  </Window.Resources>
  <Border x:Name="MainBorder" Background="#E8172033" BorderBrush="#536078" BorderThickness="1" CornerRadius="14" Padding="12">
@@ -102,10 +103,10 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
    </Grid>
    <Grid x:Name="NarrowPanel" Visibility="Collapsed" Background="#01000000">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-    <Canvas x:Name="NarrowCanvas" ClipToBounds="True" Margin="0,4,4,0"><TextBlock x:Name="NarrowText" Foreground="#E2E8F0" FontSize="15" Text="等待新的策略建议…"/></Canvas>
-    <Button x:Name="NarrowExpand" Grid.Column="1" Content="▣" ToolTip="展开大框" Padding="5,0"/>
-    <Button x:Name="NarrowMenu" Grid.Column="2" Content="⋯" ToolTip="显示模式" Padding="5,0"/>
-    <Button x:Name="NarrowClose" Grid.Column="3" Content="×" ToolTip="退出悬浮窗" Padding="5,0"/>
+    <Canvas x:Name="NarrowCanvas" ClipToBounds="True" Margin="0,2,4,0"><TextBlock x:Name="OutgoingSubtitle" Style="{StaticResource SubtitleText}"/><TextBlock x:Name="PreviousSubtitle" Style="{StaticResource SubtitleText}"/><TextBlock x:Name="NarrowText" Style="{StaticResource SubtitleText}" FontSize="14"/></Canvas>
+    <Button x:Name="NarrowExpand" Grid.Column="1" Content="▣" ToolTip="展开大框" Padding="5,0" VerticalAlignment="Center" Height="28"/>
+    <Button x:Name="NarrowMenu" Grid.Column="2" Content="⋯" ToolTip="显示模式" Padding="5,0" VerticalAlignment="Center" Height="28"/>
+    <Button x:Name="NarrowClose" Grid.Column="3" Content="×" ToolTip="退出悬浮窗" Padding="5,0" VerticalAlignment="Center" Height="28"/>
    </Grid>
    <Thumb x:Name="ResizeGrip" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-8,-8" Cursor="SizeNWSE" ToolTip="拖动调整窗口大小，会记住你的尺寸">
     <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="#01000000"><Path Data="M 7,22 L 22,7 M 14,22 L 22,14 M 21,22 L 22,21" Stroke="#93C5FD" StrokeThickness="2"/></Grid></ControlTemplate></Thumb.Template>
@@ -126,6 +127,7 @@ $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
 foreach($name in @('ResizeGrip','AppearancePanel','FontSlider','FontText')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('NarrowText','PreviousSubtitle','OutgoingSubtitle')){$controls[$name]=$window.FindName($name)}
 foreach($name in @('ConfirmationPanel','ConfirmationTitle','ConfirmationChoices')){$controls[$name]=$window.FindName($name)}
 $script:confirmationId=''
 $script:renderedTab=$null
@@ -170,23 +172,27 @@ function Set-Interaction([bool]$enabled){
  $controls.HintText.Text=if($enabled){'右下角缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 恢复穿透'}else{'右下角拖动缩放 · Ctrl+滚轮调整正文'}
  Set-PointerMode $false
 }
-function Set-Collapsed([bool]$on){
+function Set-Collapsed([bool]$on,[switch]$PreserveMode){
  if($script:collapsed -eq $on){return}
  if($on){
-  $script:expandedWidth=$window.Width;$script:expandedHeight=$window.Height
+  if($script:displayMode -eq 'large'){$script:expandedWidth=$window.Width;$script:expandedHeight=$window.Height}
   $window.MinWidth=0;$window.MinHeight=0;$window.Width=110;$window.Height=52
   $window.Left=$area.Right-$window.Width
   $window.Top=[Math]::Max($area.Top,[Math]::Min($window.Top,$area.Bottom-$window.Height))
   $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed'
+  if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
  }else{
   $window.Width=$script:expandedWidth;$window.Height=$script:expandedHeight
   $window.MinWidth=420;$window.MinHeight=220;$window.ResizeMode='CanResize';$controls.ResizeGrip.Visibility='Visible'
   $controls.Expanded.Visibility='Visible';$controls.Bubble.Visibility='Collapsed'
+  if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
   $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
   $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
  }
  $script:collapsed=$on
- if($script:displayMode){if($on){$script:displayMode='silent'}elseif($script:displayMode -eq 'silent'){$script:displayMode='large'};Save-DisplayMode}
+ if($on){$controls.MainBorder.Padding='8';$controls.MainBorder.BorderThickness=1;Set-BackgroundOpacity}
+ if($script:displayMode -and !$PreserveMode){if($on){$script:displayMode='silent'}else{$script:displayMode='large';$controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1;$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';Set-BackgroundOpacity};Save-DisplayMode}
+ if(!$on -and $PreserveMode -and $script:displayMode -eq 'narrow'){$controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible';$window.ResizeMode='NoResize';Set-NarrowMetrics}
  Set-PointerMode $true
 }
 function Save-Preferences {
@@ -198,7 +204,7 @@ function Save-Preferences {
 function Set-BackgroundOpacity {
  $percent=[Math]::Round($controls.OpacitySlider.Value)
  $color=[Windows.Media.Color]::FromArgb([byte][Math]::Round(255*$percent/100),23,32,51)
- $controls.MainBorder.Background=New-Object Windows.Media.SolidColorBrush($color)
+ $controls.MainBorder.Background=if($script:displayMode -eq 'narrow' -and $script:subtitleMode -and !$script:collapsed){[Windows.Media.Brushes]::Transparent}else{New-Object Windows.Media.SolidColorBrush($color)}
  $controls.OpacityText.Text=([string]$percent)+'%'
 }
 function Set-BodyFontSize {
@@ -206,6 +212,8 @@ function Set-BodyFontSize {
  $controls.PageText.FontSize=$size;$controls.PageText.LineHeight=[Math]::Round($size*1.65)
  $controls.FontText.Text=([string]$size)+' px'
  foreach($child in $controls.PlayersTable.Children){if($child -is [Windows.Controls.Border]){foreach($label in $child.Child.Children){$label.FontSize=[Math]::Max(11,$size-2)}}}
+ foreach($name in @('NarrowText','PreviousSubtitle','OutgoingSubtitle')){if($controls[$name]){$controls[$name].FontSize=$size}}
+ if(Get-Command Set-NarrowMetrics -ErrorAction SilentlyContinue){Set-NarrowMetrics}
 }
 try{
  $preferences=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
@@ -224,7 +232,7 @@ $controls.AccountMenuItem.Header='账号与模型设置'
 $settingsMenu.Items.Add($controls.AppearanceMenuItem) | Out-Null
 $settingsMenu.Items.Add($controls.AccountMenuItem) | Out-Null
 $controls.SettingsButton.ContextMenu=$settingsMenu
-$controls.AppearanceMenuItem.Add_Click({$controls.AppearancePanel.Visibility=if($controls.AppearancePanel.Visibility -eq 'Visible'){'Collapsed'}else{'Visible'}})
+$controls.AppearanceMenuItem.Add_Click({if($script:displayMode -eq 'narrow'){Set-DisplayMode 'large'};$controls.AppearancePanel.Visibility=if($controls.AppearancePanel.Visibility -eq 'Visible'){'Collapsed'}else{'Visible'}})
 $controls.PageScroll.Add_PreviewMouseWheel({param($sender,$eventArgs)
  if(([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Control) -ne 0){
   $controls.FontSlider.Value=[Math]::Max(11,[Math]::Min(22,$controls.FontSlider.Value+[Math]::Sign($eventArgs.Delta)))
@@ -233,6 +241,7 @@ $controls.PageScroll.Add_PreviewMouseWheel({param($sender,$eventArgs)
 })
 function Resize-Window([double]$dx,[double]$dy){
  if($script:collapsed){return}
+ if($script:displayMode -eq 'narrow'){$window.Width=[Math]::Max($window.MinWidth,[Math]::Min($window.Width+$dx,$area.Width-20));$script:narrowWidth=$window.Width;$window.Left=[Math]::Min($window.Left,$area.Right-$window.Width);return}
  $window.Width=[Math]::Max($window.MinWidth,[Math]::Min($window.Width+$dx,$area.Width))
  $window.Height=[Math]::Max($window.MinHeight,[Math]::Min($window.Height+$dy,$area.Height))
  $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
@@ -243,7 +252,7 @@ function Save-Bounds {
  [IO.File]::WriteAllText($boundsFile,$bounds,[Text.UTF8Encoding]::new($false))
 }
 $controls.ResizeGrip.Add_DragDelta({param($sender,$eventArgs) Resize-Window $eventArgs.HorizontalChange $eventArgs.VerticalChange})
-$controls.ResizeGrip.Add_DragCompleted({if(!$SelfTest){Save-Bounds}})
+$controls.ResizeGrip.Add_DragCompleted({if($script:displayMode -eq 'narrow'){Set-NarrowMetrics;Save-DisplayMode};if(!$SelfTest){Save-Bounds}})
 function Add-PlayerTableRow($values,[bool]$heading,[int]$index) {
  $grid=New-Object Windows.Controls.Grid
  foreach($width in @('32','*','90','70')){
@@ -523,6 +532,9 @@ try{
    $testing=New-Object Windows.Threading.DispatcherTimer;$testing.Interval=[TimeSpan]::FromMilliseconds(300)
    $testing.Add_Tick({
     $testing.Stop()
+    $controls.FontSlider.Value=14
+    Set-Tab 'advice'
+    $controls.ConfirmationPanel.Visibility='Collapsed'
     Set-Interaction $false;Set-PointerMode $false
     $script:testResult.clickThrough=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x20) -ne 0
     Set-PointerMode $true
@@ -608,12 +620,12 @@ try{
     $script:testResult.selectionAutoOpens=$script:tab -eq 'players' -and $controls.TimeText.Text -eq '正在选择英雄'
     $script:testResult.gameTime=$controls.TimeText.Text
     Set-DisplayMode 'narrow';$window.UpdateLayout()
-    $script:testResult.narrowMode=$controls.NarrowPanel.Visibility -eq 'Visible' -and $controls.Expanded.Visibility -eq 'Collapsed' -and $window.Height -eq 54
+    $script:testResult.narrowMode=$controls.NarrowPanel.Visibility -eq 'Visible' -and $controls.Expanded.Visibility -eq 'Collapsed' -and $window.Height -ge 2*$script:subtitleRowHeight
     $lines=@(Split-Subtitle ('安妮现在先清线，等队友先手，再根据强化选择下一件装备。'*4) 180)
     $script:testResult.subtitleSplits=$lines.Count -gt 2 -and ($lines -join '') -eq ('安妮现在先清线，等队友先手，再根据强化选择下一件装备。'*4)
     $script:playbackQueue.Add([pscustomobject]@{id='native-test';at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();text='安妮先清线，选择适合当前阵容的强化。'})
-    Playback-Tick;$script:lineStarted-=10000;Playback-Tick
-    $script:testResult.subtitleAdvances=$script:subtitleIndex -gt 0 -or !$script:activePlayback
+    Playback-Tick;$script:lineElapsed=10000;Playback-Tick
+    $script:testResult.subtitleAdvances=$script:subtitleIndex -gt 0 -or $script:playbackPhase -eq 'linger' -or !$script:activePlayback
     Set-DisplayMode 'silent';$window.UpdateLayout();$script:testResult.silentMode=$script:collapsed -and $controls.Bubble.Visibility -eq 'Visible'
     Set-DisplayMode 'large';$window.UpdateLayout();$script:testResult.largeRestored=$controls.Expanded.Visibility -eq 'Visible' -and !$script:collapsed -and $window.Height -ge 220
     $selectionFixture.confirmation=@{id='test-confirm';title='刚才选了哪个海克斯？';options=@(@{name='乙';label='优先推荐 · 乙'},@{name='甲';label='甲'},@{name='丙';label='丙'})}

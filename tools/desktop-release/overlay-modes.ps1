@@ -1,16 +1,19 @@
 ﻿# Display and input policies; the Agent/session implementation remains in DSH.
-foreach($name in @('NarrowPanel','NarrowCanvas','NarrowText','NarrowExpand','NarrowMenu','NarrowClose','BubbleLabel')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('NarrowPanel','NarrowCanvas','NarrowText','NarrowExpand','NarrowMenu','NarrowClose','BubbleLabel','PreviousSubtitle','OutgoingSubtitle')){$controls[$name]=$window.FindName($name)}
+$script:narrowWidth=600.0;
 $script:displayMode='large';$script:subtitleMode=$true;$script:speakEnabled=$false;$script:unread=0
 $script:playbackMatch='';$script:seenPlayback=New-Object 'Collections.Generic.HashSet[string]'
 $script:seenPlaybackOrder=New-Object 'Collections.Generic.Queue[string]'
 $script:playbackQueue=New-Object 'Collections.Generic.List[object]';$script:activePlayback=$null
-$script:subtitleLines=@();$script:subtitleIndex=0;$script:lineStarted=0L;$script:confirmationJob=$null;$script:speechJob=$null;$script:synth=$null
+$script:subtitleLines=@();$script:subtitleIndex=0;$script:confirmationJob=$null;$script:speechJob=$null;$script:synth=$null
 $displayFile=Join-Path $StateDir 'overlay-display.json'
+. (Join-Path $PSScriptRoot 'overlay-playback.ps1')
 $quickConfirm=New-Object Windows.Controls.Primitives.Popup;$quickConfirm.Placement='Bottom';$quickConfirm.PlacementTarget=$controls.NarrowPanel;$quickConfirm.AllowsTransparency=$true;$quickConfirm.StaysOpen=$true
 $script:popupConfirmId=''
 function Show-QuickConfirmation($confirmation){
  $quickConfirm.IsOpen=$false
  if(!$confirmation){$script:popupConfirmId='';return}
+ if($script:displayMode -eq 'narrow' -and $script:collapsed){Wake-NarrowPlayback}
  $script:popupConfirmId=[string]$confirmation.id
  $border=New-Object Windows.Controls.Border;$border.Background='#F0172033';$border.CornerRadius='8';$border.Padding='8';$border.Width=360
  $stack=New-Object Windows.Controls.StackPanel;$title=New-Object Windows.Controls.TextBlock;$title.Text=[string]$confirmation.title;$title.Foreground='#FBBF24';$title.Margin='4';$stack.Children.Add($title)|Out-Null
@@ -23,24 +26,26 @@ function Show-QuickConfirmation($confirmation){
 }
 function Save-DisplayMode {
  if($SelfTest){return}
- [IO.File]::WriteAllText($displayFile,(@{mode=$script:displayMode;subtitle=$script:subtitleMode;speech=$script:speakEnabled}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+ [IO.File]::WriteAllText($displayFile,(@{mode=$script:displayMode;subtitle=$script:subtitleMode;speech=$script:speakEnabled;width=$script:narrowWidth}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
 }
 function Set-DisplayMode([string]$mode){
  if($mode -notin @('large','narrow','silent')){return}
  $quickConfirm.IsOpen=$false;$script:popupConfirmId=''
- $modeClock.Stop();$script:activePlayback=$null;$script:playbackQueue.Clear()
+ $modeClock.Stop()
  if($script:displayMode -eq 'large' -and !$script:collapsed){$script:expandedWidth=$window.Width;$script:expandedHeight=$window.Height}
- if($script:collapsed){Set-Collapsed $false}
+ if($script:collapsed){Set-Collapsed $false -PreserveMode}
  $controls.NarrowPanel.Visibility='Collapsed';$controls.Expanded.Visibility='Visible'
  $window.MinWidth=420;$window.MinHeight=220;$window.Width=$script:expandedWidth;$window.Height=$script:expandedHeight
  $script:displayMode=$mode
+ $controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1;Set-BackgroundOpacity
  if($mode -eq 'narrow'){
   Set-Interaction $false
-  $window.MinWidth=260;$window.MinHeight=40;$window.Width=[Math]::Min(480,$area.Width-20);$window.Height=54;$window.ResizeMode='NoResize'
-  $controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed'
-  $controls.NarrowText.Text='等待新的策略建议…';$controls.NarrowText.Opacity=1
- }elseif($mode -eq 'silent'){Set-Collapsed $true}
- else{$controls.ResizeGrip.Visibility='Visible';$window.ResizeMode='CanResize';$script:unread=0;$controls.BubbleLabel.Text='金宝'}
+  $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible';$controls.ResizeGrip.Visibility='Visible';$controls.ResizeGrip.Cursor='SizeWE';$controls.ResizeGrip.Width=14;$controls.ResizeGrip.Height=14;$controls.ResizeGrip.Margin=0
+  Set-NarrowMetrics;$window.UpdateLayout();$script:playbackLastTick=Get-PlaybackNow
+  if(!$script:activePlayback -and !$script:playbackQueue.Count -and !$script:snapshot.ended){$latest=@($script:snapshot.playback)|Select-Object -Last 1;if($latest){$script:playbackQueue.Add($latest)}}
+  $modeClock.Start()
+ }elseif($mode -eq 'silent'){Set-Collapsed $true -PreserveMode}
+ else{$controls.ResizeGrip.Visibility='Visible';$controls.ResizeGrip.Cursor='SizeNWSE';$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';$window.ResizeMode='CanResize';$script:unread=0;$controls.BubbleLabel.Text='金宝'}
  $window.Left=[Math]::Max($area.Left,[Math]::Min($window.Left,$area.Right-$window.Width))
  Save-DisplayMode
 }
@@ -57,40 +62,6 @@ function Set-HighlightedText($view,[string]$value){
   $view.Inlines.Add($run);$position=$hit.Index+$hit.Length
  }
  if($position -lt $value.Length){$view.Inlines.Add((New-Object Windows.Documents.Run($value.Substring($position))))}
-}
-function Split-Subtitle([string]$value,[double]$width){
- $measure=New-Object Windows.Controls.TextBlock;$measure.FontSize=$controls.NarrowText.FontSize;$measure.FontFamily=$controls.NarrowText.FontFamily
- $lines=New-Object 'Collections.Generic.List[string]';$line='';$elements=[Globalization.StringInfo]::GetTextElementEnumerator($value)
- while($elements.MoveNext()){
-  $part=$elements.GetTextElement();if($part -eq "`n"){if($line){$lines.Add($line);$line=''};continue}
-  $measure.Text=$line+$part;$measure.Measure((New-Object Windows.Size([double]::PositiveInfinity,[double]::PositiveInfinity)))
-  if($line -and $measure.DesiredSize.Width -gt $width){$lines.Add($line);$line=$part}else{$line+=$part}
- }
- if($line){$lines.Add($line)};return $lines.ToArray()
-}
-function Playback-Tick {
- if($script:displayMode -ne 'narrow' -or $script:closing){$modeClock.Stop();return}
- $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();$width=[Math]::Max(120,$controls.NarrowCanvas.ActualWidth)
- if($script:activePlayback -and $now-[double]$script:activePlayback.at -ge 30000){$script:activePlayback=$null}
- if(!$script:activePlayback){
-  while($script:playbackQueue.Count -gt 0){$candidate=$script:playbackQueue[0];$script:playbackQueue.RemoveAt(0);if($now-[double]$candidate.at -lt 30000){$script:activePlayback=$candidate;break}}
-  if(!$script:activePlayback){$modeClock.Stop();$controls.NarrowText.Tag=$null;if($script:subtitleMode){$controls.NarrowText.Text='';$controls.NarrowText.Opacity=0}else{$controls.NarrowText.Text='等待新的策略建议…';[Windows.Controls.Canvas]::SetLeft($controls.NarrowText,0)};return}
-  $script:subtitleLines=@(Split-Subtitle ([string]$script:activePlayback.text) $width);$script:subtitleIndex=0;$script:lineStarted=$now
-  Set-HighlightedText $controls.NarrowText ([string]$script:activePlayback.text);[Windows.Controls.Canvas]::SetLeft($controls.NarrowText,0)
- }
- $elapsed=$now-$script:lineStarted
- if($script:subtitleMode){
-  if(!$script:subtitleLines.Count){$script:activePlayback=$null;return}
-  $line=$script:subtitleLines[$script:subtitleIndex];Set-HighlightedText $controls.NarrowText $line
-  $hold=[Math]::Min(6500,[Math]::Max(2000,$line.Length*150));$controls.NarrowText.Opacity=[Math]::Min(1,$elapsed/180.0)
-  if($elapsed -gt $hold-250){$controls.NarrowText.Opacity=[Math]::Max(0,($hold-$elapsed)/250.0)}
-  if($elapsed -ge $hold){$script:subtitleIndex++;$script:lineStarted=$now;if($script:subtitleIndex -ge $script:subtitleLines.Count){$script:activePlayback=$null}}
- }else{
-  $controls.NarrowText.Opacity=1;$controls.NarrowText.Measure((New-Object Windows.Size([double]::PositiveInfinity,[double]::PositiveInfinity)))
-  $textWidth=$controls.NarrowText.DesiredSize.Width;$distance=[Math]::Max(0,($elapsed-1000)/1000.0*45)
-  if($textWidth -gt $width){[Windows.Controls.Canvas]::SetLeft($controls.NarrowText,-$distance)}
-  if(($textWidth -le $width -and $elapsed -gt 4000)-or($textWidth -gt $width -and $distance -gt $textWidth+10)){$script:activePlayback=$null}
- }
 }
 function Start-Confirmation([hashtable]$payload){
  if($script:confirmationJob){return}
@@ -116,7 +87,7 @@ function Update-OverlayPlayback {
  }
  $key=[string]$script:snapshot.game+':'+[string]$script:snapshot.match
  if($key -ne $script:playbackMatch){
-  $script:playbackMatch=$key;$script:seenPlayback.Clear();$script:seenPlaybackOrder.Clear();$script:playbackQueue.Clear();$script:activePlayback=$null;$script:unread=0
+  $script:playbackMatch=$key;$script:seenPlayback.Clear();$script:seenPlaybackOrder.Clear();Reset-Playback;$script:playbackInitialized=$false;$script:unread=0
   if($script:synth){$script:synth.SpeakAsyncCancelAll()}
   if($script:speechJob){Stop-Job $script:speechJob;Remove-Job $script:speechJob -Force;$script:speechJob=$null;$mic.Content='语音'}
  }
@@ -125,23 +96,24 @@ function Update-OverlayPlayback {
   if(!$message -or !$script:seenPlayback.Add([string]$message.id)){continue}
   $script:seenPlaybackOrder.Enqueue([string]$message.id)
   if($script:seenPlaybackOrder.Count -gt 128){$null=$script:seenPlayback.Remove($script:seenPlaybackOrder.Dequeue())}
-  if($now-[double]$message.at -gt 30000){continue}
-  if($script:displayMode -eq 'silent'){$script:unread++}
+  if(!$script:playbackInitialized -and $now-[double]$message.at -gt 30000){continue}
+  if($script:displayMode -eq 'silent'){$script:unread=[Math]::Min(99,$script:unread+1)}
   if($script:displayMode -eq 'narrow'){
-   if($script:playbackQueue.Count -ge 8){$script:playbackQueue.RemoveAt(0)}
-   if([int]$message.priority -gt 0){$script:playbackQueue.Insert(0,$message);$script:activePlayback=$null}else{$script:playbackQueue.Add($message)};$modeClock.Start()
+   Add-PlaybackMessage $message
   }
   if($script:speakEnabled){try{if(!$script:synth){Add-Type -AssemblyName System.Speech;$script:synth=New-Object Speech.Synthesis.SpeechSynthesizer;$voice=$script:synth.GetInstalledVoices()|Where-Object {$_.VoiceInfo.Culture.Name -like 'zh*'}|Select-Object -First 1;if(!$voice){throw 'Chinese voice unavailable'};$script:synth.SelectVoice($voice.VoiceInfo.Name)};$script:synth.SpeakAsyncCancelAll();$script:synth.SpeakAsync([string]$message.text)|Out-Null}catch{if($script:synth){try{$script:synth.Dispose()}catch{};$script:synth=$null};$script:speakEnabled=$false;$controls.HintText.Text='本机中文语音不可用，已保留文字播报'}}
  }
+ $script:playbackInitialized=$true
  $controls.BubbleLabel.Text=if($script:snapshot.confirmation){'金宝 !'}elseif($script:unread){'金宝 '+$script:unread}else{'金宝'}
  $controls.NarrowExpand.Content=if($script:snapshot.confirmation){'!'}else{'▣'}
  if(!$script:snapshot.confirmation){$quickConfirm.IsOpen=$false;$script:popupConfirmId=''}
  elseif($script:displayMode -eq 'narrow' -and !$script:confirmationJob -and $script:popupConfirmId -ne [string]$script:snapshot.confirmation.id){Show-QuickConfirmation $script:snapshot.confirmation}
+ if($script:displayMode -eq 'narrow' -and !$script:activePlayback -and !$script:playbackQueue.Count -and !$script:snapshot.confirmation){$modeClock.Start()}
 }
-$modeClock=New-Object Windows.Threading.DispatcherTimer;$modeClock.Interval=[TimeSpan]::FromMilliseconds(50);$modeClock.Add_Tick({Playback-Tick})
+$modeClock=New-Object Windows.Threading.DispatcherTimer;$modeClock.Interval=[TimeSpan]::FromMilliseconds(16);$modeClock.Add_Tick({Playback-Tick})
 $modeMenu=New-Object Windows.Controls.MenuItem;$modeMenu.Header='显示与播报'
 foreach($entry in @(@('large','大框'),@('narrow','窄条'),@('silent','静默小球'))){$item=New-Object Windows.Controls.MenuItem;$item.Header=$entry[1];$item.Tag=$entry[0];$item.Add_Click({param($s,$e) Set-DisplayMode ([string]$s.Tag)});$modeMenu.Items.Add($item)|Out-Null}
-$subtitleItem=New-Object Windows.Controls.MenuItem;$subtitleItem.Header='窄条：淡入淡出字幕';$subtitleItem.Add_Click({$script:subtitleMode=$true;Save-DisplayMode;Set-DisplayMode 'narrow'});$modeMenu.Items.Add($subtitleItem)|Out-Null
+$subtitleItem=New-Object Windows.Controls.MenuItem;$subtitleItem.Header='字幕：两行向上推进';$subtitleItem.Add_Click({$script:subtitleMode=$true;Save-DisplayMode;Set-DisplayMode 'narrow'});$modeMenu.Items.Add($subtitleItem)|Out-Null
 $scrollItem=New-Object Windows.Controls.MenuItem;$scrollItem.Header='窄条：横向滚动';$scrollItem.Add_Click({$script:subtitleMode=$false;Save-DisplayMode;Set-DisplayMode 'narrow'});$modeMenu.Items.Add($scrollItem)|Out-Null
 $speechItem=New-Object Windows.Controls.MenuItem;$speechItem.Header='语音播报（本机中文语音）';$speechItem.IsCheckable=$true;$speechItem.Add_Click({$script:speakEnabled=$speechItem.IsChecked;if(!$script:speakEnabled -and $script:synth){$script:synth.SpeakAsyncCancelAll()};Save-DisplayMode});$modeMenu.Items.Add($speechItem)|Out-Null
 $settingsMenu.Items.Add($modeMenu)|Out-Null
@@ -158,4 +130,4 @@ $mic.Add_Click({
  $script:speechJob=Start-Job -ScriptBlock {try{Add-Type -AssemblyName System.Speech;$info=[Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()|Where-Object {$_.Culture.Name -eq 'zh-CN'}|Select-Object -First 1;if(!$info){throw 'Chinese recognizer unavailable'};$recognizer=[Speech.Recognition.SpeechRecognitionEngine]::new($info);try{$recognizer.LoadGrammar((New-Object Speech.Recognition.DictationGrammar));$recognizer.SetInputToDefaultAudioDevice();$result=$recognizer.Recognize([TimeSpan]::FromSeconds(20));@{text=[string]$result.Text}}finally{$recognizer.Dispose()}}catch{@{text=''}}}
  $mic.Content='取消';$controls.HintText.Text='正在听，请说话；完成后可编辑再发送。'
 })
-if(!$SelfTest){try{$savedDisplay=[IO.File]::ReadAllText($displayFile)|ConvertFrom-Json;$script:subtitleMode=$savedDisplay.subtitle -ne $false;$script:speakEnabled=$savedDisplay.speech -eq $true;Set-DisplayMode ([string]$savedDisplay.mode)}catch{}}
+if(!$SelfTest){try{$savedDisplay=[IO.File]::ReadAllText($displayFile)|ConvertFrom-Json;$script:subtitleMode=$savedDisplay.subtitle -ne $false;$script:speakEnabled=$savedDisplay.speech -eq $true;if($savedDisplay.width -ge 320 -and $savedDisplay.width -le 1200){$script:narrowWidth=[double]$savedDisplay.width};Set-DisplayMode ([string]$savedDisplay.mode)}catch{}}

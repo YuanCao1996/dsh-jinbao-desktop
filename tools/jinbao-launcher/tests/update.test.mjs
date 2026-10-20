@@ -51,11 +51,27 @@ test('signed updates download once, activate on the next launch, preserve user d
   await updater.check();assert.equal(f.extractions(),1);
   assert.equal(await readFile(join(f.stateDir,'settings.json'),'utf8'),'private settings stay untouched');
   await createUpdater({...f.options,root:next}).healthy();
+  const result=JSON.parse(await readFile(join(f.stateDir,'updates/result.json')));assert.equal(result.state,'success');assert.equal(result.version,'2.0.0');
+  await createUpdater({...f.options,root:next}).check();
+  assert.equal(JSON.parse(await readFile(join(f.stateDir,'updates/result.json'))).id,result.id);
   assert.equal(await updater.resolve(),next);
   f.setEnvelope(f.envelopeFor({...f.release,version:'1.5.0',url:'https://api.jinbaoai.top/downloads/dsh/v1.5.0/jinbao-desktop-windows.zip'}));
   await updater.check();assert.equal(f.extractions(),1);assert.equal(await updater.resolve(),next);
   await createUpdater({...f.options,root:next}).reject();assert.equal(await updater.resolve(),f.root);
+  assert.equal(JSON.parse(await readFile(join(f.stateDir,'updates/result.json'))).state,'rollback');
   await updater.check();assert.equal(f.extractions(),1);
+});
+
+test('download progress is bounded and cached ready update survives an offline check',async()=>{
+ const f=await fixture();const stages=[];
+ const originalFetch=f.options.fetchImpl,progress=[];let tick=0;f.options.now=()=>tick+=600;
+ f.options.fetchImpl=async url=>url.endsWith('latest.json')?originalFetch(url):{ok:true,body:{async *[Symbol.asyncIterator](){for(const chunk of [f.archive.subarray(0,Math.floor(f.archive.length/2)),f.archive.subarray(Math.floor(f.archive.length/2))]){yield chunk;const status=JSON.parse(await readFile(join(f.stateDir,'updates/status.json')));progress.push(status.percent);}}}};
+ f.options.extract=async(_archive,dest)=>{
+  stages.push(JSON.parse(await readFile(join(f.stateDir,'updates/status.json'))).state);
+  for(const [name,data]of Object.entries(f.files)){const path=join(dest,name);await mkdir(dirname(path),{recursive:true});await writeFile(path,data);}
+ };
+ const updater=createUpdater(f.options);await updater.check();assert.deepEqual(stages,['extracting']);assert.ok(await updater.prepared());assert.equal(progress.length,2);assert.ok(progress[0]>0&&progress[0]<100);assert.equal(progress[1],100);
+ f.options.fetchImpl=async()=>{throw Error('offline');};await createUpdater(f.options).check();assert.equal(JSON.parse(await readFile(join(f.stateDir,'updates/status.json'))).state,'ready');
 });
 
 test('bad signatures, altered downloads and incomplete packages never replace the working entry',async()=>{

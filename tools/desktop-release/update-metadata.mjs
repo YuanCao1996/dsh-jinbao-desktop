@@ -12,6 +12,7 @@ const { version } = JSON.parse(manifestBytes);
 const release = { version,
   url:`https://api.jinbaoai.top/downloads/dsh/v${version}/jinbao-desktop-windows.zip`,
   bytes:(await stat(zip)).size,sha256:hash(await readFile(zip)),manifestSha256:hash(manifestBytes) };
+try{release.notes=(await readFile(new URL('../../docs/RELEASE_V'+version.replaceAll('.','_')+'.md',import.meta.url),'utf8')).slice(0,1800);}catch{}
 await verifyPackage(root,release);
 await writeFile(resolve(output),JSON.stringify(release));
 console.log(JSON.stringify({version,bytes:release.bytes,metadataPrepared:true}));

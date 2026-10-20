@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, writeFile, rename, access, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -28,6 +28,7 @@ async function publish(phase, message, extra = {}) {
   const path = join(stateDir, 'launcher-state.json');
   let update;
   try { update = JSON.parse(await readFile(join(stateDir, 'updates/status.json'), 'utf8')); } catch { /* First launch. */ }
+  try{const result=JSON.parse(await readFile(join(stateDir,'updates/result.json'),'utf8'));if(!result.acknowledged)update={...update,result};}catch{}
   let version=null;
   try{version=JSON.parse(await readFile(join(root,'manifest.json'),'utf8')).version;}catch{}
   await writeFile(path + '.tmp', JSON.stringify({ phase, message, version, pluginUpdatePending, ...extra, update, updatedAt: Date.now() }));
@@ -143,7 +144,17 @@ async function main() {
       try {
         const { link, value } = await status();
         if(!settingsOpened){await psRun(platform,['-Action','open','-Target',link]);settingsOpened=true;loginOpened=true;}
-        if (value.coachReady && !updateHealthy) { await updater.healthy().catch(() => {}); updateHealthy = true; }
+        if(action==='apply-update'){
+          const path=join(stateDir,'updates/apply-status.json');
+          if(value.matchActive||value.updateBlocked){await writeFile(path,JSON.stringify({state:'failed',message:'检测到正在选英雄或对局，未退出金宝。请在对局结束后再安装。',at:Date.now()}));}
+          else if(await updater.prepared()){
+            const request=JSON.parse(await readFile(join(stateDir,'updates/apply-request.json'),'utf8'));
+            await new Promise((accept,reject)=>{const helper=spawn(process.execPath,[join(root,'tools/jinbao-launcher/apply-update.mjs'),'--state',stateDir,'--parent',String(process.pid),'--request',request.id],{detached:true,windowsHide:true,stdio:'ignore'});helper.once('error',reject);helper.once('spawn',()=>{helper.unref();accept();});});
+            await writeFile(join(stateDir,'overlay-control.json'),JSON.stringify({action:'exit',at:Date.now()}));
+            stop();break;
+          }else await writeFile(path,JSON.stringify({state:'failed',message:'没有可安装的已验证更新，请重新检查更新。',at:Date.now()}));
+        }
+        if (value.coachReady && !pluginUpdatePending && !updateHealthy) { try{await updater.healthy();updateHealthy=true;}catch{} }
         if (loginPolling) {
           try { const result = await localRequest(link, 'login/poll'); if (result.status === 'approved') loginPolling = false; }
           catch (error) { if (error.status === 410) loginPolling = false; }

@@ -355,8 +355,8 @@ function Update-State {
   if($now-[double]$launcher.updatedAt -lt 45000 -and $launcher.phase -ne 'stopped'){
    $controls.LauncherText.Text=[string]$launcher.message
    $controls.LauncherText.Visibility=if($launcher.phase -in @('waiting','playing')){'Collapsed'}else{'Visible'}
-   $controls.UpdateText.Text=[string]$launcher.update.message
-   $controls.UpdateText.Visibility=if($launcher.update.state -in @('downloading','ready','failed')){'Visible'}else{'Collapsed'}
+   $controls.UpdateText.Text=if($launcher.update.result){[string]$launcher.update.result.message}else{[string]$launcher.update.message}
+   $controls.UpdateText.Visibility=if($launcher.update.result -or $launcher.update.state -in @('downloading','verifying','extracting','ready','failed')){'Visible'}else{'Collapsed'}
    $controls.ActionButton.Tag=[string]$launcher.action
    $controls.ActionButton.Content=[string]$launcher.actionLabel
    $controls.ActionButton.Visibility=if($launcher.action){'Visible'}else{'Collapsed'}

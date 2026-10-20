@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,readFile,mkdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createSetupServer} from '../server.mjs';
+test('update controls queue only ready updates, cancel the matching waiter, and acknowledge durable result',async t=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'jinbao-update-ui-')),values=new Map();
+ const setup=await createSetupServer({stateDir,port:0,credentials:{resolve:async k=>values.has(k)?{value:values.get(k)}:null,set:async(k,v)=>values.set(k,v),unset:async k=>values.delete(k)},fetchImpl:async()=>Response.json({enabled:true})});t.after(setup.close);
+ const[base,nonce]=setup.url.split('/#');
+ const post=(path,body={})=>fetch(base+'/api/update/'+path,{method:'POST',headers:{'X-Jinbao-Setup':nonce,'Content-Type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await post('apply')).status,409);
+ await mkdir(join(stateDir,'updates'),{recursive:true});
+ await writeFile(join(stateDir,'launcher-state.json'),JSON.stringify({phase:'waiting',updatedAt:Date.now()}));
+ await writeFile(join(stateDir,'updates/status.json'),JSON.stringify({state:'downloading'}));assert.equal((await post('apply')).status,409);
+ await writeFile(join(stateDir,'updates/status.json'),JSON.stringify({state:'ready',version:'2.0.0'}));assert.equal((await post('apply')).status,202);
+ assert.equal(JSON.parse(await readFile(join(stateDir,'launcher-control.json'))).action,'apply-update');
+ const request=JSON.parse(await readFile(join(stateDir,'updates/apply-request.json')));
+ await writeFile(join(stateDir,'updates/apply-status.json'),JSON.stringify({...request,state:'waiting-host'}));assert.equal((await post('cancel')).status,202);
+ assert.equal(JSON.parse(await readFile(join(stateDir,'updates/apply-cancel.json'))).id,request.id);
+ await writeFile(join(stateDir,'updates/result.json'),JSON.stringify({id:'result-1',state:'success',version:'2.0.0'}));
+ assert.equal((await post('ack',{id:'stale'})).status,409);assert.equal((await post('ack',{id:'result-1'})).status,200);
+ assert.equal(JSON.parse(await readFile(join(stateDir,'updates/result.json'))).acknowledged,true);
+});

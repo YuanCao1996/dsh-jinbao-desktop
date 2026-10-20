@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { randomBytes,timingSafeEqual } from 'node:crypto';
+import { randomBytes,timingSafeEqual,randomUUID } from 'node:crypto';
 import { mkdir,readFile,writeFile,rename,readdir,stat,open,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
@@ -94,7 +94,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   let coachReady=false;try{const r=await fetchImpl(coachOrigin+'/coach/state',{signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
   const snapshot=overlay.view();
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
-   activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000};
+   activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000,updateBlocked:!!snapshot.match&&!snapshot.ended&&(snapshot.gameTime!=='等待对局'||snapshot.phase==='ChampSelect')&&Date.now()-snapshot.updatedAt<30000};
  }
  const overlay=await createOverlayService({stateDir,
   agentChat:async request=>{
@@ -184,12 +184,14 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     }catch{ /* A failed renewal does not invalidate an otherwise valid session. */ }
     if(token)try{account=await remote('/desktop/account',token);}catch(e){accountError=e.status??503;}
     let update=null;
-    try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<8192){const saved=JSON.parse(await readFile(path,'utf8'));update={state:saved.state,version:saved.version,message:saved.message,at:saved.at};}}catch{}
+    try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<16384){const saved=JSON.parse(await readFile(path,'utf8'));update=Object.fromEntries(['state','version','currentVersion','message','at','notes','downloadedBytes','totalBytes','percent','bytesPerSecond','failedPhase','retryable'].filter(k=>saved[k]!==undefined).map(k=>[k,saved[k]]));}}catch{}
+    let updateApply=null,updateResult=null;
+    for(const [name,assign]of [['apply-status',v=>{updateApply=v;}],['result',v=>{updateResult=v;}]])try{const path=join(stateDir,'updates',name+'.json');if((await stat(path)).size<16384)assign(JSON.parse(await readFile(path,'utf8')));}catch{}
     let phoneCaptureEnabled=false;try{phoneCaptureEnabled=JSON.parse(await readFile(join(stateDir,'phone-capture.json'),'utf8')).enabled===true;}catch{}
     let pluginUpdatePending=false;let version=null;try{const launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));version=launcher.version??null;pluginUpdatePending=launcher.pluginUpdatePending===true;}catch{}
     let maintenance=null;try{maintenance=JSON.parse(await readFile(join(stateDir,'maintenance-status.json'),'utf8'));}catch{}
     let emailDisplay=null;if(account?.loginMethod==='email')try{emailDisplay=JSON.parse(await readFile(join(stateDir,'email-account.json'),'utf8')).display;}catch{}
-    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
@@ -209,9 +211,28 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     if(typeof b.enabled!=='boolean')throw error(400);
     await locked(async()=>{const path=join(stateDir,'phone-capture.json');await writeFile(path+'.tmp',JSON.stringify({enabled:b.enabled}));await rename(path+'.tmp',path);});send(res,200,{enabled:b.enabled});return;
    }
+   if(req.url==='/api/update/ack'){
+    await locked(async()=>{const path=join(stateDir,'updates/result.json');let result;try{result=JSON.parse(await readFile(path,'utf8'));}catch{throw error(409);}if(result.id!==b.id)throw error(409);await writeFile(path+'.tmp',JSON.stringify({...result,acknowledged:true}));await rename(path+'.tmp',path);});send(res,200,{acknowledged:true});return;
+   }
+   if(req.url==='/api/update/cancel'){
+    let current;try{current=JSON.parse(await readFile(join(stateDir,'updates/apply-status.json'),'utf8'));}catch{}
+    if(current?.state!=='waiting-host'||typeof current.id!=='string')throw error(409);
+    await writeFile(join(stateDir,'updates/apply-cancel.json'),JSON.stringify({id:current.id,at:Date.now()}));send(res,202,{message:'已请求取消自动安装，确认后可从原入口重新打开金宝。'});return;
+   }
+   if(req.url==='/api/update/apply'){
+    const view=overlay.view();if(view.match&&!view.ended&&(view.gameTime!=='等待对局'||view.phase==='ChampSelect')&&Date.now()-view.updatedAt<30000){send(res,409,{error:'正在选英雄或对局，请结束后再安装。后台下载不会影响游戏。'});return;}
+    await locked(async()=>{
+     let launcher,update;try{launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));update=JSON.parse(await readFile(join(stateDir,'updates/status.json'),'utf8'));}catch{throw error(409);}
+     if(Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase)||(update.state!=='ready'&&!launcher.pluginUpdatePending))throw error(409);
+     const request={id:randomUUID(),at:Date.now()};await mkdir(join(stateDir,'updates'),{recursive:true});
+     await writeFile(join(stateDir,'updates/apply-request.json'),JSON.stringify(request));
+     await writeFile(join(stateDir,'updates/apply-status.json'),JSON.stringify({...request,state:'requested',version:update.version,message:'正在安排安装，请稍候…'}));
+     const path=join(stateDir,'launcher-control.json');await writeFile(path+'.tmp',JSON.stringify({action:'apply-update',at:Date.now()}));await rename(path+'.tmp',path);
+    });send(res,202,{message:'已安排更新。金宝会先退出，请保存工作并正常退出 DSH，随后将自动重新启动。'});return;
+   }
    if(req.url==='/api/update/check'){
     let launcher;try{launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));}catch{}
-    if(!launcher||Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase))throw error(409);
+    if(!launcher||Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase)){send(res,409,{error:'金宝启动器未运行，请双击“开始使用”后再检查更新。'});return;}
     const path=join(stateDir,'launcher-control.json');await writeFile(path+'.tmp',JSON.stringify({action:'check-update',at:Date.now()}));await rename(path+'.tmp',path);
     send(res,202,{message:'已请求检查更新，下载完成后下次启动生效。'});return;
    }

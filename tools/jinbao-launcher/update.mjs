@@ -32,6 +32,7 @@ export function verifyRelease(envelope, publicKey) {
   if (release.url !== `https://api.jinbaoai.top/downloads/dsh/v${release.version}/jinbao-desktop-windows.zip` ||
       !Number.isSafeInteger(release.bytes) || release.bytes <= 0 || release.bytes > MAX_ARCHIVE ||
       !/^[a-f0-9]{64}$/.test(release.sha256) || !/^[a-f0-9]{64}$/.test(release.manifestSha256)) throw Error('Invalid release metadata');
+  if(release.notes!==undefined&&(typeof release.notes!=='string'||release.notes.length>4000))throw Error('Invalid release notes');
   return release;
 }
 
@@ -116,15 +117,17 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
   return {
     async check(signal) {
       if (busy) return;
-      busy = true; let archive, staging;
+      busy = true; let archive, staging,phase='checking',currentVersion,targetVersion;
       try {
         const current = JSON.parse(await readFile(join(root,'manifest.json'),'utf8'));
-        await status({state:'checking',version:current.version,message:'正在检查更新…'});
+        currentVersion=current.version;
+        await status({state:'checking',version:current.version,currentVersion,message:'正在检查更新…'});
         const response = await fetchImpl(UPDATE_FEED,{redirect:'error',signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
         const envelope = JSON.parse(await boundedResponse(response,16384));
         const release = verifyRelease(envelope,await key());
+        targetVersion=release.version;
         if (compareVersions(release.version,current.version) <= 0) {
-          await status({state:'current',version:current.version,message:'已是最新版本 '+current.version}); return;
+          await status({state:'current',version:current.version,currentVersion,notes:release.notes,message:'已是最新版本 '+current.version}); return;
         }
         const rejected = await readJson(join(updates,'rejected.json'));
         if (rejected?.version === release.version) {
@@ -132,36 +135,47 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
         }
         const pending = await receipt('pending').catch(()=>null);
         if (pending && compareVersions(pending.release.version,release.version) >= 0) {
-          await status({state:'ready',version:pending.release.version,message:'新版 '+pending.release.version+' 已下载，下次启动自动更新'}); return;
+          await status({state:'ready',version:pending.release.version,currentVersion,notes:pending.release.notes,message:'新版 '+pending.release.version+' 已就绪，可在方便时安装'}); return;
         }
         const active = await receipt('active').catch(()=>null);
         if (active && compareVersions(active.release.version,release.version) >= 0) {
-          await status({state:'ready',version:active.release.version,message:'新版 '+active.release.version+' 已下载，下次启动自动更新'}); return;
+          await status({state:'ready',version:active.release.version,currentVersion,notes:active.release.notes,message:'新版 '+active.release.version+' 已就绪，可在方便时安装'}); return;
         }
         await mkdir(join(updates,'releases'),{recursive:true});
-        await status({state:'downloading',version:release.version,message:'正在后台下载新版 '+release.version});
+        phase='downloading';
+        await status({state:'downloading',version:release.version,currentVersion,downloadedBytes:0,totalBytes:release.bytes,percent:0,notes:release.notes,message:'正在后台下载新版 '+release.version});
         const downloadSignal=AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15*60*1000)]);
         const download = await fetchImpl(release.url,{redirect:'error',signal:downloadSignal});
         if (!download.ok || !download.body) throw Error('Update download failed');
         archive=join(updates,'download-'+randomUUID()+'.zip');
-        const file=await open(archive,'wx'); let count=0; const hash=createHash('sha256');
+        const file=await open(archive,'wx'); let count=0,lastProgress=0; const started=now();const hash=createHash('sha256');
         try {
           for await (const chunk of download.body) {
             count+=chunk.length;if(count>release.bytes)throw Error('Update size mismatch');
             hash.update(chunk);await file.writeFile(chunk);
+            if(now()-lastProgress>=500||count===release.bytes){lastProgress=now();await status({state:'downloading',version:release.version,currentVersion,notes:release.notes,downloadedBytes:count,totalBytes:release.bytes,percent:Math.floor(count/release.bytes*100),bytesPerSecond:Math.round(count/Math.max(.001,(now()-started)/1000)),message:'正在后台下载新版 '+release.version+' · '+Math.floor(count/release.bytes*100)+'%'});}
           }
         } finally { await file.close(); }
+        phase='verifying';
+        await status({state:'verifying',version:release.version,currentVersion,notes:release.notes,message:'下载完成，正在验证更新完整性…'});
         if(count!==release.bytes||hash.digest('hex')!==release.sha256)throw Error('Update checksum mismatch');
         staging=join(updates,'staging-'+randomUUID());
+        phase='extracting';
+        await status({state:'extracting',version:release.version,currentVersion,notes:release.notes,message:'验证通过，正在准备安装文件…'});
         await extract(archive,staging);
         await verifyPackage(staging,release);
         const destination=join(updates,'releases','v'+release.version);
         try { await rename(staging,destination); }
         catch(error) { await verifyPackage(destination,release).catch(()=>{throw error;}); }
         await atomicJson(join(updates,'pending.json'),envelope);
-        await status({state:'ready',version:release.version,message:'新版 '+release.version+' 已下载，下次启动自动更新'});
+        await atomicJson(join(updates,'ready-context.json'),{version:release.version,fromVersion:current.version,notes:release.notes});
+        await status({state:'ready',version:release.version,currentVersion,notes:release.notes,message:'新版 '+release.version+' 已就绪，可在方便时安装'});
       } catch {
-        if(!signal?.aborted)await status({state:'failed',message:'更新检查未完成，继续使用当前版本，下次自动重试'}).catch(()=>{});
+        if(!signal?.aborted){
+          const prepared=await receipt('pending').catch(()=>null);
+          const usable=prepared&&currentVersion&&compareVersions(prepared.release.version,currentVersion)>0;
+          await status(usable?{state:'ready',version:prepared.release.version,currentVersion,notes:prepared.release.notes,message:'本次检查未完成；已下载的新版仍可安装'}:{state:'failed',currentVersion,version:targetVersion,failedPhase:phase,retryable:true,message:{checking:'暂时无法检查更新，当前版本可继续使用。请检查网络后重试。',downloading:'下载未完成，当前版本可继续使用，点击重试重新下载。',verifying:'更新文件验证失败，已丢弃下载，当前版本未受影响。',extracting:'准备更新文件失败，请检查磁盘空间后重试。'}[phase]}).catch(()=>{});
+        }
       } finally {
         if(archive)await unlink(archive).catch(()=>{});
         if(staging) {
@@ -182,6 +196,14 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
       }
       return root;
     },
+    async prepared(){
+      const current=JSON.parse(await readFile(join(root,'manifest.json'),'utf8'));
+      for(const name of ['pending','active']){
+        const candidate=await receipt(name).catch(()=>null),rejected=await readJson(join(updates,'rejected.json'));
+        if(candidate&&candidate.release.version!==rejected?.version&&compareVersions(candidate.release.version,current.version)>=0)return {root:candidate.root,release:candidate.release};
+      }
+      return null;
+    },
     async healthy() {
       const pending=await receipt('pending').catch(()=>null);
       if(pending&&resolve(pending.root)===resolve(root)) {
@@ -189,6 +211,9 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
         if(active)await atomicJson(join(updates,'previous.json'),active);
         await atomicJson(join(updates,'active.json'),pending.envelope);
         await unlink(join(updates,'pending.json')).catch(()=>{});
+        const context=await readJson(join(updates,'ready-context.json'));
+        await atomicJson(join(updates,'result.json'),{id:randomUUID(),state:'success',version:pending.release.version,fromVersion:context?.version===pending.release.version?context.fromVersion:null,notes:pending.release.notes,message:'更新成功，已运行 '+pending.release.version,at:now()});
+        await atomicJson(join(updates,'apply-status.json'),{state:'complete',version:pending.release.version,message:'更新成功，已运行 '+pending.release.version,at:now()});
         await status({state:'current',version:pending.release.version,message:'已更新到 '+pending.release.version});
       }
     },
@@ -197,6 +222,7 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
       await mkdir(updates,{recursive:true});
       await atomicJson(join(updates,'rejected.json'),{version:current.version,at:now()});
       await status({state:'failed',message:'新版启动失败，已回退到原版本'});
+      await atomicJson(join(updates,'result.json'),{id:randomUUID(),state:'rollback',version:current.version,message:'新版 '+current.version+' 启动失败，已自动回退，原有设置保留。',at:now()});
     },
   };
 }

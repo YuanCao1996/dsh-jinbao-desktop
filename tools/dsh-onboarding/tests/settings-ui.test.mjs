@@ -21,4 +21,11 @@ test('settings visibly switches from binding form to signed-in card and back on 
  elements.get('emailCode').value='123456';await elements.get('emailConfirm').onclick();
  assert.equal(elements.get('emailLogin').hidden,true);assert.equal(elements.get('signedIn').hidden,false);assert.ok(elements.get('accountCard').classes.has('success'));assert.match(elements.get('message').textContent,/登录成功/);
  await elements.get('logout').onclick();assert.equal(elements.get('emailLogin').hidden,false);assert.equal(elements.get('signedIn').hidden,true);
+ await vm.runInContext("renderUpdate({version:'2.0.0',update:{state:'downloading',version:'3.0.0',percent:42,downloadedBytes:42,totalBytes:100}})",context);
+ assert.equal(elements.get('updateProgress').value,42);assert.equal(elements.get('updateProgress').hidden,false);assert.equal(elements.get('checkUpdate').disabled,true);
+ await vm.runInContext("renderUpdate({version:'2.0.0',matchActive:true,update:{state:'ready',version:'3.0.0'}})",context);
+ assert.equal(elements.get('applyUpdate').disabled,true);assert.match(elements.get('applyUpdate').textContent,/对局结束/);
+ await vm.runInContext("renderUpdate({version:'3.0.0',update:{state:'current'},updateResult:{id:'done',state:'success',version:'3.0.0',message:'更新成功'}})",context);
+ assert.equal(elements.get('updateNotice').hidden,false);assert.match(elements.get('updateNoticeTitle').textContent,/更新成功/);
+ await vm.runInContext("renderUpdate({version:'3.0.0',updateResult:{state:'success',version:'3.0.0',acknowledged:true}})",context);assert.equal(elements.get('updateNotice').hidden,true);
 });

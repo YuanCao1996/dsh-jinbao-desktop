@@ -11,6 +11,7 @@ import {trackAugmentRound,updateAugmentRecommendations,createEquipmentCoach} fro
 import {augmentConfirmation} from './augment-confirmation.mjs';
 import {teamStrength,TEAM_STRENGTH_NOTE} from './team-strength.mjs';
 import {chatFailureMessage} from './chat-errors.mjs';
+import {suggestOverlayQuestion} from './chat-suggestion.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -236,8 +237,9 @@ export function overlayView(state, knowledge = {}) {
     stats: heroStats+'\n\n'+roster.join('\n'),
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
     events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：装备购买、海克斯选择、团灭和重要目标。',
-    chat: state.chat.map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
-    chatRows: state.chat.slice(-12).map(r => ({role:r.role,origin:r.origin??'',text:r.text})),
+    chat: state.chat.slice(-12).map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
+    chatRows: state.chat.slice(-40).map(r => ({role:r.role,origin:r.origin??'',text:r.text,failed:r.failed===true})),
+    suggestedQuestion: suggestOverlayQuestion(state),
     status: state.agentStatus|| (knowledge.loading ? '正在检索推荐…' : ''), updatedAt: state.at,
   };
 }
@@ -250,7 +252,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   let state=router.state();
   let restoredChat;
   try{const saved=JSON.parse(await readFile(join(stateDir,'overlay-chat.json'),'utf8'));if(saved&&Array.isArray(saved.chat))restoredChat=saved;}catch{}
-  if(restoredChat&&!restoredChat.game&&!restoredChat.match){state.chat=restoredChat.chat.slice(-20);restoredChat=null;}
+  if(restoredChat&&!restoredChat.game&&!restoredChat.match){state.chat=restoredChat.chat.slice(-50);restoredChat=null;}
   let knowledge = {}, knowledgeKey = '', refreshTask = null, refreshQueued = false, scanning = false, closed = false, busy = false;
   let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
   let retryKnowledgeAt=Infinity;
@@ -363,7 +365,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       try{const progress=JSON.parse(await readFile(join(stateDir,'agent-status.json'),'utf8'));state.agentStatus=progress.game===state.game&&progress.match===state.match&&Date.now()-progress.at<30000?String(progress.label??''):'';}catch{state.agentStatus='';}
       if(state.match&&restoredChat){
         if(restoredChat.game===state.game&&restoredChat.match===state.match&&restoredChat.matchStartedAt===state.matchStartedAt){
-          state.chat=restoredChat.chat.slice(-20);restoredChat=null;
+          state.chat=restoredChat.chat.slice(-50);restoredChat=null;
         }
       }
       try {
@@ -401,7 +403,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       const match = state.match, started = state.matchStartedAt;
       const stillCurrent = () => state.match === match && state.matchStartedAt === started;
       const q = { role: 'user', text: question.trim(), origin: metadata.origin === 'phone' ? 'phone' : 'desktop' }; state.chat.push(q);
-      state.chat = state.chat.slice(-20);
+      state.chat = state.chat.slice(-50);
       try {
         await memory.record(state, { kind: 'chat', ...q, gameSeconds: state.gameSeconds }, 'overlay-chat');
         await flush();

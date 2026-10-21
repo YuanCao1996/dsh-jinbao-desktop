@@ -12,6 +12,13 @@ function Update-OverlayComposer {
  $controls.ComposerPlaceholder.Visibility=if($controls.QuestionBox.Text){'Collapsed'}else{'Visible'}
  $controls.SendButton.Content=if($script:job){'思考中'}else{'发送'}
  $controls.SendButton.ToolTip=if($script:job){'教练正在回复，请稍候'}else{'Enter 发送；Shift+Enter 换行'}
+ $suggestion=[string]$script:snapshot.suggestedQuestion
+ $controls.SuggestButton.Visibility=if($suggestion){'Visible'}else{'Collapsed'}
+ $controls.SuggestButton.ToolTip=if($suggestion){$suggestion}else{'当前没有可用建议问题'}
+ $controls.ScreenButton.IsEnabled=!!($script:snapshot.match -and !$script:snapshot.ended)
+ $progress=if($script:job){if($script:snapshot.status){[string]$script:snapshot.status}else{'教练正在分析…'}}else{''}
+ $controls.ChatStatusText.Text=$progress
+ $controls.ChatStatusText.Visibility=if($progress){'Visible'}else{'Collapsed'}
 }
 function Show-OverlayModeMenu {
  $menu=New-Object Windows.Controls.ContextMenu;$menu.Background='#19212A';$menu.Foreground='#E8EEF5';$menu.BorderBrush='#394A59'
@@ -39,7 +46,8 @@ function Update-OverlaySurface([bool]$force=$false){
    foreach($row in $rows){
     $user=$row.role -eq 'user';$card=New-Object Windows.Controls.Border;$card.CornerRadius=10;$card.Padding='12,10';$card.Margin=if($user){'40,0,0,10'}else{'0,0,20,10'};$card.Background=New-OverlaySurfaceBrush $(if($user){'#3F6278'}else{'#293747'});$card.BorderBrush=if($user){'#354C58'}else{'#2B3642'};$card.BorderThickness=1
     $column=New-Object Windows.Controls.StackPanel
-    $speaker=New-OverlayLabel $(if($user){'你'}else{'金宝'}) 11 $(if($user){'#ACBFCE'}else{'#E7BE79'});$speaker.Margin='0,0,0,5';$speaker.FontWeight='SemiBold';$column.Children.Add($speaker)|Out-Null
+    $speakerName=if($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
+    $speaker=New-OverlayLabel $speakerName 11 $(if($row.failed){'#F5AD91'}elseif($user){'#ACBFCE'}else{'#E7BE79'});$speaker.Margin='0,0,0,5';$speaker.FontWeight='SemiBold';$column.Children.Add($speaker)|Out-Null
     $body=New-OverlayLabel ([string]$row.text) $font '#EBF0F5';Set-HighlightedText $body ([string]$row.text);$column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
     $copyMenu=New-Object Windows.Controls.ContextMenu;$copyMenu.Background='#19212A';$copyMenu.Foreground='#E8EEF5';$copyItem=New-Object Windows.Controls.MenuItem;$copyItem.Header='复制这条消息';$copyItem.Tag=[string]$row.text;$copyItem.Add_Click({param($sender,$eventArgs) try{[Windows.Clipboard]::SetText([string]$sender.Tag)}catch{}});$copyMenu.Items.Add($copyItem)|Out-Null;$card.ContextMenu=$copyMenu
    }
@@ -67,6 +75,18 @@ function Update-OverlaySurface([bool]$force=$false){
  if($rich){$controls.PageText.Visibility='Collapsed'}
 }
 $controls.QuestionBox.Add_TextChanged({Update-OverlayComposer})
+[Windows.Controls.Grid]::SetRow($mic,1)
+$controls.SuggestButton.Add_Click({
+ $suggestion=[string]$script:snapshot.suggestedQuestion
+ if(!$suggestion){return}
+ $controls.QuestionBox.Text=$suggestion;$controls.QuestionBox.Focus()|Out-Null
+})
+$controls.ScreenButton.Add_Click({
+ if($script:job){return}
+ $question=$controls.QuestionBox.Text.Trim()
+ $controls.QuestionBox.Text=if($question){'请先查看当前游戏画面，再回答：'+$question}else{'请查看当前游戏画面，结合本局日志说出下一步最重要的决策。'}
+ Send-Question
+})
 $controls.ModeButton.Add_Click({Show-OverlayModeMenu})
 $controls.PageScroll.Add_ScrollChanged({Update-ChatJump})
 $controls.LatestMessageButton.Add_Click({$controls.PageScroll.ScrollToEnd()})

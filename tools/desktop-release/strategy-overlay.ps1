@@ -92,10 +92,16 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
     </ScrollViewer>
     </DockPanel>
     <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,8,0,0" Visibility="Collapsed">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-     <TextBox x:Name="QuestionBox" MaxLength="1000" MinHeight="39" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="8" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
-     <TextBlock x:Name="ComposerPlaceholder" Text="问问教练 · Enter 发送" Foreground="#8E9DAE" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
-     <Button x:Name="SendButton" Grid.Column="1" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="52" FontWeight="SemiBold"/>
+     <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,4">
+      <Button x:Name="SuggestButton" Content="推荐追问" FontSize="11" Padding="8,3" ToolTip="根据本局状态填入一个可回答的问题" Visibility="Collapsed"/>
+      <Button x:Name="ScreenButton" Content="看当前画面" FontSize="11" Padding="8,3" ToolTip="让教练调用画面查看工具后回答"/>
+      <TextBlock x:Name="ChatStatusText" Foreground="#E7BE79" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="280" Margin="8,0,0,0" Visibility="Collapsed"/>
+     </StackPanel>
+     <TextBox x:Name="QuestionBox" Grid.Row="1" MaxLength="1000" MinHeight="39" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="8" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
+     <TextBlock x:Name="ComposerPlaceholder" Grid.Row="1" Text="问问教练 · Enter 发送" Foreground="#8E9DAE" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+     <Button x:Name="SendButton" Grid.Row="1" Grid.Column="1" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="52" FontWeight="SemiBold"/>
     </Grid>
     <StackPanel x:Name="Footer" Grid.Row="5" Margin="0,8,0,0">
      <StackPanel x:Name="AppearancePanel" Visibility="Collapsed">
@@ -135,7 +141,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
-foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','SuggestButton','ScreenButton','ChatStatusText')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
@@ -371,7 +377,8 @@ function Update-State {
   $controls.TitleText.Text=[string]$next.title
   $controls.TimeText.Text=if($next.phase -eq 'ChampSelect'){'正在选择英雄'}elseif($next.gameTime -and $next.gameTime -ne '等待对局'){'对局 '+$next.gameTime+$(if($next.ended){' · 已结束'}else{''})}else{'等待对局'}
   $controls.SummaryText.Text=[string]$next.summary
-  if($next.status -and !$script:job){$controls.HintText.Text=[string]$next.status}
+  if($next.status){$controls.HintText.Text=[string]$next.status}
+  Update-OverlayComposer
   if($changed){Update-Page}
  }catch{}
  try{
@@ -655,9 +662,15 @@ try{
     $script:snapshot=[pscustomobject]@{keywords=@('安妮','残疫');summary='安妮'};Set-HighlightedText $controls.PageText '安妮下一件考虑残疫'
     $script:testResult.keywordHighlight=$controls.PageText.Inlines.Count -gt 1 -and $controls.PageText.Text -eq '安妮下一件考虑残疫'
     $fullAnswer='完整回答内容。'*200
-    $script:snapshot=[pscustomobject]@{chatRows=@(@{role='user';text='怎么打？'},@{role='assistant';text=$fullAnswer});chat='怎么打？'+$fullAnswer;keywords=@()}
+    $script:snapshot=[pscustomobject]@{match='ui-test';suggestedQuestion='这轮海克斯怎么选？';chatRows=@(@{role='user';origin='phone';text='怎么打？'},@{role='assistant';text=$fullAnswer});chat='怎么打？'+$fullAnswer;keywords=@()}
     Set-Tab 'chat';$window.UpdateLayout()
     $script:testResult.chatBubbles=$controls.RichContent.Visibility -eq 'Visible' -and $controls.RichContent.Children.Count -eq 2
+    $script:testResult.phoneMessageSource=$controls.RichContent.Children[0].Child.Children[0].Text -eq '你 · 手机'
+    $script:testResult.suggestionVisible=$controls.SuggestButton.Visibility -eq 'Visible' -and $controls.SuggestButton.ToolTip -eq '这轮海克斯怎么选？'
+    $controls.SuggestButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    $script:testResult.suggestionFillsInput=$controls.QuestionBox.Text -eq '这轮海克斯怎么选？'
+    $controls.QuestionBox.Text=''
+    $script:testResult.screenActionReady=$controls.ScreenButton.IsEnabled -and [Windows.Controls.Grid]::GetRow($mic) -eq 1
     $script:testResult.fullChatMessage=$controls.RichContent.Children[1].Child.Children[1].Text -eq $fullAnswer
     $script:testResult.messageCopyAvailable=$controls.RichContent.Children[1].ContextMenu.Items[0].Tag -eq $fullAnswer
     $controls.FontSlider.Value=18
@@ -673,6 +686,10 @@ try{
     $script:testResult.quickModeSwitch=$script:displayMode -eq 'narrow' -and !$script:subtitleMode
     Set-DisplayMode 'large'
     $script:testResult.voiceInputPresent=$mic.Content -eq '语音'
+    $script:job='ui-only';$selectionFixture.status='已联网搜索，继续分析…'
+    [IO.File]::WriteAllText($stateFile,($selectionFixture|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false));Update-State
+    $script:testResult.toolProgressVisible=$controls.ChatStatusText.Text -eq '已联网搜索，继续分析…' -and $controls.ChatStatusText.Visibility -eq 'Visible'
+    $script:job=$null
     $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.closed=$script:closing
    });$testing.Start()

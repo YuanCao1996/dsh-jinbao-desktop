@@ -79,6 +79,7 @@ test('chat uses authenticated native Agent bridge in both BYOK and cloud modes; 
  const setup=await createSetupServer({stateDir:dir,port:0,credentials,fetchImpl:async(url,opts)=>{
   calls.push({url:String(url),opts});
   if(new URL(url).pathname==='/coach/chat')return Response.json({answer:'等队友先手再进场'});
+  if(new URL(url).pathname==='/v1/chat/completions')return Response.json({choices:[{message:{content:'{"observations":"可见三个海克斯候选","uncertain":[]}'}}]});
   if(new URL(url).pathname==='/site/search')return Response.json({results:[{data:{champion:'锐雯',_type:JSON.parse(opts.body).filter?._type,name:'全凭身法',items:'["星蚀"]',winRate:50}}]});
   return Response.json({choices:[{message:{content:'等队友先手再进场'}}]});
  }});t.after(setup.close);
@@ -96,6 +97,11 @@ test('chat uses authenticated native Agent bridge in both BYOK and cloud modes; 
  const cloudAnswer=await fetch(base+'/api/overlay/ask',{method:'POST',headers,body:JSON.stringify({question:'下一步出装呢？'})});assert.equal(cloudAnswer.status,200);
  assert.equal(calls.filter(c=>c.url==='http://127.0.0.1:3081/coach/chat').length,2);
  assert.equal(calls.some(c=>c.url==='https://api.jinbaoai.top/v1/chat/completions'),false);
+ const jpeg=Buffer.concat([Buffer.from([0xff,0xd8,0xff]),Buffer.alloc(130,7)]).toString('base64');
+ const imageAnswer=await fetch(base+'/api/overlay/ask',{method:'POST',headers,body:JSON.stringify({question:'图中有什么？',image:jpeg})});assert.equal(imageAnswer.status,200);
+ const imageChat=calls.filter(c=>c.url==='http://127.0.0.1:3081/coach/chat').at(-1);
+ assert.equal(JSON.parse(imageChat.opts.body).question,'图中有什么？');
+ assert.match(JSON.parse(imageChat.opts.body).imageObservation.observations,/三个海克斯/);
 });
 
 test('offline logs populate all factual pages without model traffic; split UTF8 is read once complete',async t=>{

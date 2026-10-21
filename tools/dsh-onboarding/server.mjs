@@ -51,18 +51,14 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    await writeFile(join(stateDir,'sync-login.json'),JSON.stringify({expiresAt:Date.now()+result.expiresIn*1000,renewAfter:Date.now()+86400000}));
   }else await rm(join(stateDir,'sync-login.json'),{force:true});
  }
- async function acceptLinkedLogin(result){
+ async function acceptLinkedLogin(result,login=false){
   const current=await resolve('cloud');
   await acceptSync(result);
   // Existing trial/activation billing stays independent of WeChat device association.
-  if(!current?.startsWith('jc_'))await acceptCloud(result);
+  if(login&&!current?.startsWith('jc_'))await acceptCloud(result);
   pairing=null;void phoneSync.enable().catch(()=>{});
  }
  async function syncToken(){
-  const cloud=await resolve('cloud');
-  if(cloud?.startsWith('jc_')){
-   try{const profile=await remote('/desktop/account',cloud);if(profile.loginMethod==='email')return cloud;}catch{}
-  }
   let token=await resolve('sync')??await resolve('cloud');
   if(!token?.startsWith('jd_'))return null;
   try{
@@ -110,7 +106,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   },
   search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
  });
- const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl,allowEmail:true});
+ const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
  const server=http.createServer(async(req,res)=>{
   const expectedHost='127.0.0.1:'+server.address().port;
   if(req.headers.host!==expectedHost){send(res,403,{error:'invalid_host'});return;}
@@ -239,7 +235,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     const path=join(stateDir,'launcher-control.json');await writeFile(path+'.tmp',JSON.stringify({action:'check-update',at:Date.now()}));await rename(path+'.tmp',path);
     send(res,202,{message:'已请求检查更新，下载完成后下次启动生效。'});return;
    }
-   if(req.url==='/api/logout')await phoneSync.disable();
+   if(req.url==='/api/logout'&&(await resolve('sync')??await resolve('cloud'))===await resolve('cloud'))await phoneSync.disable();
    const value=await locked(async()=>{
     if(req.url==='/api/sync/disable'){
      // Avoid calling credential renewal while holding the mutation lock.
@@ -295,19 +291,19 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
      const result=await remote('/desktop/auth/wechat/start',null,{deviceName:hostname().slice(0,80)});
      const authorize=new URL(result.authorizationUrl);
      if(authorize.origin!=='https://open.weixin.qq.com'||authorize.pathname!=='/connect/qrconnect'||authorize.username||authorize.password||typeof result.deviceSecret!=='string'||!Number.isFinite(result.expiresIn))throw error(502);
-     pairing=result;
+     pairing={...result,login:true};
      return {authorizationUrl:authorize.href,expiresIn:result.expiresIn};
     }
     if(req.url==='/api/login/poll'){
      if(!pairing)throw error(410);
      const result=await remote('/desktop/auth/device/poll',null,{deviceSecret:pairing.deviceSecret});
-     if(result.status==='approved'){await acceptLinkedLogin(result);return {status:'approved'};}
+     if(result.status==='approved'){await acceptLinkedLogin(result,pairing.login===true);return {status:'approved'};}
      return {status:'pending'};
     }
     if(req.url==='/api/logout'){
      const token=await resolve('cloud');if(token)await remote('/desktop/auth/logout',token,{});
-     const linked=await resolve('sync');if(linked&&linked!==token)await remote('/desktop/auth/logout',linked,{}).catch(()=>{});
-     await credentials.unset(refs.sync);await rm(join(stateDir,'sync-login.json'),{force:true});
+     const linked=await resolve('sync');
+     if(linked===token){await credentials.unset(refs.sync);await rm(join(stateDir,'sync-login.json'),{force:true});}
      await credentials.unset(refs.cloud);await rm(join(stateDir,'cloud-login.json'),{force:true});nextRenewAttempt=0;pairing=null;return {loggedOut:true};
     }
     throw error(404);

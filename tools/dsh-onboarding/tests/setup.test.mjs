@@ -24,7 +24,7 @@ test('setup guards secrets, pairs, routes BYOK directly and revokes cloud token'
  assert.equal((await request('/api/model',{mode:'cloud'},{Origin:'https://evil.test'})).status,403);
  assert.equal((await request('/v1/chat/completions',{messages:[]})).status,401);
  const start=await (await request('/api/login/start',{})).json();assert.equal(start.userCode,'1234ABCD');assert.ok(!JSON.stringify(start).includes('server-secret'));
- const poll=await(await request('/api/login/poll',{})).json();assert.deepEqual(poll,{status:'approved'});assert.equal(values.get('JINBAO_SERVICE_TOKEN'),'jd_'+'3'.repeat(64));
+ const poll=await(await request('/api/login/poll',{})).json();assert.deepEqual(poll,{status:'approved'});assert.equal(values.get('JINBAO_SYNC_TOKEN'),'jd_'+'3'.repeat(64));assert.equal(values.has('JINBAO_SERVICE_TOKEN'),false);
  assert.equal((await(await request('/api/status')).json()).mode,'cloud');
  assert.equal((await request('/api/model',{mode:'byok',baseUrl:'https://vendor.test/v1',model:'test-model',apiKey:'private-key'})).status,200);
  const persisted=await readFile(join(stateDir,'settings.json'),'utf8');assert.ok(!persisted.includes('private-key'));
@@ -34,8 +34,9 @@ test('setup guards secrets, pairs, routes BYOK directly and revokes cloud token'
  assert.equal((await request('/v1/chat/completions',{messages:[{role:'user',content:'建议'}],model:'wrong'},{Authorization:'Bearer '+local})).status,200);
  const last=calls.at(-1);assert.equal(last.url,'https://vendor.test/v1/chat/completions');assert.equal(last.opts.headers.Authorization,'Bearer private-key');assert.equal(JSON.parse(last.opts.body).model,'test-model');
  assert.equal((await request('/api/model',{mode:'byok',baseUrl:'https://api.jinbaoai.top/v1',model:'x',apiKey:'x'})).status,400);
+ await request('/api/login/code',{activationCode:'JB-'+'A'.repeat(32)});
  assert.equal((await request('/api/model',{mode:'cloud'})).status,200);
- await request('/v1/chat/completions',{messages:[]},{Authorization:'Bearer '+local});assert.equal(calls.at(-1).opts.headers.Authorization,'Bearer jd_'+'3'.repeat(64));
+ await request('/v1/chat/completions',{messages:[]},{Authorization:'Bearer '+local});assert.equal(calls.at(-1).opts.headers.Authorization,'Bearer jc_'+'1'.repeat(64));
  await writeFile(join(stateDir,'coach_live_state.json'),JSON.stringify({game:'lol',lastReply:{text:'先集合',at:123},privateContext:'do-not-return'}));
  const advice=await(await request('/api/advice')).json();assert.deepEqual(advice,{game:'lol',text:'先集合',updatedAt:123});
  await request('/api/logout',{});assert.equal(values.has('JINBAO_SERVICE_TOKEN'),false);

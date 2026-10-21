@@ -1,4 +1,4 @@
-# A message owns its playback cursor until completed, explicitly interrupted by
+﻿# A message owns its playback cursor until completed, explicitly interrupted by
 # urgency, or the match changes. Queue age is not a playback timeout.
 $script:playbackPhase='idle';$script:lineElapsed=0.0;$script:playbackLastTick=0L
 $script:scrollOffset=0.0;$script:scrollEnd=0.0;$script:playbackAccelerated=$false
@@ -110,7 +110,7 @@ function Add-PlaybackMessage($message){
 function Playback-Tick {
  if($script:displayMode -ne 'narrow' -or $script:closing){$modeClock.Stop();return}
  $now=Get-PlaybackNow
- if($settingsMenu.IsOpen -or $quickConfirm.IsOpen -or $script:dragging){$script:playbackLastTick=$now;return}
+ if($settingsMenu.IsOpen -or $quickConfirm.IsOpen -or ($script:overlayModeMenu -and $script:overlayModeMenu.IsOpen) -or $script:dragging){$script:playbackLastTick=$now;return}
  $delta=[Math]::Max(0,$now-$script:playbackLastTick);$script:playbackLastTick=$now
  if(!$script:activePlayback -and $script:playbackQueue.Count){
   $script:activePlayback=$script:playbackQueue[0];$script:playbackQueue.RemoveAt(0);$script:playbackAccelerated=$script:playbackQueue.Count -gt 0

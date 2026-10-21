@@ -42,39 +42,50 @@ $owned=$false
 try{$owned=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$owned=$true}
 if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already running.';exit 0}
 [xml]$xaml=@'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="金宝策略悬浮窗" Width="580" Height="600" MinWidth="420" MinHeight="220" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="CanResize">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="金宝策略悬浮窗" FontFamily="Segoe UI,Microsoft YaHei UI" UseLayoutRounding="True" SnapsToDevicePixels="True" Width="580" Height="600" MinWidth="420" MinHeight="220" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" ShowActivated="False" ResizeMode="CanResize">
  <Window.Resources>
   <Style x:Key="SubtitleText" TargetType="TextBlock"><Setter Property="Foreground" Value="#F8FAFC"/><Setter Property="TextWrapping" Value="NoWrap"/><Setter Property="Effect"><Setter.Value><DropShadowEffect Color="Black" BlurRadius="5" ShadowDepth="1" Opacity="0.9"/></Setter.Value></Setter></Style>
-  <Style TargetType="Button"><Setter Property="Background" Value="#29364E"/><Setter Property="Foreground" Value="#E2E8F0"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8,4"/><Setter Property="Margin" Value="3"/><Setter Property="Cursor" Value="Hand"/></Style>
+  <Style TargetType="Button">
+   <Setter Property="Background" Value="#202B36"/><Setter Property="Foreground" Value="#CBD5E1"/><Setter Property="BorderBrush" Value="#34424F"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="10,5"/><Setter Property="Margin" Value="2"/><Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="ButtonChrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#D6B278"/></Trigger><Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonChrome" Property="Opacity" Value="0.72"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="ButtonChrome" Property="Opacity" Value="0.45"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonChrome" Property="BorderBrush" Value="#E7BE79"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="WindowAction" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="1"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Width" Value="30"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="4"/><Setter Property="FontFamily" Value="Segoe MDL2 Assets"/><Setter Property="FontSize" Value="12"/></Style>
+  <Style TargetType="ContextMenu"><Setter Property="Background" Value="#19212A"/><Setter Property="Foreground" Value="#E8EEF5"/><Setter Property="BorderBrush" Value="#34424F"/><Setter Property="Padding" Value="5"/></Style>
+  <Style TargetType="MenuItem"><Setter Property="Foreground" Value="#E8EEF5"/><Setter Property="Background" Value="#19212A"/><Setter Property="Padding" Value="10,7"/></Style>
+  <Style TargetType="ScrollBar"><Setter Property="Width" Value="7"/><Setter Property="Background" Value="Transparent"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar"><Track x:Name="PART_Track" IsDirectionReversed="True" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" ViewportSize="{TemplateBinding ViewportSize}" Value="{Binding Value,RelativeSource={RelativeSource TemplatedParent},Mode=TwoWay}"><Track.Thumb><Thumb><Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="#566575" CornerRadius="3" Margin="1"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb></Track></ControlTemplate></Setter.Value></Setter></Style>
+  <Style TargetType="TextBox"><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox"><Border x:Name="InputOutline" CornerRadius="8" BorderThickness="1" BorderBrush="{TemplateBinding BorderBrush}" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ScrollViewer x:Name="PART_ContentHost"/></Border><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="InputOutline" Property="BorderBrush" Value="#CBA86C"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
  </Window.Resources>
- <Border x:Name="MainBorder" Background="#E8172033" BorderBrush="#536078" BorderThickness="1" CornerRadius="14" Padding="12">
+ <Border x:Name="MainBorder" Background="#E810151B" BorderBrush="#39434F" BorderThickness="1" CornerRadius="14" Padding="12">
   <Grid>
    <Grid x:Name="Expanded">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Grid x:Name="Header" Background="#01000000" Cursor="SizeAll">
-     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-     <TextBlock x:Name="TitleText" Text="金宝 · 游戏教练" Foreground="#F1F5F9" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/>
-     <Button x:Name="SettingsButton" Grid.Column="1" Content="设置"/>
-     <Button x:Name="CollapseButton" Grid.Column="2" Content="收起"/>
-     <Button x:Name="CloseButton" Grid.Column="3" Content="×" FontSize="19" ToolTip="退出悬浮窗"/>
+     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+     <TextBlock x:Name="TitleText" Text="金宝 · 游戏教练" Foreground="#F1F5F9" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,8,0" TextTrimming="CharacterEllipsis"/>
+     <Button x:Name="ModeButton" Grid.Column="1" Style="{StaticResource WindowAction}" Content="&#xE8A7;" ToolTip="切换大框、字幕、滚动与静默模式"/>
+     <Button x:Name="SettingsButton" Grid.Column="2" Style="{StaticResource WindowAction}" Content="&#xE713;" ToolTip="设置与显示模式"/>
+     <Button x:Name="CollapseButton" Grid.Column="3" Style="{StaticResource WindowAction}" Content="&#xE921;" ToolTip="收起到屏幕右侧"/>
+     <Button x:Name="CloseButton" Grid.Column="4" Style="{StaticResource WindowAction}" Content="&#xE8BB;" ToolTip="退出金宝悬浮窗"/>
     </Grid>
     <StackPanel Grid.Row="1" Margin="3,4,3,2">
      <WrapPanel Visibility="Collapsed">
      <TextBlock x:Name="TimeText" Text="等待进入游戏" Foreground="#93C5FD" FontSize="14"/>
      <TextBlock x:Name="SummaryText" Text="正在检测游戏和教练服务…" Foreground="#94A3B8" FontSize="12" TextWrapping="Wrap" Margin="8,2,0,0"/>
      </WrapPanel>
-     <TextBlock x:Name="LauncherText" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
+     <TextBlock x:Name="LauncherText" Visibility="Collapsed" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"/>
      <TextBlock x:Name="UpdateText" Foreground="#94A3B8" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="Collapsed"/>
      <Button x:Name="ActionButton" Content="微信登录" HorizontalAlignment="Left" Visibility="Collapsed"/>
     </StackPanel>
-    <WrapPanel x:Name="Tabs" Grid.Row="2" Margin="0,2,0,4"/>
+    <UniformGrid x:Name="Tabs" Grid.Row="2" Rows="1" Margin="0,6,0,10"/>
     <DockPanel Grid.Row="3">
     <StackPanel x:Name="ConfirmationPanel" DockPanel.Dock="Top" Visibility="Collapsed" Margin="4,2,4,6">
      <TextBlock x:Name="ConfirmationTitle" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap"/>
      <WrapPanel x:Name="ConfirmationChoices"/>
     </StackPanel>
+    <Button x:Name="LatestMessageButton" DockPanel.Dock="Bottom" Content="回到最新消息 ↓" FontSize="11" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,4"/>
     <ScrollViewer x:Name="PageScroll" Background="Transparent" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
      <StackPanel>
+     <StackPanel x:Name="RichContent" Visibility="Collapsed" Margin="2,2,8,0"/>
      <TextBlock x:Name="PageText" Text="等待新的游戏日志…" TextWrapping="Wrap" Foreground="#E2E8F0" FontSize="14" LineHeight="24" Margin="4"/>
      <StackPanel x:Name="PlayersTable" Visibility="Collapsed" Margin="4"/>
      </StackPanel>
@@ -82,8 +93,9 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
     </DockPanel>
     <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,8,0,0" Visibility="Collapsed">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-     <TextBox x:Name="QuestionBox" MaxLength="1000" MinHeight="35" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="8" Background="#111827" Foreground="#F1F5F9" BorderBrush="#536078" ToolTip="Enter 发送；Shift+Enter 换行"/>
-     <Button x:Name="SendButton" Grid.Column="1" Content="发送"/>
+     <TextBox x:Name="QuestionBox" MaxLength="1000" MinHeight="39" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="8" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
+     <TextBlock x:Name="ComposerPlaceholder" Text="问问教练 · Enter 发送" Foreground="#8E9DAE" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+     <Button x:Name="SendButton" Grid.Column="1" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="52" FontWeight="SemiBold"/>
     </Grid>
     <StackPanel x:Name="Footer" Grid.Row="5" Margin="0,8,0,0">
      <StackPanel x:Name="AppearancePanel" Visibility="Collapsed">
@@ -109,7 +121,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
     <Button x:Name="NarrowClose" Grid.Column="3" Content="×" ToolTip="退出悬浮窗" Padding="5,0" VerticalAlignment="Center" Height="28"/>
    </Grid>
    <Thumb x:Name="ResizeGrip" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-8,-8" Cursor="SizeNWSE" ToolTip="拖动调整窗口大小，会记住你的尺寸">
-    <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="#01000000"><Path Data="M 7,22 L 22,7 M 14,22 L 22,14 M 21,22 L 22,21" Stroke="#93C5FD" StrokeThickness="2"/></Grid></ControlTemplate></Thumb.Template>
+    <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="#01000000"><Path Data="M 7,22 L 22,7 M 14,22 L 22,14 M 21,22 L 22,21" Stroke="#B39A71" StrokeThickness="1.5"/></Grid></ControlTemplate></Thumb.Template>
    </Thumb>
    <Grid x:Name="Bubble" Visibility="Collapsed" Background="#01000000" Cursor="SizeAll">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -123,6 +135,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
@@ -203,9 +216,10 @@ function Save-Preferences {
 }
 function Set-BackgroundOpacity {
  $percent=[Math]::Round($controls.OpacitySlider.Value)
- $color=[Windows.Media.Color]::FromArgb([byte][Math]::Round(255*$percent/100),23,32,51)
+ $color=[Windows.Media.Color]::FromArgb([byte][Math]::Round(255*$percent/100),16,21,27)
  $controls.MainBorder.Background=if($script:displayMode -eq 'narrow' -and $script:subtitleMode -and !$script:collapsed){[Windows.Media.Brushes]::Transparent}else{New-Object Windows.Media.SolidColorBrush($color)}
  $controls.OpacityText.Text=([string]$percent)+'%'
+ if(Get-Command Update-OverlaySurface -ErrorAction SilentlyContinue){Update-OverlaySurface}
 }
 function Set-BodyFontSize {
  $size=[Math]::Round($controls.FontSlider.Value)
@@ -214,6 +228,7 @@ function Set-BodyFontSize {
  foreach($child in $controls.PlayersTable.Children){if($child -is [Windows.Controls.Border]){foreach($label in $child.Child.Children){$label.FontSize=[Math]::Max(11,$size-2)}}}
  foreach($name in @('NarrowText','PreviousSubtitle','OutgoingSubtitle')){if($controls[$name]){$controls[$name].FontSize=$size}}
  if(Get-Command Set-NarrowMetrics -ErrorAction SilentlyContinue){Set-NarrowMetrics}
+ if(Get-Command Update-OverlaySurface -ErrorAction SilentlyContinue){Update-OverlaySurface $true}
 }
 try{
  $preferences=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
@@ -263,13 +278,13 @@ function Add-PlayerTableRow($values,[bool]$heading,[int]$index) {
  for($i=0;$i -lt $values.Count;$i++){
   $label=New-Object Windows.Controls.TextBlock
   $label.Text=[string]$values[$i];$label.FontSize=[Math]::Max(11,$controls.FontSlider.Value-2);$label.Padding='2,8,2,8';$label.TextWrapping='Wrap';$label.VerticalAlignment='Center'
-  $label.Foreground=if($heading){'#93C5FD'}else{'#E2E8F0'}
+  $label.Foreground=if($heading){'#9CAABA'}elseif($i -eq 3 -and $values[$i] -eq 'T0'){'#EDC989'}else{'#E2E8F0'}
   if($heading){$label.FontWeight='SemiBold'}
   if($i -ge 2){$label.TextAlignment='Right'}
   [Windows.Controls.Grid]::SetColumn($label,$i);$grid.Children.Add($label) | Out-Null
  }
  $border=New-Object Windows.Controls.Border
- $border.BorderBrush='#334155';$border.BorderThickness='0,0,0,1'
+ $border.BorderBrush='#293541';$border.BorderThickness='0,0,0,1'
  if(!$heading -and $index % 2 -eq 0){$border.Background='#1829364E'}
  $border.Child=$grid;$controls.PlayersTable.Children.Add($border) | Out-Null
 }
@@ -302,6 +317,7 @@ function Update-Page {
   }
  }
  $controls.ChatPanel.Visibility=if($script:tab -eq 'chat'){'Visible'}else{'Collapsed'}
+ Update-OverlaySurface
  $scroll.UpdateLayout()
  if($script:tab -eq 'events' -or $followChat -or (!$samePage -and $script:tab -eq 'chat' -and !$script:scrollPositions.ContainsKey('chat'))){$scroll.ScrollToEnd()}
  elseif($samePage){$scroll.ScrollToVerticalOffset($offset)}
@@ -314,14 +330,14 @@ function Set-Tab([string]$name){
  if($name -ne 'chat' -and $script:speechJob){Stop-Job $script:speechJob;Remove-Job $script:speechJob -Force;$script:speechJob=$null}
  if($name -eq 'stats'){$name='players'}
  $script:tab=$name
- foreach($button in $controls.Tabs.Children){$button.Background=if($button.Tag -eq $name){'#2563EB'}else{'#29364E'}}
+ foreach($button in $controls.Tabs.Children){$selected=$button.Tag -eq $name;$button.Background=if($selected){'#322B20'}else{'Transparent'};$button.Foreground=if($selected){'#EDC989'}else{'#9CAABA'};$button.BorderBrush=if($selected){'#6F5836'}else{'Transparent'}}
  Set-Interaction ($name -eq 'chat')
  Update-Page
  if($name -eq 'chat' -and $window.IsVisible){$window.Activate() | Out-Null;$controls.QuestionBox.Focus() | Out-Null;[Windows.Input.Keyboard]::Focus($controls.QuestionBox) | Out-Null}
 }
 foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','胜率'),@('events','事件'),@('chat','聊天'))){
  $button=New-Object Windows.Controls.Button
- $button.Tag=$entry[0];$button.Content=$entry[1];$button.FontSize=12
+ $button.Tag=$entry[0];$button.Content=$entry[1];$button.FontSize=12;$button.Padding='4,6';$button.ToolTip='切换到'+$entry[1]
  $button.Add_Click({param($sender,$eventArgs) Set-Tab ([string]$sender.Tag)})
  $controls.Tabs.Children.Add($button) | Out-Null
 }
@@ -382,6 +398,7 @@ function Update-State {
   $controls.HintText.Text=if($result -and $result.ok){'已完成'}elseif($result -and $result.message){[string]$result.message}else{'请求失败，请检查设置页的模型和服务状态。'}
   Remove-Job $script:job -Force -ErrorAction SilentlyContinue;$script:job=$null
   $controls.SendButton.IsEnabled=$true
+  Update-OverlayComposer
  }
  try{
   $command=[IO.File]::ReadAllText($controlFile) | ConvertFrom-Json
@@ -412,6 +429,7 @@ function Start-Request([string]$route,[hashtable]$payload){
    }
   }
   $controls.SendButton.IsEnabled=$false
+  Update-OverlayComposer
   $controls.HintText.Text=if($route -eq 'ask'){'教练思考中…'}else{'正在检索推荐…'}
  }catch{$controls.HintText.Text='请先启动 DSH，再打开金宝设置页。'}
 }
@@ -477,7 +495,7 @@ function Update-Drag([double]$x,[double]$y,[bool]$pressed){
  }
 }
 function Test-PointerHotzone([Windows.Point]$screenPoint) {
- $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.ChatPanel,$controls.ResizeGrip,$controls.ConfirmationPanel,$controls.NarrowPanel)}
+ $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.LatestMessageButton,$controls.ChatPanel,$controls.ResizeGrip,$controls.ConfirmationPanel,$controls.NarrowPanel)}
  foreach($target in $targets){
   if(!$target.IsVisible){continue}
   $local=$target.PointFromScreen($screenPoint)
@@ -517,6 +535,7 @@ $pointerTimer=New-Object Windows.Threading.DispatcherTimer;$pointerTimer.Interva
 $pointerTimer.Add_Tick({Pointer-Tick})
 $window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
 . (Join-Path $PSScriptRoot 'overlay-modes.ps1')
+. (Join-Path $PSScriptRoot 'overlay-ui.ps1')
 Set-Tab $PreviewTab;Update-State
 try{
  if($PreviewPath){
@@ -635,6 +654,24 @@ try{
     $script:testResult.quickConfirmationBuilt=$quickConfirm.Child.Child.Children.Count -eq 5 -and $quickConfirm.Child.Child.Children[1].Tag.name -eq '乙'
     $script:snapshot=[pscustomobject]@{keywords=@('安妮','残疫');summary='安妮'};Set-HighlightedText $controls.PageText '安妮下一件考虑残疫'
     $script:testResult.keywordHighlight=$controls.PageText.Inlines.Count -gt 1 -and $controls.PageText.Text -eq '安妮下一件考虑残疫'
+    $fullAnswer='完整回答内容。'*200
+    $script:snapshot=[pscustomobject]@{chatRows=@(@{role='user';text='怎么打？'},@{role='assistant';text=$fullAnswer});chat='怎么打？'+$fullAnswer;keywords=@()}
+    Set-Tab 'chat';$window.UpdateLayout()
+    $script:testResult.chatBubbles=$controls.RichContent.Visibility -eq 'Visible' -and $controls.RichContent.Children.Count -eq 2
+    $script:testResult.fullChatMessage=$controls.RichContent.Children[1].Child.Children[1].Text -eq $fullAnswer
+    $script:testResult.messageCopyAvailable=$controls.RichContent.Children[1].ContextMenu.Items[0].Tag -eq $fullAnswer
+    $controls.FontSlider.Value=18
+    $script:testResult.richFontZoom=$controls.RichContent.Children[1].Child.Children[1].FontSize -eq 18
+    $controls.FontSlider.Value=14
+    $script:job='ui-only';Update-OverlayComposer;$script:testResult.chatSendingFeedback=$controls.SendButton.Content -eq '思考中';$script:job=$null;Update-OverlayComposer
+    $controls.PageScroll.ScrollToTop();$window.UpdateLayout();Update-ChatJump
+    $script:testResult.chatJumpVisible=$controls.LatestMessageButton.Visibility -eq 'Visible'
+    $controls.LatestMessageButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)));$window.UpdateLayout()
+    $script:testResult.chatJumpWorks=$controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset -lt 1
+    Show-OverlayModeMenu;$script:testResult.quickModePicker=$script:overlayModeMenu.Items.Count -eq 4
+    $script:overlayModeMenu.Items[2].RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.MenuItem]::ClickEvent)))
+    $script:testResult.quickModeSwitch=$script:displayMode -eq 'narrow' -and !$script:subtitleMode
+    Set-DisplayMode 'large'
     $script:testResult.voiceInputPresent=$mic.Content -eq '语音'
     $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.closed=$script:closing

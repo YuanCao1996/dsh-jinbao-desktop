@@ -1,9 +1,9 @@
-param([string]$StateDir,[string]$ScreenshotDir)
+﻿param([string]$StateDir,[string]$ScreenshotDir)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $main=Join-Path $root 'strategy-overlay.ps1';$module=Join-Path $root 'overlay-modes.ps1'
-foreach($file in @($main,$module)){
+foreach($file in @($main,$module,(Join-Path $root 'overlay-ui.ps1'))){
  $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
  if($errors.Count){throw 'Invalid production PowerShell'}
  foreach($fn in $ast.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}

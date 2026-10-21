@@ -10,6 +10,7 @@ import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
 import {trackAugmentRound,updateAugmentRecommendations,createEquipmentCoach} from './equipment-context.mjs';
 import {augmentConfirmation} from './augment-confirmation.mjs';
 import {teamStrength,TEAM_STRENGTH_NOTE} from './team-strength.mjs';
+import {chatFailureMessage} from './chat-errors.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -249,6 +250,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   let state=router.state();
   let restoredChat;
   try{const saved=JSON.parse(await readFile(join(stateDir,'overlay-chat.json'),'utf8'));if(saved&&Array.isArray(saved.chat))restoredChat=saved;}catch{}
+  if(restoredChat&&!restoredChat.game&&!restoredChat.match){state.chat=restoredChat.chat.slice(-20);restoredChat=null;}
   let knowledge = {}, knowledgeKey = '', refreshTask = null, refreshQueued = false, scanning = false, closed = false, busy = false;
   let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
   let retryKnowledgeAt=Infinity;
@@ -406,14 +408,16 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         if (!agentChat) throw Object.assign(Error('DSH Agent 聊天接口尚未就绪，请重新打开金宝'), { status: 503 });
         const answer = await agentChat({ game: state.game || 'lol', match: state.match || 'waiting', question: q.text, topic });
         if(!stillCurrent())throw Object.assign(Error('对局已切换，请在当前对局重新提问'),{status:409});
-        state.chat.push({ role: 'assistant', text: text(answer) });
-        await memory.record(state, { kind: 'chat', role: 'assistant', text: text(answer), gameSeconds: state.gameSeconds }, 'overlay-chat');
+        if(typeof answer!=='string'||!answer.trim())throw Object.assign(Error('Empty Agent answer'),{status:502});
+        const reply=answer.trim();
+        state.chat.push({ role: 'assistant', text: reply });
+        await memory.record(state, { kind: 'chat', role: 'assistant', text: reply, gameSeconds: state.gameSeconds }, 'overlay-chat');
         if(topic==='teamfight')state.teamfight=text(answer);
         if(topic==='equipment')state.equipment=text(answer);
         if(topic==='augments')state.augmentAdvice=text(answer);
-        return { answer: text(answer) };
+        return { answer: reply };
       } catch (e) {
-        if(stillCurrent())state.chat.push({ role: 'assistant', text: e.status === 401 ? '请在设置页保存可用的模型配置后重试。' : e.status === 503 ? '教练暂时忙或正在恢复会话，请稍后重试。' : '这次回复失败，请稍后重试。' });
+        if(stillCurrent())state.chat.push({ role: 'assistant', text: chatFailureMessage(e), failed:true });
         throw e;
       } finally { busy = false; await flush(); }
     },

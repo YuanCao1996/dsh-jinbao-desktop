@@ -5,6 +5,7 @@
 <h1>金宝设置</h1><p>悬浮窗已在后台等待游戏。登录和设置会自动保存。</p><div id="message" role="status" aria-live="polite"></div>
 <section id="updateNotice" class="success" role="status" hidden><h2 id="updateNoticeTitle"></h2><p id="updateNoticeMessage"></p><button id="updateAck" class="secondary">知道了</button></section>
 <section id="accountCard"><h2 id="accountTitle">金宝账号</h2><p id="account">正在检查登录状态…</p><div id="signedIn" hidden><span class="badge">✓ 登录成功 · 已记住此电脑</span><p id="rights"></p><button id="changeAccount" class="secondary">切换账号</button><button id="logout" class="secondary">退出登录</button></div>
+<div id="quota" hidden><p id="quotaText" role="status" aria-live="polite"></p><progress id="quotaProgress" max="100" value="0" style="width:100%" hidden></progress><p id="quotaDetail"></p></div>
 <div id="emailLogin"><h3 id="emailTitle">邮箱验证码登录</h3><p id="emailStatus">正在检查邮箱服务…</p><label for="emailAddress">邮箱地址</label><input id="emailAddress" type="email" autocomplete="email" placeholder="name@example.com"><button id="emailSend" disabled>发送验证码</button><button id="emailBind" class="secondary" hidden>绑定到当前账号，保留额度</button><div id="emailVerify" hidden><label for="emailCode">6 位验证码</label><input id="emailCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6"><button id="emailConfirm">确认登录</button></div></div>
 <details><summary>其他登录方式</summary><button id="wechat" hidden>微信扫码登录</button><p>已有 App 账号可继续使用原来的电脑配对。</p><button id="login">生成 App 配对码</button><div id="code" class="code"></div><label for="activationCode">已有电脑激活码</label><input id="activationCode" type="password" autocomplete="off" placeholder="JB-…"><button id="activate">激活并登录</button></details></section>
 <section><h2>模型服务</h2><label for="mode">调用方式</label><select id="mode"><option value="cloud">金宝官方服务（默认）</option><option value="byok">使用自己的 API Key</option><option value="demo">仅查看日志（不调用模型）</option></select><p id="official">使用邮箱登录后调用官方服务，无需自己提供模型密钥。已有账号沿用原额度。</p><div id="byok" hidden><label for="baseUrl">OpenAI 兼容 API 地址</label><input id="baseUrl" placeholder="https://模型厂商地址/v1"><label for="model">模型 ID</label><input id="model" autocomplete="off"><label for="apiKey">API Key</label><input id="apiKey" type="password" autocomplete="new-password" placeholder="已保存时留空即可"><p>密钥保存在本机。</p></div><button id="save" hidden>保存设置</button></section>
@@ -20,12 +21,18 @@ async function run(fn){try{await fn();}catch(e){message(e.message);}}
 function show(){el('byok').hidden=el('mode').value!=='byok';el('official').hidden=el('mode').value!=='cloud';el('save').hidden=el('mode').value!=='byok'&&el('mode').value===savedMode;}
 function cooldown(){const left=Math.max(0,Math.ceil((cooldownUntil-Date.now())/1000));el('emailSend').disabled=left>0||!latest?.emailEnabled;el('emailBind').disabled=el('emailSend').disabled;el('emailSend').textContent=left?left+' 秒后重发':'发送验证码';}
 setInterval(cooldown,1000);
+function renderQuota(s){const q=s.account?.usage?.model,valid=q&&Number.isSafeInteger(q.limit)&&q.limit>=0&&Number.isSafeInteger(q.remaining)&&q.remaining>=0&&q.remaining<=q.limit;
+el('quota').hidden=!s.account&&!s.cloudConfigured;el('quotaProgress').hidden=!valid;
+if(!valid){el('quotaText').textContent='剩余 token 额度暂不可用';el('quotaDetail').textContent=s.accountError?'账号服务暂时无法连接，请稍后刷新。':'等待服务端用量数据，不代表额度为零。';return;}
+const percent=q.limit?Math.max(0,Math.min(100,q.remaining/q.limit*100)):0;
+el('quotaProgress').value=percent;el('quotaText').textContent='剩余 token：'+percent.toFixed(2)+'%';
+el('quotaDetail').textContent=q.remaining.toLocaleString('zh-CN')+' / '+q.limit.toLocaleString('zh-CN')+' token · '+(q.period==='lifetime'?'累计总额度，不按日重置':'当日额度，UTC 零点重置')+'（含进行中请求预占）'+(s.mode==='byok'?'；当前使用自有 API Key，不扣此额度。':'');}
 async function refresh(fill=false){const s=await api('status');latest=s;savedMode=s.mode;const email=s.account?.loginMethod==='email',logged=!!s.account;
 el('accountCard').classList.toggle('success',email);el('accountTitle').textContent=email?'✓ 邮箱已登录':'金宝账号';el('signedIn').hidden=!logged;
 el('account').textContent=email?(s.emailDisplay||'已验证邮箱'):(logged?'已登录原有账号，请绑定邮箱以便跨电脑使用。':'尚未登录，请使用邮箱验证码登录。');
 el('rights').textContent=logged?'官方模型：'+(s.account.features.model?'可用':'未开通')+' · 数据检索：'+(s.account.features.retrieval?'可用':'未开通'):'';
 el('emailLogin').hidden=email&&!changing;el('emailTitle').textContent=logged&&!email?'为已有账号绑定邮箱':'邮箱验证码登录';el('emailBind').hidden=!logged||email;el('emailStatus').textContent=s.emailEnabled?(logged&&!email?'点击“绑定到当前账号”，保留原额度。':'输入邮箱获取验证码，登录后自动保存。'):'邮箱服务暂不可用，请稍后重试，或使用自己的 API Key。';cooldown();
-el('wechat').hidden=!s.wechatEnabled;renderUpdate(s);el('maintenance').textContent=s.maintenance?.message||'';
+el('wechat').hidden=!s.wechatEnabled;renderQuota(s);renderUpdate(s);el('maintenance').textContent=s.maintenance?.message||'';
 el('syncStatus').textContent=s.phoneSync?.message||'邮箱登录后可开启同步';el('syncEnable').hidden=s.phoneSync?.enabled&&s.phoneSync?.linked;el('syncUnlink').hidden=!s.phoneSync?.linked||!s.phoneSync?.enabled;
 if(s.mobileUrl&&new URL(s.mobileUrl).protocol==='https:'){el('mobileLink').href=s.mobileUrl;el('mobileLink').textContent=s.mobileUrl;}
 el('diagnostics').textContent='教练服务：'+(s.coachReady?'已启动':'等待 DSH 启动')+'\n日志目录：'+s.logsDir+'\n日志文件：'+s.logCount+'\n最新日志：'+(s.recent?.name||'等待采集')+'\n模型方式：'+s.mode;

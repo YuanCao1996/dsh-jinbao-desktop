@@ -1798,7 +1798,7 @@ function apply(ctx, config) {
 // ⚠ resolveGame 定义在 apply() 里(不是模块级),所以必须**当参数传进来** ——
 //   直接调用会抛 "resolveGame is not defined",而那是 createAgent 阶段,
 //   表现为会话建不出来、侧边栏什么都没有(2026-10-02 实测)。
-function createMonitor(ctx, cfg, resolveGame) {
+export function createMonitor(ctx, cfg, resolveGame) {
   const memory = createGameMemory(cfg.sessionCwd);
   const lifetime = new AbortController();
   let liveReplyState = null;
@@ -2227,11 +2227,9 @@ function makeLiveReplyTool(replyState, resolveGame, currentReply) {
     name: "coach_reply",
     // ⚠ 两种模式(2026-10-01):用户可能在**会话里直接提问**(没有挂起的播报请求)。
     //   那种情况下不要死守"≤50字播报" —— 正常展开回答,再用本工具给出结论。
-    description: (persona.replyDescription ?? "输出本次教练请求的最终播报文本(≤50字)。调用后本次请求即完成。")
-      + " 注意:如果这一轮是**用户在会话里直接提问**(不是对局事件触发的播报),"
-      + "请先展开回答,再用本工具提交结论;此时文本不会截断成播报,会原样显示给用户。",
+    description: "提交当前请求的完整最终回答一次。自动播报遵循当前人设短句限制；用户主动聊天时不受播报字数限制，text 必须包含全部回答，不得只放摘要或结论，不得静音。调用后停止。",
     parameters: {
-      text: { type: "string", required: true, description: persona.replyParamDescription ?? "最终播报文本,可为空字符串(表示静音)" }
+      text: { type: "string", required: true, description: "完整最终回答；只有自动播报允许空字符串表示静音。" }
     },
     output: {
       schema: {
@@ -2254,6 +2252,7 @@ function makeLiveReplyTool(replyState, resolveGame, currentReply) {
     isConcurrencySafe: () => true,
     async execute(args) {
       // 修复 #3:同一回合重复调用直接忽略(返回 ok,不改写已提交的播报)
+      if (currentReply()?.question && (typeof args.text!=='string'||!args.text.trim())) throw new Error('主动聊天必须提交完整、非空的最终回答，不能静音或只提交摘要。');
       if (replyState) {
         if (replyState.replied) {
           console.warn(`[coach-server] live coach_reply called again in the same turn; ignoring duplicate`);

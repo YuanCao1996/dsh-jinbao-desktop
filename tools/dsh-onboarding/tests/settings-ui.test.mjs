@@ -28,4 +28,10 @@ test('settings visibly switches from binding form to signed-in card and back on 
  await vm.runInContext("renderUpdate({version:'3.0.0',update:{state:'current'},updateResult:{id:'done',state:'success',version:'3.0.0',message:'更新成功'}})",context);
  assert.equal(elements.get('updateNotice').hidden,false);assert.match(elements.get('updateNoticeTitle').textContent,/更新成功/);
  await vm.runInContext("renderUpdate({version:'3.0.0',updateResult:{state:'success',version:'3.0.0',acknowledged:true}})",context);assert.equal(elements.get('updateNotice').hidden,true);
+ await vm.runInContext("renderQuota({mode:'cloud',account:{usage:{model:{limit:100000000,remaining:64070345,period:'lifetime'}}}})",context);
+ assert.match(elements.get('quotaText').textContent,/64.07%/);assert.match(elements.get('quotaDetail').textContent,/累计总额度/);assert.ok(Math.abs(elements.get('quotaProgress').value-64.070345)<0.000001);
+ await vm.runInContext("renderQuota({mode:'byok',account:{usage:{model:{limit:100,remaining:0,period:'daily'}}}})",context);
+ assert.match(elements.get('quotaText').textContent,/0.00%/);assert.match(elements.get('quotaDetail').textContent,/不扣此额度/);
+ await vm.runInContext("renderQuota({cloudConfigured:true,accountError:503})",context);assert.equal(elements.get('quotaProgress').hidden,true);assert.match(elements.get('quotaText').textContent,/暂不可用/);
+ await vm.runInContext('renderQuota({})',context);assert.equal(elements.get('quota').hidden,true);
 });

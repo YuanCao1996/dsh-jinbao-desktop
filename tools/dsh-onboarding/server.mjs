@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { serviceUrl,chatUrl,limitedJson } from '../dsh-game-services/client.mjs';
 import { createOverlayService } from './overlay-state.mjs';
 import { createPhoneSync } from './phone-sync.mjs';
+import {chatFailureMessage} from './chat-errors.mjs';
 const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY',sync:'JINBAO_SYNC_TOKEN'};
 const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
@@ -157,7 +158,9 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    if(['/api/overlay/ask','/api/overlay/refresh'].includes(req.url)&&req.method==='POST'){
     if(!String(req.headers['content-type']).startsWith('application/json'))throw error(400);
     const b=await body(req,8192);
-    const result=req.url.endsWith('/ask')?await overlay.ask(b.question,b.topic):await overlay.refresh();
+    let result;
+    try{result=req.url.endsWith('/ask')?await overlay.ask(b.question,b.topic):await overlay.refresh();}
+    catch(e){const status=[400,401,403,409,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:chatFailureMessage({...e,status})});return;}
     send(res,200,result??{refreshed:true});return;
    }
    if(req.url==='/api/advice'&&req.method==='GET'){

@@ -39,9 +39,22 @@ if(args.includes('--dry-run')){console.log(doc.toString());process.exit(0);}
 const bundled=join(source,'..','node_modules');
 const releaseManifest=join(source,'..','manifest.json');
 const dependencies=existsSync(releaseManifest)?JSON.parse(readFileSync(releaseManifest)).packages:['@deepseek-ai/schemastery','@deepseek-ai/cosmokit','@deepseek-ai/dsh-tools','@deepseek-ai/cordis','@deepseek-ai/cordis-plugin-loader','@deepseek-ai/dsh-scope','@deepseek-ai/dsh-llm','@deepseek-ai/dsh-typert-protocol','@deepseek-ai/dsh-util-values','@deepseek-ai/dsh-util-crypto','@deepseek-ai/dsh-brand','@deepseek-ai/dsh-timeout','@deepseek-ai/dsh-session','yaml'];
-for(const name of dependencies){const from=join(bundled,name,'package.json'),to=join(profiles,'node_modules',name,'package.json');if(existsSync(to)&&JSON.parse(readFileSync(from)).version!==JSON.parse(readFileSync(to)).version)throw Error('Existing dependency version differs: '+name+'; use a compatible DSH profile.');}
+const hostManaged=new Set(['ipaddr.js']);
+for(const name of dependencies){
+ const from=join(bundled,name,'package.json'),to=join(profiles,'node_modules',name,'package.json');
+ if(!existsSync(to))continue;
+ const bundledVersion=JSON.parse(readFileSync(from)).version,installedVersion=JSON.parse(readFileSync(to)).version;
+ // DSH owns this shared dependency. Its 1.x and 2.x releases expose the API
+ // required by the bundled plugins; preserve the host copy and its version.
+ if(hostManaged.has(name)&&/^[12]\./.test(bundledVersion)&&/^[12]\./.test(installedVersion))continue;
+ if(bundledVersion!==installedVersion)throw Error('Existing dependency version differs: '+name+'; use a compatible DSH profile.');
+}
 // Async copy also handles Unicode paths and repairs files missing after an interrupted install.
-for(const name of dependencies)await copyDependency(join(bundled,name),join(profiles,'node_modules',name));
+for(const name of dependencies){
+ const installed=join(profiles,'node_modules',name),manifest=join(installed,'package.json');
+ if(hostManaged.has(name)&&existsSync(manifest))continue;
+ await copyDependency(join(bundled,name),installed);
+}
 mkdirSync(dirname(patch),{recursive:true});mkdirSync(join(state,'logs'),{recursive:true});
 for(const name of ['dsh-game-services','dsh-onboarding','dsh-coach-server']){
  const from=join(source,name),to=join(profiles,'node_modules',name);

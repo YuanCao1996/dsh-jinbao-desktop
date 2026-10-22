@@ -73,7 +73,6 @@ export function sseHeaders() {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache",
     connection: "keep-alive",
-    "x-accel-buffering": "no",
-    "access-control-allow-origin": "*"
+    "x-accel-buffering": "no"
   };
 }

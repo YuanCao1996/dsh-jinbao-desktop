@@ -1,14 +1,10 @@
-import { timingSafeEqual } from 'node:crypto';
+import { authenticateLocalRequest } from './local-http-auth.js';
 import { gameModePrompt } from './game-mode-prompt.js';
 
 export async function dispatchGameChat({ req, body, credentials, monitors }) {
-  const token = (await credentials?.resolve('JINBAO_LOCAL_ACCESS_KEY'))?.value;
-  const expected = 'Bearer ' + token;
-  const supplied = req.headers.authorization;
   const deny = status => { throw Object.assign(Error('Agent chat unavailable'), { status }); };
-  if (!token || typeof supplied !== 'string' || Buffer.byteLength(supplied) !== Buffer.byteLength(expected) ||
-      !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) deny(401);
-  if (req.headers.origin || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) deny(403);
+  const denied = await authenticateLocalRequest(req, credentials);
+  if (denied) deny(denied);
   if (!body || !['lol', 'wzry'].includes(body.game) || typeof body.match !== 'string' || !body.match || body.match.length > 300 ||
       typeof body.question !== 'string' || !body.question.trim() || body.question.length > (body.topic === 'equipment' ? 16000 : 1000)) deny(400);
   if (!monitors) deny(503);

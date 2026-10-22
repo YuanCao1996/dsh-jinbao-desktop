@@ -88,7 +88,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   for(const name of files){const info=await stat(join(stateDir,'logs',name));if(!recent||info.mtimeMs>recent.modifiedAt)recent={name,modifiedAt:info.mtimeMs,bytes:info.size};}
   let validTail=false;
   if(recent&&recent.bytes){const f=await open(join(stateDir,'logs',recent.name),'r');try{const n=Math.min(recent.bytes,65536),buffer=Buffer.alloc(n);await f.read(buffer,0,n,recent.bytes-n);const lines=buffer.toString('utf8').trim().split('\n');if(recent.bytes>n)lines.shift();validTail=lines.slice(-10).every(line=>{try{return !!JSON.parse(line);}catch{return false;}});}finally{await f.close();}}
-  let coachReady=false;try{const r=await fetchImpl(coachOrigin+'/coach/state',{signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
+  let coachReady=false;try{const r=await fetchImpl(coachOrigin+'/coach/state',{headers:{Authorization:'Bearer '+local},signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
   const snapshot=overlay.view();
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
    activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000,updateBlocked:!!snapshot.match&&!snapshot.ended&&(snapshot.gameTime!=='等待对局'||snapshot.phase==='ChampSelect')&&Date.now()-snapshot.updatedAt<30000};

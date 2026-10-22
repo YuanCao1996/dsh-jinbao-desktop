@@ -1,4 +1,5 @@
 import {loadRecoverySession,saveRecoverySession} from './recovery-session.js';
+import { guardCoachRequest } from './local-http-auth.js';
 import {turnContext} from './turn-context.js';
 import {createTurnHealth,recoverySessionId,canRetryContext} from './turn-health.js';
 import { configureGameAgent } from './agent-profile.js';
@@ -728,7 +729,6 @@ async function proxyToUpstream(cfg, req, res, path) {
     const upstreamBody = Buffer.from(await upstreamResp.arrayBuffer());
     res.writeHead(upstreamResp.status, {
       "content-type": upstreamResp.headers.get("content-type") ?? "application/json",
-      "access-control-allow-origin": "*"
     });
     res.end(upstreamBody);
   } catch (error) {
@@ -758,7 +758,7 @@ function readBody(req, limit) {
 }
 
 function sendJson(res, status, payload) {
-  res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*" });
+  res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(payload));
 }
 
@@ -1098,17 +1098,7 @@ function apply(ctx, config) {
   }));
 
   const server = createServer(async (req, res) => {
-    // CORS:浏览器页面(3080)跨域调用 coach API(3081)。POST JSON 触发 preflight,
-    // 必须响应 OPTIONS 并声明允许的方法/请求头,否则浏览器拦截请求。
-    res.setHeader("access-control-allow-origin", "*");
-    res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
-    res.setHeader("access-control-allow-headers", "content-type, authorization, x-request-id");
-    res.setHeader("access-control-max-age", "600");
-    if (req.method === "OPTIONS") {
-      res.writeHead(204);
-      res.end();
-      return;
-    }
+    if (!await guardCoachRequest(req, res, { credentials: ctx.credentials, port: server.address().port, desktop: cfg.coachPreset === 'jinbao-game' })) return;
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
     const path = url.pathname;
     try {

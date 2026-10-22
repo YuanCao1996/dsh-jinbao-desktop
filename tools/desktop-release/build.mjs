@@ -3,6 +3,8 @@ import { cp } from 'node:fs/promises';
 import { join,resolve,dirname,relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
+import { assertReleaseRuntime } from './runtime-policy.mjs';
+assertReleaseRuntime(process.version);
 if(process.platform!=='win32')throw Error('Windows release builds must run on Windows');
 const root=resolve('.'),out=resolve(process.argv[2]??'workspace/client-releases/jinbao-desktop');
 if(existsSync(out))throw Error('Choose a new output directory; existing releases are never overwritten');

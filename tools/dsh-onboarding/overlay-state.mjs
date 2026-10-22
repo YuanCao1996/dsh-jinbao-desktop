@@ -209,7 +209,7 @@ export function overlayView(state, knowledge = {}) {
   for(const name of offered)if(!ranked.some(row=>row.name===name))candidates.push(name+' · 暂无该英雄排名');
   const current = state.broadcasts.at(-1)?.text || '等待新的游戏策略建议…';
   const augmentTitle=(offered.length?'当前三选一':'英雄适配海克斯')+' · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
-  const augmentBody=offered.length ? candidates.join('\n') : augments.join('\n')||knowledge.message||'进入对局后自动检索，或在聊天中咨询。';
+  const augmentBody=offered.length ? candidates.join('\n')+(offered.length<3?'\n已识别 '+offered.length+'/3 个位置，其余卡片继续识别中…':'') : augments.join('\n')||knowledge.message||'进入对局后自动检索，或在聊天中咨询。';
   const equipmentUpdates=state.events.filter(e=>e.topic==='equipment').slice(-12).map(e=>`${e.time} ${e.text}`).join('\n');
   const augmentUpdates=state.events.filter(e=>e.topic==='augment-selection').slice(-8).map(e=>`${e.time} ${e.text}`).join('\n');
   const captureHint=state.augmentCaptureAvailable===false
@@ -257,6 +257,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
   let retryKnowledgeAt=Infinity;
   const contextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+state.me.champion+':'+JSON.stringify([offerNames(state.offers).sort(),[...state.ownedAugments].sort(),rosterChampions(state).sort()]);
+  const baseContextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+(state.phase==='ChampSelect'?'selection':state.me.champion);
   async function save() {
     if (closed) return;
     await writeFile(output + '.tmp', JSON.stringify(overlayView(state, knowledge)), { mode: 0o600 });
@@ -281,7 +282,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
     const game = state.game;
     if (!champion) throw Object.assign(Error('请先进入对局'), { status: 409 });
     const key = contextKey();
-    const baseKey = game+':'+state.match+':'+state.matchStartedAt+':'+(state.phase==='ChampSelect'?'selection':champion);
+    const baseKey = baseContextKey();
     const force = forceRefresh; forceRefresh = false;
     if(cached.key!==baseKey)cached={key:baseKey,rows:[],candidates:new Map(),heroes:new Map()};
     const cache = cached;
@@ -374,7 +375,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       } catch {}
       const key = contextKey();
       if(key!==knowledgeKey){
-        knowledgeKey=key;knowledge={};
+        knowledgeKey=key;knowledge=cached.key===baseContextKey()?{rows:knowledge.rows??[]}:{};
         if((state.me.champion||(state.phase==='ChampSelect'&&rosterChampions(state).length))&&!state.ended&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
       }
       else if(!refreshTask&&Date.now()>=retryKnowledgeAt&&state.me.champion&&!state.ended&&Date.now()-state.at<30000&&(!cached.baseLoaded||rosterChampions(state).some(name=>!cached.heroes.has(name))||offerNames(state.offers).some(name=>!cached.candidates.has(name)))){

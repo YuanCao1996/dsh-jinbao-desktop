@@ -28,7 +28,7 @@ process.on('message',message=>{if(message?.action==='stop')stop();});
 if(process.connected)process.once('disconnect',stop);
 const captureTimer=setInterval(async()=>{
  if(!running||capturing||Date.now()<nextCaptureAt||!lastLiveState||!['KIWI','ARAM'].includes(lastLiveState.mode))return;
- capturing=true;
+ capturing=true;nextCaptureAt=Date.now()+1000;
  const generation=captureGeneration;
  try{
   const frame=await captureAugmentPanel(captureStop.signal);
@@ -41,7 +41,7 @@ const captureTimer=setInterval(async()=>{
    chatObserver.observe(frame,lastLiveState);
   }
  }catch{if(running&&lastCaptureAvailable!=='capture-error'){lastCaptureAvailable='capture-error';log.append({kind:'augment_capture_status',available:true,reason:'capture_failed'});}}finally{capturing=false;}
-},1500);captureTimer.unref();
+},250);captureTimer.unref();
 while(running){
  try{
   const credentials=readCredentials();

@@ -28,7 +28,7 @@ test('three independent rerolls keep one round and at most six observed choices'
  assert.equal(emitted.length,4);assert.ok(emitted.every(e=>e.roll===1));
  assert.deepEqual(emitted.at(-1).options.map(o=>o.name),['四号','五号','六号']);assert.equal(emitted.at(-1).seen.length,6);
  show(['第七号','五号','六号']);assert.equal(emitted.length,4);
- for(let i=0;i<3;i++)observer.observe(frame([]));show(names.slice(0,3));assert.equal(emitted.at(-1).roll,2);assert.equal(emitted.at(-1).seen.length,3);
+ for(let i=0;i<5;i++)observer.observe(frame([]));show(names.slice(0,3));assert.equal(emitted.at(-1).roll,2);assert.equal(emitted.at(-1).seen.length,3);
 });
 
 test('a single OCR frame cannot replace choices and background windows are ignored',()=>{
@@ -97,5 +97,87 @@ test('enlarged card-title OCR drives current choices when full-screen OCR finds 
  assert.deepEqual(emitted[0].options.map(o=>o.name),['吃过路兵','精怪魔法','最终形态']);assert.equal(o.status().recognized,3);
  const after=frame(['吃过路兵','精怪魔法','咒语裂变']);o.observe(after);o.observe(after);
  assert.equal(emitted[1].roll,1);assert.equal(emitted[1].reroll,true);assert.deepEqual(emitted[1].options.map(o=>o.name),['吃过路兵','精怪魔法','咒语裂变']);
- const empty={...before,titleLines:[]};for(let i=0;i<3;i++)o.observe(empty);assert.equal(emitted.at(-1).kind,'augment_offer_closed');
+ const empty={...before,titleLines:[]};for(let i=0;i<5;i++)o.observe(empty);assert.equal(emitted.at(-1).kind,'augment_offer_closed');
+});
+
+const slotFrame=names=>({available:true,foreground:true,width:1920,height:1080,lines:[],titleLines:names.flatMap((text,slot)=>text?[{text,x:550+slot*370,y:435,slot}]:[])});
+const stabilize=(observer,frame)=>{observer.observe(frame);observer.observe(frame);};
+
+test('initial partial titles are ranked immediately and missing slots fill the same round',()=>{
+ const events=[],o=createAugmentObserver(['甲','乙','丙'],e=>events.push(e));
+ stabilize(o,slotFrame(['甲',null,'丙']));
+ assert.deepEqual(events[0].options,[{name:'甲',slot:0,rerollsUsed:0},{name:'丙',slot:2,rerollsUsed:0}]);
+ assert.deepEqual(events[0].missingSlots,[1]);
+ stabilize(o,slotFrame([null,'乙',null]));
+ assert.equal(events[1].roll,1);assert.equal(events[1].reroll,false);
+ assert.deepEqual(events[1].options.map(r=>r.name),['甲','乙','丙']);
+ const state=initialOverlayState();state.game='lol';state.me.champion='安妮';
+ applyOverlayEvent(state,{game:'lol',...events[0],t:1},'game');
+ assert.match(overlayView(state,{rows:[row('丙',1)]}).augments,/#1 · 丙/);
+ assert.match(overlayView(state).augments,/已识别 2\/3/);
+});
+
+test('a single stable rerolled slot updates despite missing neighbours, using crops or calibrated full OCR',()=>{
+ for(const full of [false,true]){
+  const events=[],o=createAugmentObserver(['甲','乙','丙','丁'],e=>events.push(e));
+  const initial={...slotFrame(['甲','乙','丙']),titleLines:[],lines:['甲','乙','丙'].map((text,i)=>({text,x:550+i*370,y:435}))};
+  stabilize(o,initial);
+  const partial=full?{...initial,lines:[{text:'丁',x:920,y:435}]}:slotFrame([null,'丁',null]);
+  stabilize(o,partial);
+  assert.equal(events.length,2);assert.equal(events[1].reroll,true);
+  assert.deepEqual(events[1].options.map(r=>r.name),['甲','丁','丙']);
+ }
+});
+
+test('animation, background gaps and ambiguous titles do not spend a reroll; exhausted slots do not block neighbours',()=>{
+ const events=[],o=createAugmentObserver(['甲','乙','丙','丁','戊','己'],e=>events.push(e));
+ stabilize(o,slotFrame(['甲','乙','丙']));
+ o.observe(slotFrame(['丁',null,null]));o.observe({...slotFrame(['丁',null,null]),foreground:false});o.observe(slotFrame(['丁',null,null]));
+ assert.equal(events.length,1);
+ o.observe(slotFrame(['甲',null,null]));
+ const ambiguous=slotFrame(['丁',null,null]);ambiguous.titleLines.push({...ambiguous.titleLines[0],text:'戊',y:450});
+ stabilize(o,ambiguous);assert.equal(events.length,1);
+ stabilize(o,slotFrame(['丁',null,null]));assert.equal(events.length,2);
+ stabilize(o,slotFrame(['戊','己',null]));
+ assert.deepEqual(events.at(-1).options.map(r=>r.name),['丁','己','丙']);
+ assert.equal(events.at(-1).seen.length,5);
+});
+
+test('duplicate OCR titles cannot consume a refresh or replace another slot',()=>{
+ const events=[],o=createAugmentObserver(['甲','乙','丙','丁'],e=>events.push(e));
+ stabilize(o,slotFrame(['甲','乙','丙']));
+ stabilize(o,slotFrame(['乙',null,null]));assert.equal(events.length,1);
+ stabilize(o,slotFrame(['丁',null,null]));
+ assert.deepEqual(events.at(-1).options.map(r=>r.name),['丁','乙','丙']);
+});
+
+test('a lone tooltip cannot establish an augment selection panel',()=>{
+ const events=[],o=createAugmentObserver(['甲','乙','丙'],e=>events.push(e));
+ for(let i=0;i<6;i++)o.observe(slotFrame([null,'乙',null]));
+ assert.equal(events.length,0);
+ stabilize(o,slotFrame(['甲','乙',null]));assert.equal(events.length,1);
+});
+
+test('short blank refresh animations keep the same round and reroll history',()=>{
+ const events=[],o=createAugmentObserver(['甲','乙','丙','丁'],e=>events.push(e));
+ stabilize(o,slotFrame(['甲','乙','丙']));
+ for(let i=0;i<3;i++)o.observe(slotFrame([]));
+ assert.equal(events.length,1);
+ stabilize(o,slotFrame(['丁',null,null]));
+ assert.equal(events.at(-1).roll,1);assert.equal(events.at(-1).reroll,true);assert.equal(events.at(-1).seen.length,4);
+});
+
+test('unchanged candidate rankings stay visible while a refreshed slot is being queried',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-partial-rank-'));await mkdir(join(dir,'logs'));
+ const file=join(dir,'logs/live.jsonl');let at=Date.now(),release;
+ await writeFile(file,JSON.stringify({game:'lol',t:at,kind:'game_start',me:{champion:'安妮'}})+'\n');
+ const service=await createOverlayService({stateDir:dir,pollMs:10,search:async q=>{
+  if(q.filter?.name==='丁')await new Promise(r=>{release=r;});
+  return {results:q.filter?._type==='augments'?[{data:row(q.filter.name??'英雄推荐',q.filter.name==='乙'?2:1)}]:[]};
+ }});t.after(()=>{release?.();service.close();});
+ const offer=options=>appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options})+'\n');
+ await offer(['甲','乙','丙']);await until(()=>service.view().augments.includes('#2 · 乙'));
+ await offer(['丁','乙','丙']);await until(()=>!!release);
+ assert.match(service.view().augments,/#2 · 乙/);assert.doesNotMatch(service.view().augments,/#1 · 甲/);
+ release();await until(()=>service.view().augments.includes('#1 · 丁'));
 });

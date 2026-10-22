@@ -97,7 +97,6 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,4">
       <Button x:Name="SuggestButton" Content="推荐追问" FontSize="11" Padding="8,3" ToolTip="根据本局状态填入一个可回答的问题" Visibility="Collapsed"/>
       <Button x:Name="ScreenButton" Content="看当前画面" FontSize="11" Padding="8,3" ToolTip="让教练调用画面查看工具后回答"/>
-      <Button x:Name="AttachButton" Content="添加图片" FontSize="11" Padding="8,3" ToolTip="选一张本机图片，与问题一起发送"/>
       <TextBlock x:Name="ChatStatusText" Foreground="#E7BE79" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="280" Margin="8,0,0,0" Visibility="Collapsed"/>
      </StackPanel>
      <TextBox x:Name="QuestionBox" Grid.Row="1" MaxLength="1000" MinHeight="39" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="8" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
@@ -142,7 +141,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
-foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','SuggestButton','ScreenButton','AttachButton','ChatStatusText')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','SuggestButton','ScreenButton','ChatStatusText')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
@@ -402,7 +401,7 @@ function Update-State {
   $result=Receive-Job $script:job -ErrorAction SilentlyContinue
   if($result -and !$result.ok -and $script:pendingQuestion -and !$controls.QuestionBox.Text){$controls.QuestionBox.Text=$script:pendingQuestion}
   $script:pendingQuestion=$null
-  if($result -and $result.ok){$script:renderedTab=$null;$script:attachedImage=$null;$script:attachedName=''}
+  if($result -and $result.ok){$script:renderedTab=$null}
   $controls.HintText.Text=if($result -and $result.ok){'已完成'}elseif($result -and $result.message){[string]$result.message}else{'请求失败，请检查设置页的模型和服务状态。'}
   Remove-Job $script:job -Force -ErrorAction SilentlyContinue;$script:job=$null
   $controls.SendButton.IsEnabled=$true
@@ -444,9 +443,7 @@ function Start-Request([string]$route,[hashtable]$payload){
 function Send-Question {
  $question=$controls.QuestionBox.Text.Trim()
  if(!$question -or $script:job){return}
- $payload=@{question=$question}
- if($script:attachedImage){$payload.image=$script:attachedImage}
- Start-Request 'ask' $payload
+ Start-Request 'ask' @{question=$question}
  if($script:job){$script:pendingQuestion=$question;$controls.QuestionBox.Text=''}
 }
 $controls.SendButton.Add_Click({Send-Question})
@@ -674,11 +671,6 @@ try{
     $script:testResult.suggestionFillsInput=$controls.QuestionBox.Text -eq '这轮海克斯怎么选？'
     $controls.QuestionBox.Text=''
     $script:testResult.screenActionReady=$controls.ScreenButton.IsEnabled -and [Windows.Controls.Grid]::GetRow($mic) -eq 1
-    $testImage=Join-Path $StateDir 'chat-ui-test.jpg';$bitmap=[Drawing.Bitmap]::new(120,80)
-    try{$bitmap.Save($testImage,[Drawing.Imaging.ImageFormat]::Jpeg)}finally{$bitmap.Dispose()}
-    $script:testResult.imageAttachReady=(Set-ChatImageFile $testImage) -and $script:attachedImage -and $controls.AttachButton.Content -eq '已附图 ✓'
-    Remove-Item -LiteralPath $testImage -ErrorAction SilentlyContinue
-    $script:attachedImage=$null;$script:attachedName='';Update-OverlayComposer
     $script:testResult.fullChatMessage=$controls.RichContent.Children[1].Child.Children[1].Text -eq $fullAnswer
     $script:testResult.messageCopyAvailable=$controls.RichContent.Children[1].ContextMenu.Items[0].Tag -eq $fullAnswer
     $controls.FontSlider.Value=18

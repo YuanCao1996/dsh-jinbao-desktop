@@ -16,26 +16,9 @@ function Update-OverlayComposer {
  $controls.SuggestButton.Visibility=if($suggestion){'Visible'}else{'Collapsed'}
  $controls.SuggestButton.ToolTip=if($suggestion){$suggestion}else{'当前没有可用建议问题'}
  $controls.ScreenButton.IsEnabled=!!($script:snapshot.match -and !$script:snapshot.ended)
- $controls.AttachButton.Content=if($script:attachedImage){'已附图 ✓'}else{'添加图片'}
- $controls.AttachButton.ToolTip=if($script:attachedImage){'已选择 '+$script:attachedName+'；右键可移除'}else{'选一张本机图片，与问题一起发送'}
  $progress=if($script:job){if($script:snapshot.status){[string]$script:snapshot.status}else{'教练正在分析…'}}else{''}
  $controls.ChatStatusText.Text=$progress
  $controls.ChatStatusText.Visibility=if($progress){'Visible'}else{'Collapsed'}
-}
-function Set-ChatImageFile([string]$path){
- $source=$null
- try{
-  $source=[Drawing.Image]::FromFile($path)
-  foreach($limit in @(1280,960,720)){
-   $scale=[Math]::Min(1.0,[double]$limit/[Math]::Max($source.Width,$source.Height))
-   $width=[int][Math]::Max(1,[Math]::Round($source.Width*$scale));$height=[int][Math]::Max(1,[Math]::Round($source.Height*$scale))
-   $bitmap=[Drawing.Bitmap]::new($width,$height);$drawing=[Drawing.Graphics]::FromImage($bitmap);$stream=[IO.MemoryStream]::new()
-   try{$drawing.DrawImage($source,0,0,$width,$height);$bitmap.Save($stream,[Drawing.Imaging.ImageFormat]::Jpeg);if($stream.Length -le 524288){$script:attachedImage=[Convert]::ToBase64String($stream.ToArray());$script:attachedName=[IO.Path]::GetFileName($path);Update-OverlayComposer;return $true}}
-   finally{$drawing.Dispose();$bitmap.Dispose();$stream.Dispose()}
-  }
-  $controls.HintText.Text='图片过大，请选择更清晰简洁的截图。';return $false
- }catch{$controls.HintText.Text='无法读取图片，请选择 JPG、PNG 或 BMP 文件。';return $false}
- finally{if($source){$source.Dispose()}}
 }
 function Show-OverlayModeMenu {
  $menu=New-Object Windows.Controls.ContextMenu;$menu.Background='#19212A';$menu.Foreground='#E8EEF5';$menu.BorderBrush='#394A59'
@@ -63,7 +46,7 @@ function Update-OverlaySurface([bool]$force=$false){
    foreach($row in $rows){
     $user=$row.role -eq 'user';$card=New-Object Windows.Controls.Border;$card.CornerRadius=10;$card.Padding='12,10';$card.Margin=if($user){'40,0,0,10'}else{'0,0,20,10'};$card.Background=New-OverlaySurfaceBrush $(if($user){'#3F6278'}else{'#293747'});$card.BorderBrush=if($user){'#354C58'}else{'#2B3642'};$card.BorderThickness=1
     $column=New-Object Windows.Controls.StackPanel
-    $speakerName=if($user){$(if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'})+$(if($row.imageAttached){' · 附图'}else{''})}elseif($row.failed){'本次未完成'}else{'金宝'}
+    $speakerName=if($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
     $speaker=New-OverlayLabel $speakerName 11 $(if($row.failed){'#F5AD91'}elseif($user){'#ACBFCE'}else{'#E7BE79'});$speaker.Margin='0,0,0,5';$speaker.FontWeight='SemiBold';$column.Children.Add($speaker)|Out-Null
     $body=New-OverlayLabel ([string]$row.text) $font '#EBF0F5';Set-HighlightedText $body ([string]$row.text);$column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
     $copyMenu=New-Object Windows.Controls.ContextMenu;$copyMenu.Background='#19212A';$copyMenu.Foreground='#E8EEF5';$copyItem=New-Object Windows.Controls.MenuItem;$copyItem.Header='复制这条消息';$copyItem.Tag=[string]$row.text;$copyItem.Add_Click({param($sender,$eventArgs) try{[Windows.Clipboard]::SetText([string]$sender.Tag)}catch{}});$copyMenu.Items.Add($copyItem)|Out-Null;$card.ContextMenu=$copyMenu
@@ -104,13 +87,6 @@ $controls.ScreenButton.Add_Click({
  $controls.QuestionBox.Text=if($question){'请先查看当前游戏画面，再回答：'+$question}else{'请查看当前游戏画面，结合本局日志说出下一步最重要的决策。'}
  Send-Question
 })
-$controls.AttachButton.Add_Click({
- if($script:job){return}
- $picker=New-Object Windows.Forms.OpenFileDialog;$picker.Filter='图片文件|*.jpg;*.jpeg;*.png;*.bmp';$picker.Multiselect=$false
- if($picker.ShowDialog() -eq [Windows.Forms.DialogResult]::OK){[void](Set-ChatImageFile $picker.FileName)}
- $picker.Dispose()
-})
-$removeImage=New-Object Windows.Controls.ContextMenu;$removeItem=New-Object Windows.Controls.MenuItem;$removeItem.Header='移除附图';$removeItem.Add_Click({$script:attachedImage=$null;$script:attachedName='';Update-OverlayComposer});$removeImage.Items.Add($removeItem)|Out-Null;$controls.AttachButton.ContextMenu=$removeImage
 $controls.ModeButton.Add_Click({Show-OverlayModeMenu})
 $controls.PageScroll.Add_ScrollChanged({Update-ChatJump})
 $controls.LatestMessageButton.Add_Click({$controls.PageScroll.ScrollToEnd()})

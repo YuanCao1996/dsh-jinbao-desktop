@@ -238,7 +238,7 @@ export function overlayView(state, knowledge = {}) {
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
     events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：装备购买、海克斯选择、团灭和重要目标。',
     chat: state.chat.slice(-12).map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
-    chatRows: state.chat.slice(-40).map(r => ({role:r.role,origin:r.origin??'',text:r.text,failed:r.failed===true,imageAttached:r.imageAttached===true})),
+    chatRows: state.chat.slice(-40).map(r => ({role:r.role,origin:r.origin??'',text:r.text,failed:r.failed===true})),
     suggestedQuestion: suggestOverlayQuestion(state),
     status: state.agentStatus|| (knowledge.loading ? '正在检索推荐…' : ''), updatedAt: state.at,
   };
@@ -402,13 +402,13 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       busy = true;
       const match = state.match, started = state.matchStartedAt;
       const stillCurrent = () => state.match === match && state.matchStartedAt === started;
-      const q = { role: 'user', text: question.trim(), origin: metadata.origin === 'phone' ? 'phone' : 'desktop', imageAttached:!!metadata.imageObservation }; state.chat.push(q);
+      const q = { role: 'user', text: question.trim(), origin: metadata.origin === 'phone' ? 'phone' : 'desktop' }; state.chat.push(q);
       state.chat = state.chat.slice(-50);
       try {
         await memory.record(state, { kind: 'chat', ...q, gameSeconds: state.gameSeconds }, 'overlay-chat');
         await flush();
         if (!agentChat) throw Object.assign(Error('DSH Agent 聊天接口尚未就绪，请重新打开金宝'), { status: 503 });
-        const answer = await agentChat({ game: state.game || 'lol', match: state.match || 'waiting', question: q.text, topic, ...(metadata.imageObservation?{imageObservation:metadata.imageObservation}:{}) });
+        const answer = await agentChat({ game: state.game || 'lol', match: state.match || 'waiting', question: q.text, topic });
         if(!stillCurrent())throw Object.assign(Error('对局已切换，请在当前对局重新提问'),{status:409});
         if(typeof answer!=='string'||!answer.trim())throw Object.assign(Error('Empty Agent answer'),{status:502});
         const reply=answer.trim();

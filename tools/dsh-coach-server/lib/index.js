@@ -1952,7 +1952,7 @@ export function createMonitor(ctx, cfg, resolveGame) {
     const passive=pendingTexts.splice(0).map(line=>line.slice(0,400));
     const body=passive.length?{...job.body,prompt:String(job.body.prompt??'')+'\n【额外观察数据】\n'+JSON.stringify(passive)}:job.body;
     const context = turnContext(await memory.context(job.body?.game ?? cfg.defaultGame, job.body?.match_id ?? cfg.monitorMatch));
-    const msg = job.body?.chat ? buildGameChatMessage(job.body.question, context, job.body.game, job.body.imageObservation)
+    const msg = job.body?.chat ? buildGameChatMessage(job.body.question, context, job.body.game)
       : buildCoachMessage({ ...body, mode:context.current?.mode ?? body.mode, prompt: String(body.prompt ?? '') + '\n【共享对局与历史数据 JSON】\n' + JSON.stringify(context) }, resolveGame(job.body?.game));
     // 修复 #6:mark/trace 原定义在 drainQueue() 作用域,这里引用不到 → 定时器每跳
     //   必抛未捕获 ReferenceError 杀死宿主(桌面版打不开)。本函数补一套相同埋点三件套。

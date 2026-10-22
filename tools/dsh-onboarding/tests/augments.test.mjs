@@ -11,13 +11,17 @@ async function until(check){for(let i=0;i<200;i++){if(check())return;await pause
 
 test('hero-specific ranks beat win rate, omit details, and only rank the currently available slots',()=>{
  const s=initialOverlayState();s.game='lol';s.me.champion='安妮';
- const knowledge={rows:[row('一号',1,{winRate:40}),row('二号',2,{winRate:80}),row('三号',3),row('旧选项',4),row('其他英雄',1,{champion:'锐雯'})]};
+ const knowledge={rows:[row('一号',1,{winRate:40}),row('二号',2,{winRate:80}),row('三号',3),row('旧选项',4),row('其他英雄',1,{champion:'锐雯'}),{_type:'combos',champion:'安妮',augments:['组合甲','组合乙'],winRate:65}]};
  const all=overlayView(s,knowledge).augments;
- assert.ok(all.indexOf('一号')<all.indexOf('二号'));assert.doesNotMatch(all,/效果详情|其他英雄/);
+ assert.match(all,/组合甲 \+ 组合乙/);assert.doesNotMatch(all,/当前三选一|适配排名|#\d|效果详情|其他英雄/);
  applyOverlayEvent(s,{game:'lol',kind:'augment_offer',t:1,roll:1,options:['旧选项','二号','三号']},'game');
  applyOverlayEvent(s,{game:'lol',kind:'augment_offer',t:2,roll:1,options:['一号','二号','三号']},'game');
  const current=overlayView(s,knowledge).augments;
  assert.doesNotMatch(current,/旧选项|效果详情/);assert.match(current,/4\/6/);assert.ok(current.indexOf('一号')<current.indexOf('二号'));
+ assert.ok(current.indexOf('#1 · 一号')<current.indexOf('资料库推荐组合'));
+ applyOverlayEvent(s,{game:'lol',kind:'augment_offer_closed',t:3,roll:1},'game');
+ const closed=overlayView(s,knowledge).augments;
+ assert.match(closed,/组合甲 \+ 组合乙/);assert.doesNotMatch(closed,/当前三选一|适配排名|#\d/);
 });
 
 test('three independent rerolls keep one round and at most six observed choices',()=>{
@@ -46,8 +50,8 @@ test('manual refresh waits for results and a changed slot queries its new candid
   calls.push(q);await pause();const rows=q.filter?._type==='augments'?[row('初始',3),row('新候选',version),row('另一个',2)]:[];
   return {results:rows.filter(r=>!q.filter?.name||r.name===q.filter.name).map(data=>({data}))};
  }});t.after(service.close);
- await until(()=>service.view().augments.includes('初始'));
- version=4;await service.refresh();assert.match(service.view().augments,/#4 · 新候选/);
+ await until(()=>calls.some(q=>q.filter?._type==='augments'));
+ version=4;await service.refresh();assert.doesNotMatch(service.view().augments,/#4 · 新候选/);
  await appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options:['初始','另一个','未知']})+'\n');
  await until(()=>service.view().augments.includes('当前三选一'));
  await appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options:['新候选','另一个','未知']})+'\n');
@@ -65,7 +69,7 @@ test('a delayed slot lookup never restores replaced choices and rerolls reuse he
   const rows=q.filter?._type==='augments'?[row(q.filter.name??'英雄推荐',q.filter.name==='新选项'?1:5)]:[];
   return {results:rows.map(data=>({data}))};
  }});t.after(service.close);
- await until(()=>service.view().augments.includes('英雄推荐'));
+ await until(()=>calls.some(q=>q.filter?._type==='coreBuilds'));
  const offer=options=>appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options})+'\n');
  await offer(['旧选项','二号','三号']);await until(()=>!!release);
  await offer(['新选项','二号','三号']);await until(()=>service.view().augments.includes('新选项'));

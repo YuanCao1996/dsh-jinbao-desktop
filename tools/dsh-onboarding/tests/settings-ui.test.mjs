@@ -32,6 +32,8 @@ test('settings visibly switches from binding form to signed-in card and back on 
  assert.match(elements.get('quotaText').textContent,/64.07%/);assert.match(elements.get('quotaDetail').textContent,/累计总额度/);assert.ok(Math.abs(elements.get('quotaProgress').value-64.070345)<0.000001);
  await vm.runInContext("renderQuota({mode:'byok',account:{usage:{model:{limit:100,remaining:0,period:'daily'}}}})",context);
  assert.match(elements.get('quotaText').textContent,/0.00%/);assert.match(elements.get('quotaDetail').textContent,/不扣此额度/);
+ await vm.runInContext("renderQuota({mode:'cloud',account:{usage:{model:{limit:100000000,remaining:100000000,period:'weekly',resetsAt:'2026-10-25T16:00:00.000Z'}}}})",context);
+ assert.match(elements.get('quotaDetail').textContent,/每周额度/);assert.match(elements.get('quotaDetail').textContent,/下次补充/);assert.match(elements.get('quotaDetail').textContent,/北京时间/);
  await vm.runInContext("renderQuota({cloudConfigured:true,accountError:503})",context);assert.equal(elements.get('quotaProgress').hidden,true);assert.match(elements.get('quotaText').textContent,/暂不可用/);
  await vm.runInContext('renderQuota({})',context);assert.equal(elements.get('quota').hidden,true);
 });

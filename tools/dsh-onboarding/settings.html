@@ -26,7 +26,8 @@ el('quota').hidden=!s.account&&!s.cloudConfigured;el('quotaProgress').hidden=!va
 if(!valid){el('quotaText').textContent='剩余 token 额度暂不可用';el('quotaDetail').textContent=s.accountError?'账号服务暂时无法连接，请稍后刷新。':'等待服务端用量数据，不代表额度为零。';return;}
 const percent=q.limit?Math.max(0,Math.min(100,q.remaining/q.limit*100)):0;
 el('quotaProgress').value=percent;el('quotaText').textContent='剩余 token：'+percent.toFixed(2)+'%';
-el('quotaDetail').textContent=q.remaining.toLocaleString('zh-CN')+' / '+q.limit.toLocaleString('zh-CN')+' token · '+(q.period==='lifetime'?'累计总额度，不按日重置':'当日额度，UTC 零点重置')+'（含进行中请求预占）'+(s.mode==='byok'?'；当前使用自有 API Key，不扣此额度。':'');}
+const reset=q.period==='weekly'?'每周额度，周一北京时间 00:00 补满，不累计'+(q.resetsAt?' · 下次补充：'+new Date(q.resetsAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})+'（北京时间）':''):(q.period==='lifetime'?'累计总额度，不按日重置':'当日额度，UTC 零点重置');
+el('quotaDetail').textContent=q.remaining.toLocaleString('zh-CN')+' / '+q.limit.toLocaleString('zh-CN')+' token · '+reset+'（含进行中请求预占）'+(s.mode==='byok'?'；当前使用自有 API Key，不扣此额度。':'');}
 async function refresh(fill=false){const s=await api('status');latest=s;savedMode=s.mode;const email=s.account?.loginMethod==='email',logged=!!s.account;
 el('accountCard').classList.toggle('success',email);el('accountTitle').textContent=email?'✓ 邮箱已登录':'金宝账号';el('signedIn').hidden=!logged;
 el('account').textContent=email?(s.emailDisplay||'已验证邮箱'):(logged?'已登录原有账号，请绑定邮箱以便跨电脑使用。':'尚未登录，请使用邮箱验证码登录。');

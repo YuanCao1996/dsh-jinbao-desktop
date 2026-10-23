@@ -2023,6 +2023,15 @@ export function createMonitor(ctx, cfg, resolveGame) {
             clearInterval(timer);
             if (offTools) { try { offTools(); } catch {} }
             let text = state.text ?? "";
+            // Interactive chat also accepts DSH's completed final assistant message.
+            // Automatic advice still requires coach_reply to explicitly opt into broadcasting.
+            if (body.chat && !text.trim()) {
+              const finalAnswer = liveTextSink.turnHealth.chatAnswer();
+              if (finalAnswer) {
+                state.text = text = finalAnswer;
+                diagLog('✓ 聊天接收 DSH 最终文本回答（未使用 coach_reply）', cfg);
+              }
+            }
             if (!body.chat && body.game === 'lol' && coachEvents.length) {
               try {
                 const newest = await memory.context(body.game, body.match_id ?? cfg.monitorMatch);

@@ -23,3 +23,21 @@ test('real monitor queue calls native session, rejects silent chat, preserves fu
  const answer=await monitor.submitInteraction({kind:'chat'},'one',{chat:true,question:'详细说明',game:'lol',match_id:'one'});
  assert.equal(sessions,2);assert.equal(sends,2);assert.equal(emptyRejected,true);assert.equal(answer,'完整回答'.repeat(1500));assert.match(prompts[0],/用户主动提问/);assert.match(prompts[1],/详细说明/);
 });
+
+test('chat accepts completed native final text after tools, ignores reasoning and never reuses it for the next silent turn',async t=>{
+ const root=await mkdtemp(join(tmpdir(),'jinbao-chat-final-'));let count=0;
+ const ctx={on:()=>()=>{},get:key=>key==='workspaceRegistry'?{resolveByPath:async()=>({sessionIds:[],attachSession(){}})}:undefined,agentLoop:{createAgent:async(_ctx,options)=>{
+  const listeners=new Map();await options.setup({get:()=>undefined,on:(name,fn)=>listeners.set(name,fn),tools:{register(){}}});
+  const agent={status:'idle',session:{id:options.sessionId},send(){agent.status='running';const n=++count;setTimeout(()=>{
+   const emit=(type,data)=>listeners.get('session/event')?.(agent.session,{type,data});
+   if(n===1){
+    emit('step/start',{});emit('assistant/message',{message:{content:[{type:'text',text:'Searching...'}]}});emit('tool/call',{});
+    emit('step/start',{});emit('assistant/message',{message:{content:[{type:'reasoning',text:'private reasoning'},{type:'text',text:'完整的最终回答'.repeat(300)}]}});
+   }
+   emit('turn/end',{reason:{kind:'completed'}});agent.status='idle';
+  },5);},cancel(){this.status='idle';}};return {agent,dispose:async()=>{}};
+ }}};
+ const monitor=createMonitor(ctx,{sessionCwd:root,diagLogFile:join(root,'diag.log'),liveStateFile:join(root,'state.json'),monitorSessionId:'final-test',monitorMatch:'one',defaultGame:'lol',coachPreset:'test',liveTimeoutMs:2000},()=>({persona:{}}));t.after(()=>monitor.close());
+ const submit=()=>monitor.submitInteraction({kind:'chat'},'one',{chat:true,question:'hi',game:'lol',match_id:'one'});
+ assert.equal(await submit(),'完整的最终回答'.repeat(300));assert.equal(await submit(),'');
+});

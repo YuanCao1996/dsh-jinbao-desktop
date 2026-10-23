@@ -3,7 +3,7 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $main=Join-Path $root 'strategy-overlay.ps1';$module=Join-Path $root 'overlay-modes.ps1'
-foreach($file in @($main,$module,(Join-Path $root 'overlay-ui.ps1'))){
+foreach($file in @($main,$module,(Join-Path $root 'overlay-ui.ps1'),(Join-Path $root 'confirmation-countdown.ps1'))){
  $tokens=$null;$errors=$null;$ast=[Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors)
  if($errors.Count){throw 'Invalid production PowerShell'}
  foreach($fn in $ast.FindAll({param($node)$node -is [Management.Automation.Language.FunctionDefinitionAst]},$false)){Invoke-Expression $fn.Extent.Text}
@@ -41,6 +41,8 @@ function Save-Frame([string]$name){
 $results=@{}
 try{
  Set-DisplayMode 'narrow';Layout
+ Playback-Tick
+ Check 'emptyModeShowsVisibleWaitingText' (!$script:collapsed -and $controls.NarrowPanel.Visibility -eq 'Visible' -and $controls.NarrowText.Text.Length -gt 0 -and $controls.NarrowCanvas.ActualHeight -gt 20 -and $controls.NarrowCanvas.ActualWidth -gt 100)
  Add-PlaybackMessage (Message 'long' ('A'*600));Advance 31000
  Check 'activeMessageSurvivesThirtySeconds' ($script:activePlayback.id -eq 'long')
  Add-PlaybackMessage (Message 'normal' 'normal advice' 1)
@@ -78,8 +80,34 @@ try{
  Reset-Playback;$script:subtitleMode=$false;Set-NarrowMetrics;Layout
  Add-PlaybackMessage (Message 'first' 'first');Add-PlaybackMessage (Message 'second' 'second');Add-PlaybackMessage (Message 'third' 'third')
  Advance 1000
+ Check 'shortQueuedMessageHasReadingTime' ($script:activePlayback.id -eq 'first')
+ Advance 1600
  Check 'queueHandoffKeepsFifo' ($script:activePlayback.id -eq 'second' -and $script:playbackQueue[0].id -eq 'third')
- Advance 1000;Advance 80
+ Advance 1000;Advance 1600
  Check 'everyQueuedMessagePlays' ($script:activePlayback.id -eq 'third' -and !$script:playbackQueue.Count)
+ Remove-InvalidPlayback @('third') ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+ Check 'revokedActiveAdviceStopsImmediately' (!$script:activePlayback -and !$controls.NarrowText.Text)
+ $script:playbackQueue.Add([pscustomobject]@{id='expired';text='expired';expiresAt=1000})
+ $script:playbackQueue.Add([pscustomobject]@{id='valid';text='valid';expiresAt=3000})
+ Remove-InvalidPlayback @() 2000
+ Check 'expiredQueueAdviceRemovedWithoutDroppingValidAdvice' ($script:playbackQueue.Count -eq 1 -and $script:playbackQueue[0].id -eq 'valid')
+ Reset-Playback;$script:subtitleMode=$false;Set-NarrowMetrics;Layout
+ Add-PlaybackMessage (Message 'paragraphs' "First paragraph`nSecond paragraph`r`nFinal paragraph")
+ Check 'scrollRendersAllParagraphsOnOneLine' ($controls.NarrowText.Text -notmatch '[\r\n]' -and $controls.NarrowText.Text.Contains('Final paragraph'))
+ Reset-Playback
+ Add-PlaybackMessage (Message 'progress' ('abcdefghij '*80));Advance 10000
+ $script:subtitleMode=$true;Set-NarrowMetrics;Layout;Playback-Tick
+ $remaining=$script:subtitleLines -join ''
+ Check 'scrollToSubtitlePreservesReadProgress' ($remaining.Length -lt $script:activePlayback.text.Length -and $script:activePlayback.text.EndsWith($remaining))
+ Advance 4000
+ $tail=$script:subtitleLines[$script:subtitleIndex..($script:subtitleLines.Count-1)] -join ''
+ $script:subtitleMode=$false;Set-NarrowMetrics;Layout;Playback-Tick
+ Check 'subtitleToScrollDoesNotRestartMessage' ($script:scrollText -eq $tail -and $script:scrollOffset -eq 0)
+ Reset-Playback
+ Add-PlaybackMessage ([pscustomobject]@{id='stale';text='stale';priority=0;expiresAt=$script:playbackTestNow-1})
+ Check 'expiredMessageCannotWakePlayback' (!$script:activePlayback -and !$script:playbackQueue.Count)
+ $script:snapshot.playback=@([pscustomobject]@{id='old';text='old match';at=$script:playbackTestNow-60000})
+ Set-DisplayMode 'large';Set-DisplayMode 'narrow';Layout;Playback-Tick
+ Check 'switchDoesNotReplayOldMatchAndShowsWaiting' (!$script:activePlayback -and !$script:collapsed -and $controls.NarrowText.Text -ne 'old match' -and $controls.NarrowText.Text.Length -gt 0)
  $results|ConvertTo-Json -Compress
 }finally{$window.Close()}

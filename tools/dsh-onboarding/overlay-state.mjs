@@ -12,6 +12,7 @@ import {augmentConfirmation} from './augment-confirmation.mjs';
 import {teamStrength,TEAM_STRENGTH_NOTE} from './team-strength.mjs';
 import {chatFailureMessage} from './chat-errors.mjs';
 import {suggestOverlayQuestion} from './chat-suggestion.mjs';
+import {adviceIsValid} from '../dsh-coach-server/lib/lol-coaching-plan.js';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -37,7 +38,7 @@ export function applyOverlayEvent(state, event, file) {
   const at = eventTimestamp(event);
   if (event.broadcast) {
     if(at<state.matchStartedAt||(event.game&&state.game&&event.game!==state.game)||(event.match&&event.match!==state.match))return;
-    const reply = { at, text: text(event.broadcast), priority:Number.isInteger(event.priority)?Math.max(0,Math.min(2,event.priority)):0 };
+    const reply = { at, text: text(event.broadcast), validity:event.validity ?? null,priority:Number.isInteger(event.priority)?Math.max(0,Math.min(2,event.priority)):0 };
     if (!state.broadcasts.some(r => r.at === at && r.text === reply.text)) {
       state.broadcasts.push(reply); state.broadcasts.sort((a, b) => a.at - b.at);
       state.broadcasts = state.broadcasts.slice(-12);
@@ -206,7 +207,10 @@ export function overlayView(state, knowledge = {}) {
   const offered = state.ended?[]:offerNames(state.offers);
   const candidates = ranked.filter(row => offered.includes(row.name)).map(augmentLine);
   for(const name of offered)if(!ranked.some(row=>row.name===name))candidates.push(name+' · 暂无该英雄排名');
-  const current = state.broadcasts.at(-1)?.text || '等待新的游戏策略建议…';
+  // Revocation is permanent: a later death or item swap must not revive old advice.
+  for (const reply of state.broadcasts) if (!adviceIsValid(reply.validity,state)) reply.revoked = true;
+  const validBroadcasts = state.broadcasts.filter(r => !r.revoked);
+  const current = validBroadcasts.at(-1)?.text || (state.broadcasts.length?'局势已变化，等待新的针对性建议…':'等待新的游戏策略建议…');
   const augmentTitle='当前三选一 · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
   const augmentBody=candidates.join('\n')+(offered.length<3?'\n已识别 '+offered.length+'/3 个位置，其余卡片继续识别中…':'');
   const equipmentUpdates=state.events.filter(e=>e.topic==='equipment').slice(-12).map(e=>`${e.time} ${e.text}`).join('\n');
@@ -217,7 +221,8 @@ export function overlayView(state, knowledge = {}) {
   const heroStats = (state.game==='lol'?'大乱斗英雄样本胜率\n':'英雄样本胜率\n') + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?tierText(hero.tier):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
   return {
     game: state.game, mode:state.mode, match: state.match, gameTime: clock(state.gameSeconds), phase:state.phase, ended: state.ended,
-    playback:state.broadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0})),
+    playback:validBroadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0,expiresAt:r.validity?.expiresAt??null})),
+    revokedPlayback:state.broadcasts.filter(r=>r.revoked).map(r=>String(r.at)+':'+r.text),
     keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
     summary: [me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
@@ -388,10 +393,11 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   const timer = setInterval(scan, pollMs); timer.unref();
   return {
     view: () => overlayView(state, knowledge), refresh,
-    async confirm({id,name,dismiss=false}={}){
+    async confirm({id,name,dismiss=false,timeoutDefault=false}={}){
       const prompt=augmentConfirmation(state,knowledge.rows??[]);
       if(!prompt||id!==prompt.id||(!dismiss&&!prompt.options.some(o=>o.name===name)))throw Object.assign(Error('确认已过期或选项已变化'),{status:409});
-      const event={game:state.game,match:state.match,t:Date.now(),roll:prompt.round,...(dismiss?{kind:'augment_confirmation_dismissed'}:{kind:'augment_picked',who:'self',augment:name,source:'user-confirmed',confidence:'high',time:state.gameSeconds})};
+      if(timeoutDefault&&(dismiss||prompt.options[0]?.name!==name))throw Object.assign(Error('默认选项已变化'),{status:409});
+      const event={game:state.game,match:state.match,t:Date.now(),roll:prompt.round,...(dismiss?{kind:'augment_confirmation_dismissed'}:{kind:'augment_picked',who:'self',augment:name,source:timeoutDefault?'countdown-default-confirmed':'user-confirmed',confidence:'high',time:state.gameSeconds})};
       await appendFile(join(logs,'lol-user-confirmations.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
       router.apply(event,'lol-user-confirmations.jsonl');equipmentCoach.invalidate();await flush();equipmentCoach.tick();
       return {confirmed:!dismiss};

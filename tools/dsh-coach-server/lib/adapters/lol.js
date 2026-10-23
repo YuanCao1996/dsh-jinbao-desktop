@@ -1,4 +1,5 @@
 import { gameModePrompt, normalizeLolMode } from '../game-mode-prompt.js';
+import { buildLolCoachingPlan, stateCoachingTrigger } from '../lol-coaching-plan.js';
 // adapters/lol.js — 英雄联盟(端游)adapter
 // ----------
 // 与 wzry.js 同一契约,但游戏侧知识完全不同:
@@ -89,7 +90,7 @@ function fmtPick(p) {
   if (!p) return "?";
   const name = p.champion || p.name || "?";
   const bits = [];
-  if (n(p.tier)) bits.push(`T${p.tier}`);
+  if (n(p.tier) !== null || /^T\d+$/.test(String(p.tier ?? ''))) bits.push(String(p.tier).startsWith('T') ? p.tier : `T${p.tier}`);
   if (n(p.winRate)) bits.push(`${p.winRate}%`);
   if (n(p.level)) bits.push(`Lv${p.level}`);
   if (n(p.k)) bits.push(`${p.k}/${p.d ?? 0}/${p.a ?? 0}`);
@@ -137,7 +138,7 @@ function classify(raw) {
     case "shard_offer":
       return { kind, key: "属性碎片", ...raw, text: shardOfferText(raw) };
     case "augment_picked":
-      return { kind, key: raw.name ?? "海克斯", ...raw, text: `已选海克斯强化: ${raw.name ?? "?"}(${TIER_CN[raw.tier] ?? raw.tier ?? "?"})` };
+      return { kind, key: raw.name ?? raw.augment ?? "海克斯", ...raw, text: `海克斯选择记录: ${raw.name ?? raw.augment ?? "?"}(${TIER_CN[raw.tier] ?? raw.tier ?? "?"})；来源=${raw.source ?? '日志'}；置信度=${raw.confidence ?? '未知'}；归属=${raw.who ?? '未知'}` };
     case "game_start":
       return { kind, key: "开局", ...raw, text: gameStartText(raw) };
     case "loading_roster":
@@ -525,9 +526,12 @@ function isRelevant(event) {
  * · state(局内轮询快照)—— 信息量大但高频,作为上下文最合适;
  * · ocr 里 source=scoreboard/shop 的常规识别同理。海克斯面板必须自己触发,故不在此列。
  */
-function contextOnly(event) {
+function contextOnly(event, st) {
   if (!event) return false;
-  if (event.kind === "state") return true;
+  if (event.kind === "state") {
+    event.coachTrigger = stateCoachingTrigger(event, st);
+    return !event.coachTrigger;
+  }
   if (event.kind === "ocr" && (event.source === "scoreboard" || event.source === "shop")) return true;
   return false;
 }
@@ -562,7 +566,7 @@ function isFactChanged(event, st, sourceFile) {
     return true;
   }
   if (event.kind === "champ_select") {
-    const fp = `${event.me?.champion ?? ""}|${(event.enemies ?? []).map((e) => e.champion).join(",")}`;
+    const fp = JSON.stringify([event.me, event.allies, event.bench, event.enemies]);
     if (st.lastChampSelectFp === fp) return false;
     st.lastChampSelectFp = fp;
     return st.champSelectFpAt !== undefined || true;
@@ -581,6 +585,7 @@ function isFactChanged(event, st, sourceFile) {
 function isHighSignal(events, st) {
   for (const e of events ?? []) {
     if (!e) continue;
+    if (e.coachTrigger) return true;
     if (e.kind === "interaction") return true;
     if (e.kind === "augment_offer" || e.kind === "champ_select" || e.kind === "load" || e.kind === "game_start") return true;
     // 加载页阵容是"敌方是谁"的唯一来源,后面所有针对性建议都依赖它 —— 必须立即触发
@@ -589,6 +594,7 @@ function isHighSignal(events, st) {
     if (e.kind === "vision") return true;
     if (e.kind === "shard_offer") return true;   // 属性碎片三选一:同样必须立即触发
     if (e.kind === "augment_picked") return true;
+    if (e.kind === 'chat_events' && (e.events ?? []).some(row => ['purchase','augment_picked_chat','augment_mutate'].includes(row.kind))) return true;
     // 记分板/结算页都是玩家主动产生的信息密度极高的快照,值得立即送进对话
     if (e.kind === "scoreboard" || e.kind === "result_board") return true;
     // 强化质变是局内播报确证(高置信度),不同于面板推断 —— 立即送
@@ -667,7 +673,7 @@ function eventToBody(event, opts = {}) {
     mode: normalizeLolMode(event.mode ?? event.queue),
     prompt:
       `【实时对局观察】\n${toLine(event, 0)}\n\n` +
-      `请基于以上观察给出下一步建议(≤50字,口语化,先结论后依据);若纯状态无变化可输出空串。` +
+      buildLolCoachingPlan([event]).prompt +
       lookupHint(toLine(event, 0)),
     system_prompt: (opts.systemPrompt || PERSONA_SYSTEM_PROMPT) + "\n" + gameModePrompt({game:"lol",mode:event.mode??event.queue}),
     // ⚠ 这里**不要**写死 model。原先写着 "qwen3.6-plus",而**没有任何地方读它** ——
@@ -676,6 +682,7 @@ function eventToBody(event, opts = {}) {
     //   写死的值只会让人以为「教练对话跑在 qwen 上」,与事实相反;
     //   实际全部云端调用都是 opencode-go / deepseek-v4.1-flash。
     _count: 1,
+    _coachEvents: [event],
   };
 }
 
@@ -689,10 +696,10 @@ function eventsToBody(events, opts = {}) {
     // 注意:不要写"合并 N 条"这类裸数字(会被模型误读为比分)
     prompt:
       `【实时对局观察(${mode || "模式待确认"},按时间先后排列)】\n${lines.join("\n")}\n\n` +
-      `请基于以上实时观察给出下一步的简短播报建议(≤50字,口语化,说给正在打游戏的玩家听);` +
-      `若均为纯状态无变化可输出空串。` +
+      buildLolCoachingPlan(events).prompt +
       lookupHint(lines.join("\n")),
     mode,
+    _coachEvents: events,
     system_prompt: (opts.systemPrompt || PERSONA_SYSTEM_PROMPT) + "\n" + gameModePrompt({game:"lol",mode}),
     // ⚠ 这里**不要**写死 model。原先写着 "qwen3.6-plus",而**没有任何地方读它** ——
     //   真正生效的是 coach-server 配置里的 cfg.provider / cfg.model
@@ -711,8 +718,8 @@ export const LOL_ADAPTER = {
   version: 1,
   persona: {
     systemPrompt: PERSONA_SYSTEM_PROMPT,
-    maxReplyTokens: 80,
-    replyDescription: "输出本次教练请求的最终播报文本(≤50字)。调用后本次请求即完成。",
+    maxReplyTokens: 180,
+    replyDescription: "输出本轮阶段建议，2—4条短句、80—180字；紧急提醒1—2句，无新信息可静默。调用后本次请求即完成。",
     replyParamDescription: "最终播报文本,可为空字符串(表示静音)",
   },
   deepKeywords: ["出装", "天赋", "符文", "对线", "团战", "开团", "海克斯", "强化", "阵容", "克制", "强度", "胜率", "连招", "复盘", "节奏"],

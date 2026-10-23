@@ -214,7 +214,7 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
         const context=await readJson(join(updates,'ready-context.json'));
         await atomicJson(join(updates,'result.json'),{id:randomUUID(),state:'success',version:pending.release.version,fromVersion:context?.version===pending.release.version?context.fromVersion:null,notes:pending.release.notes,message:'更新成功，已运行 '+pending.release.version,at:now()});
         await atomicJson(join(updates,'apply-status.json'),{state:'complete',version:pending.release.version,message:'更新成功，已运行 '+pending.release.version,at:now()});
-        await status({state:'current',version:pending.release.version,message:'已更新到 '+pending.release.version});
+        await status({state:'current',version:pending.release.version,notes:pending.release.notes,message:'已更新到 '+pending.release.version});
       }
     },
     async reject() {

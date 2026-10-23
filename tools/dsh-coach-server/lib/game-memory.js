@@ -131,6 +131,8 @@ export function createGameMemory(stateDir) {
       while (JSON.stringify(result).length > 16000 && result.previousMatches.length) result.previousMatches.pop();
       if (current && JSON.stringify(result).length > 16000) {
         result.current = { game, mode: current.mode, match, phase: current.phase, gameSeconds: current.gameSeconds, me: current.me,
+          allies: current.allies, enemies: current.enemies, bench: current.phase === 'ChampSelect' ? current.bench : [],
+          augmentRounds: current.augmentRounds, ended: current.ended,
           offers: current.offers, ownedAugments: current.ownedAugments, events: current.events?.slice(-12),
           broadcasts: current.broadcasts?.slice(-3), chat: current.chat?.slice(-4), contextReduced: true };
       }

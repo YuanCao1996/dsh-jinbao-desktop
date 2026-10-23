@@ -20,7 +20,7 @@ function Set-NarrowMetrics {
  foreach($name in @('NarrowText','PreviousSubtitle','OutgoingSubtitle')){if($controls[$name]){$controls[$name].FontSize=$size}}
  $script:subtitleRowHeight=[Math]::Ceiling($size*1.6+4)
  if($script:displayMode -eq 'narrow' -and !$script:collapsed){
-  $window.MinWidth=[Math]::Min(320,$area.Width-20);$window.MinHeight=40
+  $window.MinWidth=[Math]::Min(260,$area.Width-20);$window.MinHeight=40
   $window.Width=[Math]::Min([Math]::Max($window.MinWidth,$script:narrowWidth),$area.Width-20)
   $window.Height=if($script:subtitleMode){2*$script:subtitleRowHeight+24}else{$script:subtitleRowHeight+24}
   $controls.MainBorder.Padding=if($script:subtitleMode){'8,6'}else{'12,8'}
@@ -68,7 +68,24 @@ function Push-Subtitle([string]$line,[bool]$animate=$true){
  }
 }
 function Prepare-PlaybackLayout([bool]$resume=$false){
- $remaining=if($resume -and $script:renderedSubtitleMode -and $script:subtitleLines.Count -and $script:subtitleIndex -lt $script:subtitleLines.Count){($script:subtitleLines[$script:subtitleIndex..($script:subtitleLines.Count-1)] -join '')}else{[string]$script:activePlayback.text}
+ $sameScroll=$resume -and !$script:renderedSubtitleMode -and !$script:subtitleMode
+ $remaining=([string]$script:activePlayback.text -replace '\s*\r?\n\s*','  ')
+ if($resume -and $script:renderedSubtitleMode -and $script:subtitleLines.Count -and $script:subtitleIndex -lt $script:subtitleLines.Count){
+  $remaining=($script:subtitleLines[$script:subtitleIndex..($script:subtitleLines.Count-1)] -join '')
+ }elseif($resume -and !$script:renderedSubtitleMode -and $script:scrollText){
+  $remaining=$script:scrollText
+  if($script:subtitleMode){
+   # Only skip text that has completely passed the left edge; keep visible text.
+   $measure=New-Object Windows.Controls.TextBlock;$measure.FontSize=$controls.NarrowText.FontSize;$measure.FontFamily=$controls.NarrowText.FontFamily
+   $offset=0;$next=0
+   while($next -lt $remaining.Length){
+    $next+=[Globalization.StringInfo]::GetNextTextElement($remaining,$next).Length
+    $measure.Text=$remaining.Substring(0,$next);$measure.Measure((New-Object Windows.Size([double]::PositiveInfinity,[double]::PositiveInfinity)))
+    if($measure.DesiredSize.Width -gt $script:scrollOffset){break};$offset=$next
+   }
+   $remaining=$remaining.Substring($offset)
+  }
+ }
  if($resume -or !$script:subtitleMode -or $script:renderedSubtitleMode -ne $script:subtitleMode){Clear-PlaybackRows}
  $script:renderedSubtitleMode=$script:subtitleMode;$script:playbackLayoutDirty=$false
  $width=[Math]::Max(120,$controls.NarrowCanvas.ActualWidth)
@@ -79,10 +96,11 @@ function Prepare-PlaybackLayout([bool]$resume=$false){
   $controls.PreviousSubtitle.Visibility='Collapsed';$controls.OutgoingSubtitle.Visibility='Collapsed'
   $controls.NarrowText.Width=[double]::NaN;$controls.NarrowText.TextAlignment='Left'
   [Windows.Controls.Canvas]::SetTop($controls.NarrowText,0);[Windows.Controls.Canvas]::SetLeft($controls.NarrowText,0)
-  Set-HighlightedText $controls.NarrowText ([string]$script:activePlayback.text)
+  $script:scrollText=$remaining
+  Set-HighlightedText $controls.NarrowText $remaining
   $controls.NarrowText.Measure((New-Object Windows.Size([double]::PositiveInfinity,[double]::PositiveInfinity)))
   $script:scrollEnd=[Math]::Max(0,$controls.NarrowText.DesiredSize.Width-$width)
-  $script:scrollOffset=if($resume){[Math]::Min($script:scrollOffset,$script:scrollEnd)}else{0}
+  $script:scrollOffset=if($sameScroll){[Math]::Min($script:scrollOffset,$script:scrollEnd)}else{0}
   $controls.NarrowText.RenderTransform.X=-$script:scrollOffset
  }
  $script:lineElapsed=0;$script:playbackPhase='playing';$script:playbackLastTick=Get-PlaybackNow
@@ -98,7 +116,19 @@ function Finish-Playback {
 function Reset-Playback {
  Finish-Playback;$script:playbackQueue.Clear();$script:subtitleLines=@();$script:subtitleIndex=0;Clear-PlaybackRows;$modeClock.Stop()
 }
+function Remove-InvalidPlayback($revoked,$now) {
+ for($i=$script:playbackQueue.Count-1;$i -ge 0;$i--){
+  $item=$script:playbackQueue[$i]
+  if(([string]$item.id -in $revoked) -or ($item.expiresAt -and $now -ge [double]$item.expiresAt)){$script:playbackQueue.RemoveAt($i)}
+ }
+ $item=$script:activePlayback
+ if($item -and (([string]$item.id -in $revoked) -or ($item.expiresAt -and $now -ge [double]$item.expiresAt))){
+  Finish-Playback;Clear-PlaybackRows
+  if($script:synth){$script:synth.SpeakAsyncCancelAll()}
+ }
+}
 function Add-PlaybackMessage($message){
+ if($message.expiresAt -and (Get-PlaybackNow) -ge [double]$message.expiresAt){return}
  $normalized=([string]$message.text).Trim()
  if(!$normalized){return}
  if($script:activePlayback -and ([string]$script:activePlayback.text).Trim() -eq $normalized -and [int]$script:activePlayback.priority -eq [int]$message.priority){return}
@@ -113,10 +143,17 @@ function Playback-Tick {
  if($settingsMenu.IsOpen -or $quickConfirm.IsOpen -or ($script:overlayModeMenu -and $script:overlayModeMenu.IsOpen) -or $script:dragging){$script:playbackLastTick=$now;return}
  $delta=[Math]::Max(0,$now-$script:playbackLastTick);$script:playbackLastTick=$now
  if(!$script:activePlayback -and $script:playbackQueue.Count){
+  $script:awaitingPlayback=$false
   $script:activePlayback=$script:playbackQueue[0];$script:playbackQueue.RemoveAt(0);$script:playbackAccelerated=$script:playbackQueue.Count -gt 0
   Prepare-PlaybackLayout;$delta=0
  }elseif($script:activePlayback -and $script:playbackLayoutDirty){Prepare-PlaybackLayout $true;$delta=0}
  if(!$script:activePlayback){
+  if($script:awaitingPlayback -and !$script:collapsed){
+   Clear-PlaybackRows
+   $controls.NarrowText.Width=[Math]::Max(120,$controls.NarrowCanvas.ActualWidth);$controls.NarrowText.TextAlignment='Center'
+   [Windows.Controls.Canvas]::SetTop($controls.NarrowText,0);[Windows.Controls.Canvas]::SetLeft($controls.NarrowText,0)
+   $controls.NarrowText.Text='等待新的对局建议…';$modeClock.Stop();return
+  }
   $modeClock.Stop();Clear-PlaybackRows
   if(!$script:collapsed){Set-Collapsed $true -PreserveMode}
   return
@@ -126,7 +163,7 @@ function Playback-Tick {
   if($script:subtitleMode){
    if(!$script:subtitleLines.Count){$script:playbackPhase='linger';$script:lineElapsed=0;return}
    $line=$script:subtitleLines[$script:subtitleIndex]
-   $hold=$script:subtitleBaseHold;if($script:playbackAccelerated){$hold=[Math]::Max(420,$hold/2)}
+   $hold=$script:subtitleBaseHold;if($script:playbackAccelerated){$hold=[Math]::Max(1200,$hold/1.3)}
    if($script:lineElapsed -ge $hold){
     if($script:subtitleIndex+1 -lt $script:subtitleLines.Count){$script:subtitleIndex++;Push-Subtitle $script:subtitleLines[$script:subtitleIndex];$script:lineElapsed=0}
     else{$script:playbackPhase='linger';$script:lineElapsed=0}
@@ -139,7 +176,8 @@ function Playback-Tick {
    if($script:scrollOffset -ge $script:scrollEnd){$script:playbackPhase='linger';$script:lineElapsed=0}
   }
  }elseif($script:playbackPhase -eq 'linger'){
-  if($script:playbackQueue.Count -and $script:lineElapsed -ge 80){Finish-Playback;Playback-Tick}
+  $readHold=if(!$script:subtitleMode -and $script:scrollEnd -eq 0){[Math]::Max(1600,[Math]::Min(5000,800+([string]$script:scrollText).Length*100))}else{1200}
+  if($script:playbackQueue.Count -and $script:lineElapsed -ge $readHold){Finish-Playback;Playback-Tick}
   elseif(!$script:playbackQueue.Count -and $script:lineElapsed -ge 3000){
    $script:playbackPhase='fade';$script:lineElapsed=0
    if(!$SelfTest){$fade=New-Object Windows.Media.Animation.DoubleAnimation;$fade.From=1;$fade.To=0;$fade.Duration=[TimeSpan]::FromMilliseconds(280);$controls.NarrowCanvas.BeginAnimation([Windows.UIElement]::OpacityProperty,$fade)}

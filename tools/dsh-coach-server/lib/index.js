@@ -41,6 +41,7 @@ import { createGameMemory } from './game-memory.js';
 import { registerGameMemoryTools } from './game-memory-tools.js';
 import { dispatchGameChat, buildGameChatMessage } from './chat-bridge.js';
 import { gameModePrompt } from './game-mode-prompt.js';
+import { buildLolCoachingPlan, coachingStillCurrent, createAdviceValidity, adviceIsValid } from './lol-coaching-plan.js';
 import {registerScreenTool} from './screen-tool.js';
 import {cacheSearchProvider,registerGameFetch,relevantGameSource} from './game-web.js';
 import {createAgentStatus} from './agent-status.js';
@@ -240,7 +241,7 @@ function buildCoachMessage(body, adapter) {
     "结合请求内容与已有对局记忆,决定是否需要查询数据(site_query 查英雄/胜率/梯度等本地真实数据,web_search 查版本/新套路/冷知识),然后给出最终播报文本。",
     "",
     "## 硬性规则",
-    `- 保持传入人设的口吻,≤${maxReplyTokens}字,单句,口语化,无markdown,不提工具/联网/DSH`,
+    adapter?.id === 'lol' ? '- 按本轮阶段任务输出2—4条短句，总计80—180字；紧急提醒1—2句。口语化，不提工具/联网/DSH，无新信息可静默。' : `- 保持传入人设的口吻,≤${maxReplyTokens}字,单句,口语化,无markdown,不提工具/联网/DSH`,
     "- 纯系统噪音消息(如“互动内容由AI生成”)→ 输出空字符串",
     "- 结论只能来自输入事实、对局记忆或查询到的数据,不得凭空编造数值",
     "- 调用 coach_reply 一次性输出最终播报文本:调用即结束,调用后立即停止,不要再输出文字、不要再调其他工具、不要再次调用 coach_reply"
@@ -1518,12 +1519,13 @@ function apply(ctx, config) {
             key: primary.key,
             context: primary.context ?? null,
             count: events.length,
+            validity: body._adviceValidity ?? null,
             broadcast: text
           };
           appendBroadcast(cfg.broadcastFile, entry);
           console.log(`[coach-server] logstream ★播报(${primary.kind}×${events.length}): ${text || "(silent)"}`);
           diagLog(`★播报(${primary.kind}×${events.length}): ${text || "(静音)"}`, cfg);
-          if(liveState.match===matchId)updateLiveState({ agentStatus: text ? "replied" : "idle", lastReply: { at: Date.now(), kind: primary.kind, text,game:a.id,match:matchId,source:sourceFile } }, cfg);
+          if(liveState.match===matchId)updateLiveState({ agentStatus: text ? "replied" : "idle", lastReply: { at: Date.now(), kind: primary.kind, text,game:a.id,match:matchId,source:sourceFile,validity:body._adviceValidity ?? null } }, cfg);
         }).catch((error) => {
           // 为什么把错误写进状态:真机对局 m20260919143955 里 134 个回合全部失败,但
           // 表现只是"教练不说话" —— lastReply 停在更早的一次成功、agentStatus 回到 idle。
@@ -1942,6 +1944,14 @@ export function createMonitor(ctx, cfg, resolveGame) {
     const passive=pendingTexts.splice(0).map(line=>line.slice(0,400));
     const body=passive.length?{...job.body,prompt:String(job.body.prompt??'')+'\n【额外观察数据】\n'+JSON.stringify(passive)}:job.body;
     const context = turnContext(await memory.context(job.body?.game ?? cfg.defaultGame, job.body?.match_id ?? cfg.monitorMatch));
+    const coachEvents = body._coachEvents ?? [];
+    if (!body.chat && body.game === 'lol' && coachEvents.length) {
+      if (!coachingStillCurrent(coachEvents, context.current)) return '';
+      // Replace the queued phase instructions with current facts, not stale polls.
+      const plan = buildLolCoachingPlan(coachEvents, context.current);
+      body.prompt = plan.prompt;
+      job.body._adviceValidity = createAdviceValidity(plan.stage, context.current);
+    }
     const msg = job.body?.chat ? buildGameChatMessage(job.body.question, context, job.body.game)
       : buildCoachMessage({ ...body, mode:context.current?.mode ?? body.mode, prompt: String(body.prompt ?? '') + '\n【共享对局与历史数据 JSON】\n' + JSON.stringify(context) }, resolveGame(job.body?.game));
     // 修复 #6:mark/trace 原定义在 drainQueue() 作用域,这里引用不到 → 定时器每跳
@@ -1973,7 +1983,7 @@ export function createMonitor(ctx, cfg, resolveGame) {
       const deadline = Date.now() + (cfg.liveTimeoutMs ?? cfg.deepTimeoutMs ?? 20000) + 5000;
       let phase = "waiting-run"; // waiting-run -> waiting-idle -> done
       let traceSeenStatus = null; // 埋点:只记变化,避免每 100ms 一行
-      const timer = setInterval(() => {
+      const timer = setInterval(async () => {
         // 加固:定时器内任何未捕获异常都会杀死宿主进程 → 桌面版闪退。整体包 try/catch。
         try {
         if (lifetime.signal.aborted) {
@@ -2012,7 +2022,13 @@ export function createMonitor(ctx, cfg, resolveGame) {
           if (s === "idle") {
             clearInterval(timer);
             if (offTools) { try { offTools(); } catch {} }
-            const text = state.text ?? "";
+            let text = state.text ?? "";
+            if (!body.chat && body.game === 'lol' && coachEvents.length) {
+              try {
+                const newest = await memory.context(body.game, body.match_id ?? cfg.monitorMatch);
+                if (!coachingStillCurrent(coachEvents, newest.current) || (newest.current && !adviceIsValid(job.body._adviceValidity, newest.current))) text = '';
+              } catch { text = ''; } // Do not publish a choice we cannot freshness-check.
+            }
             liveReplyState = null;
             if(liveTextSink.turnHealth.failedWithoutReply(state.text)){
               const error=Object.assign(new Error('Agent context blocked; recovering native session'),{code:'AGENT_CONTEXT_BLOCKED',status:503});

@@ -188,9 +188,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     for(const [name,assign]of [['apply-status',v=>{updateApply=v;}],['result',v=>{updateResult=v;}]])try{const path=join(stateDir,'updates',name+'.json');if((await stat(path)).size<16384)assign(JSON.parse(await readFile(path,'utf8')));}catch{}
     let phoneCaptureEnabled=false;try{phoneCaptureEnabled=JSON.parse(await readFile(join(stateDir,'phone-capture.json'),'utf8')).enabled===true;}catch{}
     let pluginUpdatePending=false;let version=null;try{const launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));version=launcher.version??null;pluginUpdatePending=launcher.pluginUpdatePending===true;}catch{}
+    let releaseNotes=null;try{const bundled=JSON.parse(await readFile(new URL('./release-notes.json',import.meta.url),'utf8'));if(bundled.version===version)releaseNotes=bundled.notes;}catch{}
     let maintenance=null;try{maintenance=JSON.parse(await readFile(join(stateDir,'maintenance-status.json'),'utf8'));}catch{}
     let emailDisplay=null;if(account?.loginMethod==='email')try{emailDisplay=JSON.parse(await readFile(join(stateDir,'email-account.json'),'utf8')).display;}catch{}
-    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {initialOverlayState,applyOverlayEvent,createOverlayService} from '../overlay-state.mjs';
@@ -29,4 +29,18 @@ test('one-click confirmation records actual choice, rejects stale IDs, persists 
  await service.confirm({id:prompt.id,name:'甲'});assert.equal(service.view().confirmation,null);assert.match(service.view().augments,/本局已选\n甲/);
  await assert.rejects(service.confirm({id:prompt.id,name:'乙'}),e=>e.status===409);
  await service.close();service=await open();assert.match(service.view().augments,/本局已选\n甲/);assert.equal(service.view().confirmation,null);
+});
+
+test('countdown default accepts only current first choice and logs its real source',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-default-'));await mkdir(join(dir,'logs'));const at=Date.now()-5000;
+ await writeFile(join(dir,'logs/live.jsonl'),[{kind:'game_start',me:{champion:'安妮'}},{kind:'augment_offer',roll:1,options:['甲','乙','丙']},{kind:'augment_offer_closed',roll:1}].map((e,i)=>JSON.stringify({game:'lol',match:'one',t:at+i,...e})).join('\n')+'\n');
+ const service=await createOverlayService({stateDir:dir,pollMs:10,search:async()=>({results:ranks.map(data=>({data}))})});t.after(()=>service.close());
+ for(let i=0;i<100&&!service.view().augments.includes('#1');i++)await new Promise(r=>setTimeout(r,10));
+ const prompt=service.view().confirmation;
+ await assert.rejects(service.confirm({id:prompt.id,name:'甲',timeoutDefault:true}),e=>e.status===409);
+ await service.confirm({id:prompt.id,name:'乙',timeoutDefault:true});
+ assert.equal(service.view().confirmation,null);
+ const event=JSON.parse((await readFile(join(dir,'logs/lol-user-confirmations.jsonl'),'utf8')).trim());
+ assert.equal(event.source,'countdown-default-confirmed');assert.equal(event.augment,'乙');
+ await assert.rejects(service.confirm({id:prompt.id,name:'乙',timeoutDefault:true}),e=>e.status===409);
 });

@@ -15,6 +15,7 @@ public static class JinbaoOverlayNative {
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] public static extern bool SetWindowDisplayAffinity(IntPtr handle,uint affinity);
+    [DllImport("user32.dll")] public static extern bool GetWindowDisplayAffinity(IntPtr handle,out uint affinity);
     [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr handle,int index);
     [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr handle,int index,int value);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr handle,IntPtr after,int x,int y,int w,int h,uint flags);
@@ -152,6 +153,7 @@ $script:confirmationId=''
 $script:renderedTab=$null
 $script:interactiveMode=[bool]$Interactive
 $script:windowHandle=[IntPtr]::Zero
+$script:showInCapture=$true
 $script:source=$null
 $script:hotkeyRegistered=$false
 $script:tab=$PreviewTab
@@ -215,10 +217,19 @@ function Set-Collapsed([bool]$on,[switch]$PreserveMode){
  Set-PointerMode $true
 }
 function Save-Preferences {
- $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value);bodyFontSize=[Math]::Round($controls.FontSlider.Value)} | ConvertTo-Json -Compress
+ $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value);bodyFontSize=[Math]::Round($controls.FontSlider.Value);showInCapture=[bool]$script:showInCapture;capturePreferenceVersion=2} | ConvertTo-Json -Compress
  $temporary=$preferencesFile+'.tmp'
  [IO.File]::WriteAllText($temporary,$json,[Text.UTF8Encoding]::new($false))
  Move-Item -LiteralPath $temporary -Destination $preferencesFile -Force
+}
+function Set-CaptureVisibility([bool]$show){
+ $script:showInCapture=$show
+ if($controls.CaptureMenuItem){$controls.CaptureMenuItem.IsChecked=$show}
+ if($script:windowHandle -eq [IntPtr]::Zero){return $true}
+ $affinity=if($show){0}else{0x11}
+ $ok=[JinbaoOverlayNative]::SetWindowDisplayAffinity($script:windowHandle,$affinity)
+ if(!$ok){$controls.HintText.Text='录制可见性设置失败，请检查直播软件的画面预览。'}
+ return $ok
 }
 function Set-BackgroundOpacity {
  $percent=[Math]::Round($controls.OpacitySlider.Value)
@@ -238,6 +249,8 @@ function Set-BodyFontSize {
 }
 try{
  $preferences=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
+ # Earlier releases saved capture exclusion by default; migrate once.
+ $script:showInCapture=if($preferences.capturePreferenceVersion -ge 2){$preferences.showInCapture -ne $false}else{$true}
  if($preferences.backgroundOpacity -ge 20 -and $preferences.backgroundOpacity -le 100){$controls.OpacitySlider.Value=[double]$preferences.backgroundOpacity}
  if($preferences.bodyFontSize -ge 11 -and $preferences.bodyFontSize -le 22){$controls.FontSlider.Value=[double]$preferences.bodyFontSize}
 }catch{}
@@ -252,6 +265,18 @@ $controls.AccountMenuItem=New-Object Windows.Controls.MenuItem
 $controls.AccountMenuItem.Header='账号与模型设置'
 $settingsMenu.Items.Add($controls.AppearanceMenuItem) | Out-Null
 $settingsMenu.Items.Add($controls.AccountMenuItem) | Out-Null
+$controls.CaptureMenuItem=New-Object Windows.Controls.MenuItem
+$controls.CaptureMenuItem.Header='允许截图、直播和录屏显示助手'
+$controls.CaptureMenuItem.IsCheckable=$true
+$controls.CaptureMenuItem.IsChecked=$script:showInCapture
+$controls.CaptureMenuItem.ToolTip='默认开启，允许截图和录屏采集悬浮窗；关闭后截图可能不含助手。游戏捕获通常只包含游戏，请使用屏幕或窗口捕获并检查预览。'
+$controls.CaptureMenuItem.Add_Click({
+ $previous=$script:showInCapture
+ if(Set-CaptureVisibility ([bool]$controls.CaptureMenuItem.IsChecked)){Save-Preferences}else{
+  Set-CaptureVisibility $previous | Out-Null
+ }
+})
+$settingsMenu.Items.Add($controls.CaptureMenuItem) | Out-Null
 $controls.SettingsButton.ContextMenu=$settingsMenu
 $controls.AppearanceMenuItem.Add_Click({if($script:displayMode -eq 'narrow'){Set-DisplayMode 'large'};$controls.AppearancePanel.Visibility=if($controls.AppearancePanel.Visibility -eq 'Visible'){'Collapsed'}else{'Visible'}})
 $controls.PageScroll.Add_PreviewMouseWheel({param($sender,$eventArgs)
@@ -359,13 +384,17 @@ function Update-State {
   $script:snapshot=$next
   $confirmation=$next.confirmation
   $confirmId=if($confirmation){[string]$confirmation.id}else{''}
-  if($confirmId -ne $script:confirmationId){
+  $choicesKey=Get-ConfirmationChoiceKey $confirmation
+  if($confirmId -ne $script:confirmationId -or $choicesKey -ne $script:confirmationChoicesKey){
+   $script:confirmationChoicesKey=$choicesKey
    $script:confirmationId=$confirmId;$controls.ConfirmationChoices.Children.Clear()
    $controls.ConfirmationPanel.Visibility=if($confirmId){'Visible'}else{'Collapsed'}
    if($confirmId){
-    $controls.ConfirmationTitle.Text=[string]$confirmation.title+'（推荐靠前，按实际选择确认）'
+    $controls.ConfirmationTitle.Text=[string]$confirmation.title+' · 10 秒后默认确认'
+    $choiceIndex=0
     foreach($option in $confirmation.options){
      $choice=New-Object Windows.Controls.Button;$choice.Content=[string]$option.label;$choice.Tag=[string]$option.name;$choice.FontSize=11
+     Set-ConfirmationChoiceStyle $choice $option ($choiceIndex -eq 0);$choiceIndex++
      $choice.Add_Click({param($sender,$e) Start-Request 'confirm' @{id=$script:confirmationId;name=[string]$sender.Tag}})
      $controls.ConfirmationChoices.Children.Add($choice)|Out-Null
     }
@@ -455,7 +484,7 @@ $controls.CloseButton.Add_Click({$window.Close()})
 $controls.BubbleClose.Add_Click({$window.Close()})
 $controls.ActionButton.Add_Click({
  $action=[string]$controls.ActionButton.Tag
- if($action -in @('login','settings','download')){
+ if($action -in @('login','settings','download','cancel-download')){
   $command=@{action=$action;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}|ConvertTo-Json -Compress
   [IO.File]::WriteAllText((Join-Path $StateDir 'launcher-control.json'),$command,[Text.UTF8Encoding]::new($false))
  }
@@ -524,7 +553,7 @@ $hook=[Windows.Interop.HwndSourceHook]{
 $window.Add_SourceInitialized({
  $script:windowHandle=(New-Object Windows.Interop.WindowInteropHelper($window)).Handle
  $script:source=[Windows.Interop.HwndSource]::FromHwnd($script:windowHandle);$script:source.AddHook($hook)
- [JinbaoOverlayNative]::SetWindowDisplayAffinity($script:windowHandle,0x11)|Out-Null
+ Set-CaptureVisibility $script:showInCapture | Out-Null
  $script:hotkeyRegistered=[JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,701,$(if($SelfTest){7}else{3}),$(if($SelfTest){123}else{74}))
  Set-Interaction $script:interactiveMode
  if(!$SelfTest){
@@ -541,6 +570,7 @@ $timer.Add_Tick({Update-State;Update-OverlayPlayback})
 $pointerTimer=New-Object Windows.Threading.DispatcherTimer;$pointerTimer.Interval=[TimeSpan]::FromMilliseconds(40)
 $pointerTimer.Add_Tick({Pointer-Tick})
 $window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
+. (Join-Path $PSScriptRoot 'confirmation-countdown.ps1')
 . (Join-Path $PSScriptRoot 'overlay-modes.ps1')
 . (Join-Path $PSScriptRoot 'overlay-ui.ps1')
 Set-Tab $PreviewTab;Update-State
@@ -558,6 +588,17 @@ try{
    $testing=New-Object Windows.Threading.DispatcherTimer;$testing.Interval=[TimeSpan]::FromMilliseconds(300)
    $testing.Add_Tick({
     $testing.Stop()
+    $captureAffinity=[uint32]0
+    [JinbaoOverlayNative]::GetWindowDisplayAffinity($script:windowHandle,[ref]$captureAffinity) | Out-Null
+    $script:testResult.initialCaptureAffinity=[int]$captureAffinity
+    $captureVisible=Set-CaptureVisibility $true
+    $script:testResult.captureVisible=$captureVisible -and [JinbaoOverlayNative]::GetWindowDisplayAffinity($script:windowHandle,[ref]$captureAffinity) -and $captureAffinity -eq 0
+    Save-Preferences
+    $savedCapture=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
+    $script:testResult.captureVisibilitySaved=$savedCapture.showInCapture -eq $true -and $savedCapture.capturePreferenceVersion -eq 2
+    $captureHidden=Set-CaptureVisibility $false
+    $script:testResult.captureHidden=$captureHidden -and [JinbaoOverlayNative]::GetWindowDisplayAffinity($script:windowHandle,[ref]$captureAffinity) -and $captureAffinity -eq 0x11
+    Save-Preferences
     $controls.FontSlider.Value=14
     Set-Tab 'advice'
     $controls.ConfirmationPanel.Visibility='Collapsed'

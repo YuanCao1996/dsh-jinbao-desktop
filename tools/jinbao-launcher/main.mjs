@@ -8,6 +8,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { createSupervisor } from './supervisor.mjs';
 import { installationCurrent, installationAction, createHostRecovery } from './installation.mjs';
 import { createUpdater } from './update.mjs';
+import { bootstrapHost } from './host-bootstrap.mjs';
 
 const exec = promisify(execFile);
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -19,8 +20,8 @@ const platform = join(root, 'tools/jinbao-launcher/platform.ps1');
 const shutdown = new AbortController();
 const updater = createUpdater({ root, stateDir });
 let pluginUpdatePending=false;
-async function psRun(script, extra = []) {
-  return exec(ps, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...extra], { windowsHide: true, timeout: 60000, maxBuffer: 65536 });
+async function psRun(script, extra = [], timeout = 60000) {
+  return exec(ps, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...extra], { windowsHide: true, timeout, maxBuffer: 65536 });
 }
 async function inspect() { return JSON.parse((await psRun(platform, ['-StateDir', stateDir])).stdout.replace(/^\uFEFF/, '')); }
 async function exists(path) { try { await access(path); return true; } catch { return false; } }
@@ -84,6 +85,8 @@ async function main() {
   const recovery = createHostRecovery();
   let loginOpened = false;
   let settingsOpened = false;
+  let hostInstallTask = null, hostInstallAttempted = false, hostInstallError = false;
+  let hostInstallProgress = {}, hostDownloadController;
   let loginPolling = false;
   let lastAction = Date.now();
   let nextHostCheck = 0;
@@ -95,7 +98,8 @@ async function main() {
         const command = JSON.parse(await readFile(join(stateDir, 'launcher-control.json'), 'utf8'));
         if (command.at > lastAction) { lastAction = command.at; action = command.action; }
       } catch { /* No pending UI action. */ }
-      if (action === 'download') await psRun(platform, ['-Action', 'open', '-Target', 'https://deepseek.com/harness/']);
+      if (action === 'download' && !hostInstallTask) { hostInstallAttempted = false; hostInstallError = false; }
+      if (action === 'cancel-download' && hostInstallProgress.stage === 'download') hostDownloadController?.abort();
       if (action === 'check-update') updateTask = updater.check(shutdown.signal);
       if (Date.now() > nextHostCheck) { host = await inspect(); nextHostCheck = Date.now() + 10000; }
       if (host.legacyOverlay?.length) {
@@ -106,8 +110,26 @@ async function main() {
         await writeFile(join(stateDir, 'overlay-control.json'), JSON.stringify({ action: 'exit', at: Date.now() }));
         break;
       }
-      if (!host.desktop) {
-        await publish('install-required', '首次使用需要安装 DeepSeek Harness，安装后金宝会自动继续。', { action: 'download', actionLabel: '下载 DSH' });
+      if (!host.desktop || hostInstallTask) {
+        if (!hostInstallAttempted) {
+          hostInstallAttempted = true;
+          hostDownloadController = new AbortController();
+          hostInstallTask = bootstrapHost({ stateDir,
+            signal: AbortSignal.any([shutdown.signal, hostDownloadController.signal]),
+            onProgress: progress => { hostInstallProgress = progress; },
+            runInstaller: file => psRun(join(root,'tools/jinbao-launcher/install-host.ps1'),['-InstallerPath',file],0) })
+            .catch(()=>{hostInstallError=true;})
+            .finally(()=>{hostInstallTask=null;nextHostCheck=0;});
+        }
+        await publish('install-required', hostInstallTask
+          ? hostInstallProgress.stage === 'download'
+            ? `正在下载 DSH：${hostInstallProgress.total ? Math.floor(hostInstallProgress.received / hostInstallProgress.total * 100) + '%' : (hostInstallProgress.received / 1048576).toFixed(1) + ' MB'}，首次安装完成后无需再次下载。`
+            : '正在验证并运行 DSH 官方安装程序，请完成安装界面；金宝会自动继续。'
+          : hostInstallError ? '自动下载安装未完成，请检查网络后重试。'
+          : '等待 DSH 安装完成；如已取消，可重新启动安装。',
+          hostInstallTask ? { hostInstall: hostInstallProgress,
+            ...(hostInstallProgress.stage === 'download' ? { action: 'cancel-download', actionLabel: '取消下载' } : {}) }
+            : { action: 'download', actionLabel: '重新下载安装' });
         await sleep(2000); continue;
       }
       if(pluginUpdatePending&&!host.running)installed=false;

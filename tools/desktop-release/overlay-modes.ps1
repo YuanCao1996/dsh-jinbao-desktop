@@ -1,6 +1,6 @@
 ﻿# Display and input policies; the Agent/session implementation remains in DSH.
 foreach($name in @('NarrowPanel','NarrowCanvas','NarrowText','NarrowExpand','NarrowMenu','NarrowClose','BubbleLabel','PreviousSubtitle','OutgoingSubtitle')){$controls[$name]=$window.FindName($name)}
-$script:narrowWidth=600.0;
+$script:narrowWidth=360.0;
 $script:displayMode='large';$script:subtitleMode=$true;$script:speakEnabled=$false;$script:unread=0
 $script:playbackMatch='';$script:seenPlayback=New-Object 'Collections.Generic.HashSet[string]'
 $script:seenPlaybackOrder=New-Object 'Collections.Generic.Queue[string]'
@@ -15,10 +15,13 @@ function Show-QuickConfirmation($confirmation){
  if(!$confirmation){$script:popupConfirmId='';return}
  if($script:displayMode -eq 'narrow' -and $script:collapsed){Wake-NarrowPlayback}
  $script:popupConfirmId=[string]$confirmation.id
+ $script:popupConfirmKey=Get-ConfirmationChoiceKey $confirmation
  $border=New-Object Windows.Controls.Border;$border.Background='#F0172033';$border.CornerRadius='8';$border.Padding='8';$border.Width=360
- $stack=New-Object Windows.Controls.StackPanel;$title=New-Object Windows.Controls.TextBlock;$title.Text=[string]$confirmation.title;$title.Foreground='#FBBF24';$title.Margin='4';$stack.Children.Add($title)|Out-Null
+ $stack=New-Object Windows.Controls.StackPanel;$title=New-Object Windows.Controls.TextBlock;$title.Text=[string]$confirmation.title+' · 10 秒后默认确认';$title.TextWrapping='Wrap';$title.Foreground='#FBBF24';$title.Margin='4';$stack.Children.Add($title)|Out-Null
+ $script:quickConfirmationTitle=$title;$choiceIndex=0
  foreach($option in $confirmation.options){
   $button=New-Object Windows.Controls.Button;$button.Content=[string]$option.label;$button.Margin='3';$button.Padding='6';$button.Background='#29364E';$button.Foreground='#E2E8F0';$button.Tag=@{id=$script:popupConfirmId;name=[string]$option.name}
+  Set-ConfirmationChoiceStyle $button $option ($choiceIndex -eq 0);$choiceIndex++
   $button.Add_Click({param($s,$e) Start-Confirmation $s.Tag;$quickConfirm.IsOpen=$false});$stack.Children.Add($button)|Out-Null
  }
  $skip=New-Object Windows.Controls.Button;$skip.Content='都不是 / 暂不确认';$skip.Margin='3';$skip.Tag=@{id=$script:popupConfirmId;dismiss=$true};$skip.Add_Click({param($s,$e) Start-Confirmation $s.Tag;$quickConfirm.IsOpen=$false});$stack.Children.Add($skip)|Out-Null
@@ -26,7 +29,7 @@ function Show-QuickConfirmation($confirmation){
 }
 function Save-DisplayMode {
  if($SelfTest){return}
- [IO.File]::WriteAllText($displayFile,(@{mode=$script:displayMode;subtitle=$script:subtitleMode;speech=$script:speakEnabled;width=$script:narrowWidth}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+ [IO.File]::WriteAllText($displayFile,(@{mode=$script:displayMode;subtitle=$script:subtitleMode;speech=$script:speakEnabled;width=$script:narrowWidth;widthVersion=1}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
 }
 function Set-DisplayMode([string]$mode){
  if($mode -notin @('large','narrow','silent')){return}
@@ -39,10 +42,11 @@ function Set-DisplayMode([string]$mode){
  $script:displayMode=$mode
  $controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1;Set-BackgroundOpacity
  if($mode -eq 'narrow'){
+  $script:awaitingPlayback=$true
   Set-Interaction $false
   $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible';$controls.ResizeGrip.Visibility='Visible';$controls.ResizeGrip.Cursor='SizeWE';$controls.ResizeGrip.Width=14;$controls.ResizeGrip.Height=14;$controls.ResizeGrip.Margin=0
   Set-NarrowMetrics;$window.UpdateLayout();$script:playbackLastTick=Get-PlaybackNow
-  if(!$script:activePlayback -and !$script:playbackQueue.Count -and !$script:snapshot.ended){$latest=@($script:snapshot.playback)|Select-Object -Last 1;if($latest){$script:playbackQueue.Add($latest)}}
+  if(!$script:activePlayback -and !$script:playbackQueue.Count -and !$script:snapshot.ended){$latest=@($script:snapshot.playback)|Select-Object -Last 1;if($latest -and (Get-PlaybackNow)-[double]$latest.at -lt 30000 -and (!$latest.expiresAt -or (Get-PlaybackNow) -lt [double]$latest.expiresAt)){$script:playbackQueue.Add($latest)}}
   $modeClock.Start()
  }elseif($mode -eq 'silent'){Set-Collapsed $true -PreserveMode}
  else{$controls.ResizeGrip.Visibility='Visible';$controls.ResizeGrip.Cursor='SizeNWSE';$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';$window.ResizeMode='CanResize';$script:unread=0;$controls.BubbleLabel.Text='金宝'}
@@ -65,6 +69,7 @@ function Set-HighlightedText($view,[string]$value){
 }
 function Start-Confirmation([hashtable]$payload){
  if($script:confirmationJob){return}
+ $script:confirmationHandledId=[string]$payload.id
  try{
   $url=[Uri]([IO.File]::ReadAllText((Join-Path $StateDir 'settings-link.txt')).Trim())
   if($url.Scheme -ne 'http' -or $url.Host -ne '127.0.0.1' -or $url.Fragment -notmatch '^#[a-f0-9]{64}$'){throw 'invalid local link'}
@@ -76,10 +81,11 @@ function Start-Confirmation([hashtable]$payload){
  }catch{$controls.HintText.Text='确认未提交，请重新打开金宝后重试。'}
 }
 function Update-OverlayPlayback {
+ Update-ConfirmationCountdown
  if($script:confirmationJob -and $script:confirmationJob.State -in @('Completed','Failed','Stopped')){
   $result=Receive-Job $script:confirmationJob -ErrorAction SilentlyContinue;Remove-Job $script:confirmationJob -Force;$script:confirmationJob=$null;$controls.ConfirmationChoices.IsEnabled=$true
   $controls.HintText.Text=if($result.ok){'已保存确认，正在更新建议'}else{'确认已过期或提交失败，请按当前选项重试'}
-  if(!$result.ok){$script:popupConfirmId=''}
+  if(!$result.ok){$script:popupConfirmId='';$controls.ConfirmationPanel.Visibility='Visible';$controls.ConfirmationTitle.Text='确认未提交，请手动选择'}
  }
  if($script:speechJob -and $script:speechJob.State -in @('Completed','Failed','Stopped')){
   $result=Receive-Job $script:speechJob -ErrorAction SilentlyContinue;Remove-Job $script:speechJob -Force;$script:speechJob=$null;$mic.Content='语音'
@@ -92,6 +98,7 @@ function Update-OverlayPlayback {
   if($script:speechJob){Stop-Job $script:speechJob;Remove-Job $script:speechJob -Force;$script:speechJob=$null;$mic.Content='语音'}
  }
  $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+ Remove-InvalidPlayback @($script:snapshot.revokedPlayback) $now
  foreach($message in @($script:snapshot.playback)){
   if(!$message -or !$script:seenPlayback.Add([string]$message.id)){continue}
   $script:seenPlaybackOrder.Enqueue([string]$message.id)
@@ -107,7 +114,7 @@ function Update-OverlayPlayback {
  $controls.BubbleLabel.Text=if($script:snapshot.confirmation){'金宝 !'}elseif($script:unread){'金宝 '+$script:unread}else{'金宝'}
  $controls.NarrowExpand.Content=if($script:snapshot.confirmation){'!'}else{'▣'}
  if(!$script:snapshot.confirmation){$quickConfirm.IsOpen=$false;$script:popupConfirmId=''}
- elseif($script:displayMode -eq 'narrow' -and !$script:confirmationJob -and $script:popupConfirmId -ne [string]$script:snapshot.confirmation.id){Show-QuickConfirmation $script:snapshot.confirmation}
+ elseif($script:displayMode -eq 'narrow' -and !$script:confirmationJob -and $script:confirmationHandledId -ne [string]$script:snapshot.confirmation.id -and ($script:popupConfirmId -ne [string]$script:snapshot.confirmation.id -or $script:popupConfirmKey -ne (Get-ConfirmationChoiceKey $script:snapshot.confirmation))){Show-QuickConfirmation $script:snapshot.confirmation}
  if($script:displayMode -eq 'narrow' -and !$script:activePlayback -and !$script:playbackQueue.Count -and !$script:snapshot.confirmation){$modeClock.Start()}
 }
 $modeClock=New-Object Windows.Threading.DispatcherTimer;$modeClock.Interval=[TimeSpan]::FromMilliseconds(16);$modeClock.Add_Tick({Playback-Tick})
@@ -130,4 +137,4 @@ $mic.Add_Click({
  $script:speechJob=Start-Job -ScriptBlock {try{Add-Type -AssemblyName System.Speech;$info=[Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()|Where-Object {$_.Culture.Name -eq 'zh-CN'}|Select-Object -First 1;if(!$info){throw 'Chinese recognizer unavailable'};$recognizer=[Speech.Recognition.SpeechRecognitionEngine]::new($info);try{$recognizer.LoadGrammar((New-Object Speech.Recognition.DictationGrammar));$recognizer.SetInputToDefaultAudioDevice();$result=$recognizer.Recognize([TimeSpan]::FromSeconds(20));@{text=[string]$result.Text}}finally{$recognizer.Dispose()}}catch{@{text=''}}}
  $mic.Content='取消';$controls.HintText.Text='正在听，请说话；完成后可编辑再发送。'
 })
-if(!$SelfTest){try{$savedDisplay=[IO.File]::ReadAllText($displayFile)|ConvertFrom-Json;$script:subtitleMode=$savedDisplay.subtitle -ne $false;$script:speakEnabled=$savedDisplay.speech -eq $true;if($savedDisplay.width -ge 320 -and $savedDisplay.width -le 1200){$script:narrowWidth=[double]$savedDisplay.width};Set-DisplayMode ([string]$savedDisplay.mode)}catch{}}
+if(!$SelfTest){try{$savedDisplay=[IO.File]::ReadAllText($displayFile)|ConvertFrom-Json;$script:subtitleMode=$savedDisplay.subtitle -ne $false;$script:speakEnabled=$savedDisplay.speech -eq $true;if($savedDisplay.width -ge 260 -and $savedDisplay.width -le 1200){$script:narrowWidth=if(!$savedDisplay.widthVersion -and $savedDisplay.width -eq 600){360.0}else{[double]$savedDisplay.width}};Set-DisplayMode ([string]$savedDisplay.mode)}catch{}}

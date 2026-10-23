@@ -12,3 +12,18 @@ test('final assistant text requires completed native turn and excludes intermedi
  h.reset();text();emit('turn/end',{reason:{kind:'failed',error:{code:'error'}}});assert.equal(h.chatAnswer(),'');
  h.reset();emit('assistant/message',{message:{content:[{type:'reasoning',text:'secret'}]}});emit('turn/end',{reason:{kind:'completed'}});assert.equal(h.chatAnswer(),'');
 });
+
+test('transport 413 recovers context; unrelated failures are visible without resetting context',()=>{
+ const h=createTurnHealth();h.observe({type:'turn/end',data:{reason:{kind:'error',error:{code:'INVALID_REQUEST',message:'413 "request too large"'}}}});
+ assert.equal(h.failedWithoutReply(null),true);assert.equal(h.chatAnswer(),'');
+ h.reset();h.observe({type:'turn/end',data:{reason:{kind:'error',error:{code:'AUTHENTICATION_ERROR',message:'401 invalid key'}}}});
+ assert.equal(h.failedWithoutReply(null),false);assert.equal(h.failure().code,'AUTHENTICATION_ERROR');
+});
+
+test('ordinary kills enrich context without triggering model turns; objectives remain actionable',async()=>{
+ const {LOL_ADAPTER}=await import('../lib/adapters/lol.js');const state=LOL_ADAPTER.createState();
+ assert.equal(LOL_ADAPTER.filter.contextOnly({kind:'event',text:'击杀：英雄甲击杀英雄乙'},state),true);
+ assert.equal(LOL_ADAPTER.filter.contextOnly({kind:'event',text:'防御塔被摧毁'},state),false);
+ assert.equal(LOL_ADAPTER.filter.contextOnly({kind:'event',text:'团灭'},state),false);
+ assert.equal(LOL_ADAPTER.filter.contextKey({kind:'event',text:'击杀'}),'lol:recent-event');
+});

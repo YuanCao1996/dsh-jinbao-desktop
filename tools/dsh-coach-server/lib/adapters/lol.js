@@ -528,6 +528,8 @@ function isRelevant(event) {
  */
 function contextOnly(event, st) {
   if (!event) return false;
+  // Ordinary kills are facts for the next decision, not separate model turns.
+  if (event.kind === 'event' && !/团灭|防御塔|水晶|基地|男爵|巨龙|小龙|先锋|ace/i.test(event.text ?? '')) return true;
   if (event.kind === "state") {
     event.coachTrigger = stateCoachingTrigger(event, st);
     return !event.coachTrigger;
@@ -611,6 +613,7 @@ function isHighSignal(events, st) {
 /** 上下文快照归并键(同类只保留最新)。 */
 function contextKey(event) {
   if (!event) return null;
+  if (event.kind === 'event') return 'lol:recent-event';
   if (event.kind === "state") return "lol:state";
   if (event.kind === "ocr") return `lol:ocr:${event.source ?? "unknown"}`;
   return `${event.kind}:${event.key ?? ""}`;

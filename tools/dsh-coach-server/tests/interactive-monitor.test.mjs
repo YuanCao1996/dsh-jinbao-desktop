@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import {createMonitor} from '../lib/index.js';
 
-test('real monitor queue calls native session, rejects silent chat, preserves full reply and recovers blocked context once',async t=>{
+for(const failureKind of ['compaction','oversize'])test('monitor preserves full replies and recovers context once: '+failureKind,async t=>{
  const root=await mkdtemp(join(tmpdir(),'jinbao-monitor-'));let sessions=0,sends=0,emptyRejected=false;const prompts=[];
  const workspace={sessionIds:[],attachSession(id){this.sessionIds.push(id);}};
  const ctx={on:()=>()=>{},get:key=>key==='workspaceRegistry'?{resolveByPath:async()=>workspace}:undefined,
@@ -11,7 +11,7 @@ test('real monitor queue calls native session, rejects silent chat, preserves fu
   await options.setup(agentCtx);const agent={status:'idle',session:{id:options.sessionId},send(message){
    sends++;prompts.push(message.content[0].text);agent.status='running';
    setTimeout(async()=>{
-    if(sends===1){listeners.get('session/event')?.(agent.session,{type:'compaction/end',data:{error:'summary failed'}});}
+    if(sends===1){listeners.get('session/event')?.(agent.session,failureKind==='compaction'?{type:'compaction/end',data:{error:'summary failed'}}:{type:'turn/end',data:{reason:{kind:'error',error:{code:'INVALID_REQUEST',message:'413 request body too large'}}}});}
     else{try{await tools.get('coach_reply').execute({text:''});}catch{emptyRejected=true;}
      await tools.get('coach_reply').execute({text:'完整回答'.repeat(1500)});}
     agent.status='idle';

@@ -5,7 +5,7 @@ const labels={site_query:'已检索攻略',site_datasets:'已读取检索能力'
 export function createAgentStatus(stateDir,game,match){
  let last=Promise.resolve();
  return (phase,name)=>{
-  const label=phase==='start'?'智能体正在分析…':phase==='complete'?'':labels[name]?labels[name]+'，继续分析…':'智能体正在整理回答…';
+  const label=phase==='start'?'智能体正在分析…':phase==='error'?'模型请求失败，等待恢复；可在设置查看诊断':phase==='complete'?'':labels[name]?labels[name]+'，继续分析…':'智能体正在整理回答…';
   const value={game,match,label,at:Date.now()};
   last=last.catch(()=>{}).then(async()=>{await mkdir(stateDir,{recursive:true});const file=join(stateDir,'agent-status.json'),tmp=file+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value),{mode:0o600});await rename(tmp,file);}).catch(()=>{});
  };

@@ -2043,6 +2043,11 @@ export function createMonitor(ctx, cfg, resolveGame) {
               const error=Object.assign(new Error('Agent context blocked; recovering native session'),{code:'AGENT_CONTEXT_BLOCKED',status:503});
               failMonitor(error,true);publishStatus('complete');reject(error);return;
             }
+            if (!state.text && liveTextSink.turnHealth.failure()) {
+              const error=Object.assign(new Error('模型请求失败，本轮未生成建议，请查看维护与诊断'),{status:503});
+              updateLiveState({lastError:{at:Date.now(),stage:'model-request',kind:job.event?.kind,message:error.message}},cfg);
+              publishStatus('error');reject(error);return;
+            }
             // 修复 #4:模型没调 coach_reply 就结束了回合。此时 assistant 的收尾文本通常是
             // 内部推理("纯状态…已静音处理,请求完成"),直接播报会把推理念给玩家听 ——
             // 所以按静音处理,只记诊断日志(便于发现契约违反)。

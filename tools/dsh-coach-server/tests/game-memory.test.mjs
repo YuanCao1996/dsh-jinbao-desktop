@@ -21,7 +21,8 @@ test('full event history paginates beyond the UI window, survives restart and do
   await assert.rejects(restarted.query({ game: 'lol', match: 'one', cursor: 2 }), /boundary/);
   state.match = 'two'; state.at = 2; await restarted.snapshot(state);
   const context = await restarted.context('lol', 'two');
-  assert.equal(context.previousMatches[0].match, 'one');
+  assert.deepEqual(context.previousMatches, []);
+  assert.equal((await restarted.history('lol','two'))[0].match, 'one');
   assert.equal(context.current.events[0].text, '装备购买');
   assert.equal(context.current.broadcasts[0].text, '等队友');
   assert.equal((await restarted.context('wzry', 'two')).previousMatches.length, 0);
@@ -96,4 +97,22 @@ test('startup replay cannot overwrite newer facts or erase archived chat summari
   assert.equal((await restarted.context('lol', 'replay')).current.gameSeconds, 600);
   await restarted.snapshot({ ...state, chat: [] });
   assert.equal((await restarted.context('lol', 'replay')).current.chat[0].text, '上一局要记住的问题');
+});
+
+test('new match carries only explicit preferences, never previous chat, advice or equipment',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-new-match-'));const memory=createGameMemory(dir);
+ await memory.remember('lol','偏好前排','我喜欢前排','记住，我喜欢前排');
+ await memory.snapshot({...initialOverlayState(),game:'lol',match:'old',at:1,me:{champion:'安妮',items:['旧装备']},chat:[{role:'assistant',text:'旧局建议'}],events:[{text:'旧局事件'}]});
+ const fresh={...initialOverlayState(),game:'lol',match:'new',at:2,me:{champion:'布隆'}};await memory.snapshot(fresh);
+ const result=await createGameMemory(dir).context('lol','new');
+ assert.deepEqual(result.previousMatches,[]);assert.equal(result.preferences[0].fact,'偏好前排');assert.equal(result.current.me.champion,'布隆');
+ assert.doesNotMatch(JSON.stringify(result),/旧装备|旧局建议|旧局事件|安妮/);
+});
+
+test('historical lookup requires explicit user intent; current facts and preferences remain available',async()=>{
+ const {registerGameMemoryTools}=await import('../lib/game-memory-tools.js');const tools=new Map();let question='现在出什么装备',historyCalls=0;
+ registerGameMemoryTools({tools:{register:t=>tools.set(t.name,t)}},{context:async()=>({current:{match:'new'},previousMatches:[]}),preferences:async()=>[{fact:'喜欢前排'}],history:async()=>{historyCalls++;return[{match:'old'}];}},'lol','new',()=>question);
+ assert.deepEqual((await tools.get('game_memory_query').execute({query:'装备'})).matches,[]);assert.equal(historyCalls,0);
+ assert.equal((await tools.get('game_memory_query').execute({preferences:true})).preferences[0].fact,'喜欢前排');
+ question='帮我复盘上一局';assert.equal((await tools.get('game_memory_query').execute({query:'装备'})).matches[0].match,'old');assert.equal(historyCalls,1);
 });

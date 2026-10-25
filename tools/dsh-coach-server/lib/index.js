@@ -109,7 +109,7 @@ const Config = z.object({
   watchStartDelayMs: z.number().default(5000),
   watchReplay: z.boolean().default(false),
   watchReplaySpeed: z.number().default(1),
-  // 诊断日志文件(同步追加)。默认 D:/work/DSH/workspace/coach-server.log。
+  // 诊断日志文件(同步追加)。默认 D:/work/DSH/workspace/logs/root-evidence/coach-server.log。
   // 为什么需要它而不只用 console:DSH 用 -RedirectStandardOutput 把 stdout 接到文件时,
   // Node 的 stdout 是带缓冲的 —— 实测 dsh-web.log 自进程启动后再没长过,
   // 关键警告永远不落盘(对局 m20260919143955 查不出原因的直接原因之一)。

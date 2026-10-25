@@ -25,7 +25,7 @@ export async function createPhoneChat({stateDir,deviceId,getToken,view,ask,servi
       if(receipt&&receipt.account!==fingerprint(token)){receipt=null;await rm(file,{force:true});}
       if(!receipt){
         const {request}=await remote('next',token);if(!request)return;
-        if(!UUID.test(request.id??'')||!UUID.test(request.lease??'')||!['lol','wzry'].includes(request.game)||typeof request.match!=='string'||!request.match||request.match.length>300||typeof request.question!=='string'||!request.question.trim()||request.question.length>1000||!Number.isFinite(request.leaseUntil))return;
+        if(!UUID.test(request.id??'')||!UUID.test(request.lease??'')||!['lol','wzry','generic'].includes(request.game)||typeof request.match!=='string'||!request.match||request.match.length>300||typeof request.question!=='string'||!request.question.trim()||request.question.length>1000||!Number.isFinite(request.leaseUntil))return;
         receipt={...request,account:fingerprint(token),status:'running'};await save();
       }
       if(receipt.status==='running'){

@@ -21,6 +21,7 @@ public static class JinbaoOverlayNative {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr handle,IntPtr after,int x,int y,int w,int h,uint flags);
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr handle,int id,uint modifiers,uint key);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr handle,int id);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr handle,uint message,IntPtr wParam,IntPtr lParam);
     public static void InputMode(IntPtr handle,bool through,bool focusable) {
         int style=GetWindowLong(handle,-20);
         style=through ? style|0x20 : style&~0x20;
@@ -63,9 +64,8 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
     <Grid x:Name="Header" Background="#01000000" Cursor="SizeAll">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock x:Name="TitleText" Text="金宝 · 游戏教练" Foreground="#F1F5F9" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,8,0" TextTrimming="CharacterEllipsis"/>
-     <Button x:Name="ModeButton" Grid.Column="1" Style="{StaticResource WindowAction}" Content="&#xE8A7;" ToolTip="切换大框、字幕、滚动与静默模式"/>
-     <Button x:Name="SettingsButton" Grid.Column="2" Style="{StaticResource WindowAction}" Content="&#xE713;" ToolTip="设置与显示模式"/>
-     <Button x:Name="CollapseButton" Grid.Column="3" Style="{StaticResource WindowAction}" Content="&#xE921;" ToolTip="收起到屏幕右侧"/>
+     <Button x:Name="SettingsButton" Grid.Column="2" Style="{StaticResource WindowAction}" Content="&#xE713;" ToolTip="设置 · 显示模式、外观与快捷键"/>
+     <Button x:Name="CollapseButton" Grid.Column="3" Style="{StaticResource WindowAction}" Content="&#xE921;" ToolTip="收起到屏幕右侧 · Ctrl+Alt+↓"/>
      <Button x:Name="CloseButton" Grid.Column="4" Style="{StaticResource WindowAction}" Content="&#xE8BB;" ToolTip="退出金宝悬浮窗"/>
     </Grid>
     <StackPanel Grid.Row="1" Margin="3,4,3,2">
@@ -123,7 +123,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
    <Grid x:Name="NarrowPanel" Visibility="Collapsed" Background="#01000000">
     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
     <Canvas x:Name="NarrowCanvas" ClipToBounds="True" Margin="0,2,4,0"><TextBlock x:Name="OutgoingSubtitle" Style="{StaticResource SubtitleText}"/><TextBlock x:Name="PreviousSubtitle" Style="{StaticResource SubtitleText}"/><TextBlock x:Name="NarrowText" Style="{StaticResource SubtitleText}" FontSize="14"/></Canvas>
-    <Button x:Name="NarrowExpand" Grid.Column="1" Content="▣" ToolTip="展开大框" Padding="5,0" VerticalAlignment="Center" Height="28"/>
+    <Button x:Name="NarrowExpand" Grid.Column="1" Content="▣" ToolTip="展开大框 · Ctrl+Alt+↑" Padding="5,0" VerticalAlignment="Center" Height="28"/>
     <Button x:Name="NarrowMenu" Grid.Column="2" Content="⋯" ToolTip="显示模式" Padding="5,0" VerticalAlignment="Center" Height="28"/>
     <Button x:Name="NarrowClose" Grid.Column="3" Content="×" ToolTip="退出悬浮窗" Padding="5,0" VerticalAlignment="Center" Height="28"/>
    </Grid>
@@ -382,6 +382,9 @@ function Update-State {
   $changed=(!$script:snapshot -or !$script:renderedTab -or [string]$next.($script:tab) -ne [string]$script:snapshot.($script:tab))
   $enteredSelection=$next.phase -eq 'ChampSelect' -and (!$script:snapshot -or $script:snapshot.phase -ne 'ChampSelect')
   $script:snapshot=$next
+  foreach($button in $controls.Tabs.Children){$button.Visibility=if($next.game -eq 'generic' -and $button.Tag -in @('equipment','augments','players')){'Collapsed'}else{'Visible'}}
+  $controls.Tabs.Columns=if($next.game -eq 'generic'){3}else{6}
+  if($next.game -eq 'generic' -and $script:tab -in @('equipment','augments','players')){Set-Tab 'advice'}
   $confirmation=$next.confirmation
   $confirmId=if($confirmation){[string]$confirmation.id}else{''}
   $choicesKey=Get-ConfirmationChoiceKey $confirmation
@@ -440,7 +443,7 @@ function Update-State {
   $command=[IO.File]::ReadAllText($controlFile) | ConvertFrom-Json
   if([double]$command.at -gt $script:lastControl){
    $script:lastControl=[double]$command.at
-   if($command.action -eq 'exit'){$window.Close()}
+   if($command.action -eq 'exit'){$script:exitApproved=$true;$window.Close()}
    elseif($command.action -eq 'show'){Set-Collapsed $false}
   }
  }catch{}
@@ -545,9 +548,22 @@ function Pointer-Tick {
  Update-Drag $p.X $p.Y (([JinbaoOverlayNative]::GetAsyncKeyState(1) -band 0x8000) -ne 0)
  Set-PointerMode (Test-PointerHotzone (New-Object Windows.Point($p.X,$p.Y)))
 }
+function Invoke-OverlayShortcut([int]$id){
+ if($id -eq 701){Set-Interaction (!$script:interactiveMode);return}
+ if($id -eq 703){Set-Collapsed $true;return}
+ if($id -in @(702,704,705)){
+  if($script:displayMode -ne 'large'){Set-DisplayMode 'large'}
+  Set-Collapsed $false
+  if($id -in @(704,705)){
+   $pages=if($script:snapshot.game -eq 'generic'){@('advice','events','chat')}else{@('advice','equipment','augments','players','events','chat')};$index=[Array]::IndexOf($pages,$script:tab)
+   $delta=if($id -eq 704){-1}else{1};Set-Tab $pages[(($index+$delta+$pages.Count)%$pages.Count)]
+  }
+ }
+}
+$script:registeredShortcuts=@()
 $hook=[Windows.Interop.HwndSourceHook]{
  param($handle,$message,$wParam,$lParam,[ref]$handled)
- if($message -eq 0x0312 -and $wParam.ToInt32() -eq 701){Set-Interaction (!$script:interactiveMode);$handled.Value=$true}
+ if($message -eq 0x0312 -and $wParam.ToInt32() -in @(701,702,703,704,705)){Invoke-OverlayShortcut $wParam.ToInt32();$handled.Value=$true}
  return [IntPtr]::Zero
 }
 $window.Add_SourceInitialized({
@@ -555,6 +571,7 @@ $window.Add_SourceInitialized({
  $script:source=[Windows.Interop.HwndSource]::FromHwnd($script:windowHandle);$script:source.AddHook($hook)
  Set-CaptureVisibility $script:showInCapture | Out-Null
  $script:hotkeyRegistered=[JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,701,$(if($SelfTest){7}else{3}),$(if($SelfTest){123}else{74}))
+ if(!$SelfTest){foreach($entry in @(@(702,38),@(703,40),@(704,37),@(705,39))){if([JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,$entry[0],16387,$entry[1])){$script:registeredShortcuts+=@($entry[0])}else{$shortcutMenu.Header='快捷键（有组合被占用）';foreach($item in $shortcutMenu.Items){if($item.Tag -eq $entry[0]){$item.Header=[string]$item.Header+'（已被占用）'}}}}}
  Set-Interaction $script:interactiveMode
  if(!$SelfTest){
   $script:tray=New-Object Windows.Forms.NotifyIcon
@@ -565,10 +582,18 @@ $window.Add_SourceInitialized({
   $script:tray.ContextMenuStrip=$menu;$script:tray.Add_DoubleClick({Set-Collapsed $false;Set-Interaction $true})
  }
 })
-$timer=New-Object Windows.Threading.DispatcherTimer;$timer.Interval=[TimeSpan]::FromMilliseconds(1000)
+$timer=New-Object Windows.Threading.DispatcherTimer;$timer.Interval=[TimeSpan]::FromMilliseconds(250)
 $timer.Add_Tick({Update-State;Update-OverlayPlayback})
 $pointerTimer=New-Object Windows.Threading.DispatcherTimer;$pointerTimer.Interval=[TimeSpan]::FromMilliseconds(40)
 $pointerTimer.Add_Tick({Pointer-Tick})
+$script:exitApproved=$false;$script:testExitChoice=$true;$script:exitConfirmations=0
+$window.Add_Closing({param($sender,$eventArgs)
+ if(!$script:exitApproved){
+  $script:exitConfirmations++
+  $confirmed=if($SelfTest){$script:testExitChoice}else{[Windows.MessageBox]::Show($window,'确定退出金宝吗？退出后将停止采集和策略建议。','退出金宝',[Windows.MessageBoxButton]::YesNo,[Windows.MessageBoxImage]::Question,[Windows.MessageBoxResult]::No) -eq [Windows.MessageBoxResult]::Yes}
+  if(!$confirmed){$eventArgs.Cancel=$true;return};$script:exitApproved=$true
+ }
+})
 $window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
 . (Join-Path $PSScriptRoot 'confirmation-countdown.ps1')
 . (Join-Path $PSScriptRoot 'overlay-modes.ps1')
@@ -731,7 +756,16 @@ try{
     [IO.File]::WriteAllText($stateFile,($selectionFixture|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false));Update-State
     $script:testResult.toolProgressVisible=$controls.ChatStatusText.Text -eq '已联网搜索，继续分析…' -and $controls.ChatStatusText.Visibility -eq 'Visible'
     $script:job=$null
-    $controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    $script:testExitChoice=$false;$controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    $script:testResult.exitCancelKeepsWindow=!$script:closing -and !$script:exitApproved
+    # Exercise the actual HWND hook, without sending keys to any other app.
+    [JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]703,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutCollapse=$script:collapsed
+    [JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]702,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutExpand=!$script:collapsed
+    Set-Tab 'advice';[JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]705,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutNext=$script:tab -eq 'equipment'
+    [JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]704,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutPrevious=$script:tab -eq 'advice'
+    $script:testResult.modeButtonInSettings=$null -eq $window.FindName('ModeButton') -and $settingsMenu.Items.Contains($modeMenu)
+    $script:testExitChoice=$true;$controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
+    $script:testResult.exitConfirmed=$script:exitConfirmations -ge 2
     $script:testResult.closed=$script:closing
    });$testing.Start()
   }
@@ -752,6 +786,7 @@ try{
  if($script:job){Stop-Job $script:job -ErrorAction SilentlyContinue;Remove-Job $script:job -Force -ErrorAction SilentlyContinue}
  if($script:tray){$script:tray.Visible=$false;$script:tray.Dispose()}
  if($script:hotkeyRegistered){[JinbaoOverlayNative]::UnregisterHotKey($script:windowHandle,701) | Out-Null}
+ foreach($id in $script:registeredShortcuts){[JinbaoOverlayNative]::UnregisterHotKey($script:windowHandle,$id)|Out-Null}
  if($script:source){$script:source.RemoveHook($hook)}
  if($owned){$mutex.ReleaseMutex()};$mutex.Dispose()
 }

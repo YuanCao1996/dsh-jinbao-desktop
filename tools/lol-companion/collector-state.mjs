@@ -4,6 +4,7 @@ import { createPlayerStats, buildRows } from './player-stats.mjs';
 export function stateEvent(state) {
   return { kind: 'state', mode: state.mode, me: state.me, allies: state.allies, enemies: state.enemies,
     state: { ...state.me, time: state.gameTime, hpPct: state.me.maxHp ? state.me.hp / state.me.maxHp : null,
+      ...(state.sideSource?{sideSource:state.sideSource}:{}),
       teamKills: state.allies.reduce((n, p) => n + (p.k ?? 0), 0),
       enemyKills: state.enemies.reduce((n, p) => n + (p.k ?? 0), 0),
       enemyItems: state.enemies.flatMap(p => p.items ?? []) } };

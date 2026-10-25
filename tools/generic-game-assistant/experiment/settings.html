@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>金宝 · 通用游戏实验</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 system-ui,"Microsoft YaHei",sans-serif;color:#202326;background:#f5f7f6;letter-spacing:0}button,input,select{font:inherit}button{cursor:pointer;border:1px solid #cbd2ce;background:#fff;color:#202326;border-radius:5px;padding:7px 12px;min-height:36px}button:hover{background:#e6eee9}button:disabled{opacity:.5;cursor:default}button.primary{background:#176b4a;color:#fff;border-color:#176b4a}header{padding:16px 24px;background:#fff;border-bottom:1px solid #d9dfdc;display:flex;align-items:center;justify-content:space-between;gap:12px}h1{font-size:19px;margin:0;font-weight:650}main{max-width:1120px;margin:auto;padding:20px 24px}.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #d9dfdc;padding-bottom:18px}select{min-width:180px;max-width:100%;flex:1;padding:8px;background:#fff;border:1px solid #cbd2ce;border-radius:4px}label{display:flex;gap:5px;align-items:center}.split{display:grid;grid-template-columns:minmax(240px,1fr) minmax(280px,1fr);gap:28px;margin-top:20px}h2{font-size:15px;margin:0 0 12px}canvas{width:100%;max-width:520px;aspect-ratio:1;background:#e4e9e6;border:1px solid #cbd2ce}.metrics{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:#56625b;margin:8px 0}.messages{height:300px;overflow:auto;border-bottom:1px solid #d9dfdc}.message{padding:10px 0;border-top:1px solid #d9dfdc;white-space:pre-wrap;overflow-wrap:anywhere}.message.user{color:#176b4a}.message.error{color:#a52b40}.sender{display:block;font-size:11px;color:#657168;margin-bottom:3px}.composer{display:flex;gap:8px;padding-top:12px}input[type=text]{min-width:0;flex:1;border:1px solid #cbd2ce;border-radius:5px;padding:8px}.events{margin-top:18px;height:150px;overflow:auto;font:12px/1.6 ui-monospace,monospace;color:#59645d;white-space:pre-wrap;overflow-wrap:anywhere}.status{font-size:12px;color:#59645d}#error{min-height:22px;color:#a52b40;font-size:13px;margin-top:10px}@media(max-width:700px){header{padding:12px 16px}main{padding:16px}.split{grid-template-columns:1fr;gap:18px}.messages{height:240px}.controls{gap:8px}h1{font-size:17px}}
+</style>
+<header><h1>金宝 · 通用游戏实验</h1><span id="connection" class="status">未连接</span></header>
+<main>
+<div class="controls"><select id="windows" aria-label="游戏窗口"><option value="">选择窗口</option></select><button id="refresh" title="刷新窗口">↻</button><select id="game" aria-label="观察能力"><option value="generic">通用观察</option><option value="gomoku">五子棋棋盘识别</option></select><label><input type="checkbox" id="authorized">授权此窗口</label><label><input type="checkbox" id="automatic">自动观察</label><label><input type="checkbox" id="cloud-images">允许云端读图</label><button id="start" class="primary">开始</button><button id="stop">停止</button></div>
+<div id="error" role="status"></div>
+<div class="split"><section><h2 id="observation-title">窗口观察</h2><canvas id="board" width="520" height="520" aria-label="当前观察"></canvas><div class="metrics"><span id="freshness">无观察</span><span id="pieces">内容未知</span><span id="mode">未启动</span></div><button id="observe">观察一次</button></section>
+<section><h2>本局对话</h2><div id="messages" class="messages" role="log"></div><form id="form" class="composer"><input type="text" id="question" maxlength="2000" aria-label="问题" placeholder="输入问题"><button id="send" class="primary" title="发送">↑</button></form><div id="events" class="events" aria-label="工具进度"></div></section></div>
+</main>
+<script>
+const $=id=>document.getElementById(id),token=location.hash.slice(1)||sessionStorage.getItem('generic-session');if(location.hash)sessionStorage.setItem('generic-session',token);history.replaceState(null,'',location.pathname);
+const labels={generic_read_state:'读取当前观察',generic_observe:'观察授权窗口',generic_read_screen:'读取画面内容',generic_plan:'调整观察计划',generic_reply:'提交回复',started:'开始',completed:'完成',failed:'失败'};
+const errors={authorization_required:'访问未授权，请重新打开启动链接',specialized_game_active:'LoL正在运行，实验观察已暂停',window_not_foreground:'游戏窗口不在前台',foreground_unavailable:'无法访问当前桌面',model_not_configured:'云端模型未配置',observation_stale:'画面观察已过期',observation_incomplete:'暂无可用观察',operation_busy:'操作进行中',analysis_busy:'正在分析',model_cooldown:'模型请求冷却中',no_session:'未启动观察'};
+let pending=false,lastSequence=0,liveSession=false;
+async function api(path,data){const r=await fetch('/api/'+path,{method:data===undefined?'GET':'POST',headers:{'x-generic-session':token,...(data===undefined?{}:{'Content-Type':'application/json'})},...(data===undefined?{}:{body:JSON.stringify(data)})});const v=await r.json();if(!r.ok)throw Error(v.error);return v}
+function fail(e){$('error').textContent=errors[e.message]||e.message}
+function message(role,text){const row=document.createElement('div');row.className='message '+role;const name=document.createElement('span');name.className='sender';name.textContent=role==='user'?'你':role==='error'?'未完成':'金宝';row.append(name,document.createTextNode(text));$('messages').append(row);$('messages').scrollTop=$('messages').scrollHeight}
+async function run(fn){if(pending)return;pending=true;$('error').textContent='';$('send').disabled=true;try{await fn()}catch(e){fail(e)}finally{pending=false;$('send').disabled=false;await status()}}
+async function refresh(){const v=await api('windows');const selected=$('windows').value;$('windows').replaceChildren(new Option('选择窗口',''));for(const w of v.windows)$('windows').add(new Option(w.title+' · '+w.width+'×'+w.height,w.id));$('windows').value=selected;$('authorized').checked=false}
+function draw(facts){
+  const c=$('board').getContext('2d');c.fillStyle='#e4e9e6';c.fillRect(0,0,520,520);
+  if(!facts?.cells){
+    c.fillStyle='#59645d';c.font='18px system-ui';c.textAlign='left';
+    const readable=facts&&facts.visual_status!=='unread';
+    c.fillText(!facts?'暂无画面观察':!readable?'画面已截取，内容尚未确认':facts.visual_status==='partial'?'已确认部分画面内容':'已读取画面内容',24,44);
+    if(readable){
+      const lines=[...(facts.texts||[]),...(facts.entities||[]).map(e=>e.label)].filter(Boolean);
+      let y=84;
+      for(const line of lines){
+        let row='';
+        for(const char of String(line)){
+          if(c.measureText(row+char).width>472){c.fillText(row,24,y);y+=26;row='';if(y>474)break}
+          row+=char;
+        }
+        if(y>474)break;
+        if(row){c.fillText(row,24,y);y+=26}
+      }
+      if(y>474)c.fillText('更多内容见本局对话',24,504);
+    }
+    return;
+  }
+  const n=facts.board_size,step=460/(n-1);c.strokeStyle='#819087';c.lineWidth=1;
+  for(let i=0;i<n;i++){const p=30+i*step;c.beginPath();c.moveTo(30,p);c.lineTo(490,p);c.moveTo(p,30);c.lineTo(p,490);c.stroke()}
+  for(let i=0;i<facts.cells.length;i++){const v=facts.cells[i];if(v==='empty')continue;const x=30+(i%n)*step,y=30+Math.floor(i/n)*step;c.beginPath();if(v==='unknown'){c.fillStyle='#a52b40';c.fillRect(x-2,y-2,4,4);continue}c.arc(x,y,step*.38,0,Math.PI*2);c.fillStyle=v==='black'?'#232925':'#fff';c.fill();c.strokeStyle='#626f66';c.stroke()}
+}
+async function status(){
+  try{
+    const v=await api('status');liveSession=!!v.session_id;
+    for(const id of ['windows','game','authorized','automatic','refresh','start'])$(id).disabled=liveSession;
+    $('cloud-images').disabled=(liveSession?v.state.game:$('game').value)!=='generic';
+    $('connection').textContent=v.model_ready?'模型已配置':'模型未配置';
+    $('mode').textContent=v.session_id?(v.automatic?'自动观察':'手动观察'):'未启动';
+    $('freshness').textContent=v.state.status==='observed'?'观察年龄 '+Math.round(v.state.age_ms/1000)+'秒':'观察未知或已过期';
+    const f=v.state.facts;draw(f);
+    $('observation-title').textContent=v.state.game==='gomoku'?'棋盘观察':'窗口观察';
+    $('pieces').textContent=f?.cells?'黑 '+f.cells.filter(x=>x==='black').length+' · 白 '+f.cells.filter(x=>x==='white').length+' · 执子未知':f?.visual_status==='unread'?'画面内容待确认':f?'文字 '+f.texts.length+' · 对象 '+f.entities.length:'内容未知';
+    for(const e of v.events){
+      if(e.sequence<=lastSequence)continue;lastSequence=e.sequence;
+      if(e.event==='tool_progress')$('events').append(document.createTextNode(e.time.slice(11,19)+' '+(labels[e.tool]||e.tool)+' '+(labels[e.phase]||e.phase)+'\n'));
+      if(e.event==='request_failed')fail(Error(e.reason));
+    }
+    $('events').scrollTop=$('events').scrollHeight;
+  }catch(e){fail(e)}
+}
+$('refresh').onclick=()=>run(refresh);$('windows').onchange=()=>{$('authorized').checked=false};
+$('game').onchange=()=>{$('cloud-images').disabled=$('game').value!=='generic';if($('cloud-images').disabled)$('cloud-images').checked=false};
+$('cloud-images').onchange=async()=>{if(!liveSession)return;const allowed=$('cloud-images').checked;try{await api('image-permission',{allowed})}catch(e){$('cloud-images').checked=!allowed;fail(e)}};
+$('start').onclick=()=>run(async()=>{const v=await api('start',{targetId:$('windows').value,authorized:$('authorized').checked,automatic:$('automatic').checked,game:$('game').value,allowCloudImages:$('cloud-images').checked});if(v.status!=='started')throw Error(v.reason||v.status);$('messages').replaceChildren();$('events').textContent=''});
+$('stop').onclick=async()=>{try{await api('stop',{});await status()}catch(e){fail(e)}};
+$('observe').onclick=()=>run(async()=>{const v=await api('observe',{});if(v.status!=='observed')throw Error(v.reason||v.status)});
+$('form').onsubmit=e=>{e.preventDefault();const q=$('question').value.trim();if(!q||pending)return;run(async()=>{message('user',q);$('question').value='';const v=await api('ask',{question:q});message(v.status==='completed'?'assistant':'error',v.text||errors[v.reason]||v.reason||v.status)})};
+draw(null);run(refresh);setInterval(status,2000);
+</script></html>

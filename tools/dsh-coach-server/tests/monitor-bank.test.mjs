@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMonitorBank } from '../lib/monitor-bank.js';
 
-test('games and matches get independent monitors; busy sessions survive idle eviction and all close with bank', () => {
+test('each match owns its monitor; a new match closes the previous Agent without touching the other game', () => {
   const monitors = [];
   const bank = createMonitorBank((game, source) => {
     const monitor = { game, source, running: false, closed: false,
@@ -16,8 +16,8 @@ test('games and matches get independent monitors; busy sessions survive idle evi
   assert.notEqual(lol, wzry);
   assert.equal(bank.get('lol', 'match1'), lol);
   const next = bank.get('lol', 'match2');
-  assert.notEqual(next, lol); assert.equal(wzry.closed, true); assert.equal(lol.closed, false);
+  assert.notEqual(next, lol); assert.equal(wzry.closed, false); assert.equal(lol.closed, true);
   next.running = true;
-  assert.throws(() => bank.get('wzry', 'match2'), /busy/);
+  const nextWzry=bank.get('wzry', 'match2');assert.equal(wzry.closed,true);assert.notEqual(nextWzry,wzry);
   bank.close(); assert.equal(lol.closed, true); assert.equal(next.closed, true);
 });

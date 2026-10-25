@@ -1,9 +1,16 @@
-﻿param([switch]$CheckOnly,[string]$ImagePath)
+﻿param([switch]$CheckOnly,[string]$ImagePath,[switch]$Worker)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+if($Worker){
+ while($null -ne ($captureCommand=[Console]::In.ReadLine())){
+  if($captureCommand -eq 'exit'){break}
+  if($captureCommand -eq 'capture'){$captureResult=if($ImagePath){& $PSCommandPath -ImagePath $ImagePath}else{& $PSCommandPath};[Console]::Out.WriteLine([string]$captureResult);[Console]::Out.Flush()}
+ }
+ exit 0
+}
 $engineReady=$false
 try{
- Add-Type @'
+ if(-not('JinbaoAugmentCapture' -as [type])){Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class JinbaoAugmentCapture {
@@ -16,6 +23,7 @@ public static class JinbaoAugmentCapture {
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 }
 '@
+ }
  Add-Type -AssemblyName System.Runtime.WindowsRuntime,System.Drawing
  $null=[Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
  $null=[Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime]
@@ -25,7 +33,8 @@ public static class JinbaoAugmentCapture {
  $null=[Windows.Graphics.Imaging.SoftwareBitmap,Windows.Foundation,ContentType=WindowsRuntime]
  $null=[Windows.Media.Ocr.OcrResult,Windows.Foundation,ContentType=WindowsRuntime]
  $language=[Windows.Globalization.Language]::new('zh-Hans')
- $engine=[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($language)
+ $engine=$global:JinbaoAugmentOcrEngine
+ if(!$engine){$engine=[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($language);$global:JinbaoAugmentOcrEngine=$engine}
  if(!$engine){Write-Output '{"available":false,"reason":"chinese_language_unavailable"}';exit 0}
  $engineReady=$true
  if($CheckOnly){Write-Output '{"available":true}';exit 0}
@@ -85,7 +94,11 @@ public static class JinbaoAugmentCapture {
  $inputBitmap=$null
  try{
   $inputBitmap=[Drawing.Bitmap]::new($inputStream)
-  for($slot=0;$slot -lt 3;$slot++){
+  $w=[int]($inputBitmap.Height*0.302);$h=[int]($inputBitmap.Height*0.11);$gutter=36;$stride=$h*3+$gutter
+  $strip=[Drawing.Bitmap]::new($w*3,$stride*3);$stripGraphics=[Drawing.Graphics]::FromImage($strip)
+  try{
+   $stripGraphics.Clear([Drawing.Color]::Black)
+   for($slot=0;$slot -lt 3;$slot++){
    $crop=$null;$enlarged=$null;$encoded=[IO.MemoryStream]::new()
    try{
     $x=[int]($inputBitmap.Width/2+$inputBitmap.Height*(-0.4713+0.3413*$slot));$y=[int]($inputBitmap.Height*0.35)
@@ -93,15 +106,23 @@ public static class JinbaoAugmentCapture {
     $rect=[Drawing.Rectangle]::new($x,$y,$w,$h)
     $crop=$inputBitmap.Clone($rect,$inputBitmap.PixelFormat)
     $enlarged=[Drawing.Bitmap]::new($crop,[Drawing.Size]::new($w*3,$h*3))
-    $enlarged.Save($encoded,[Drawing.Imaging.ImageFormat]::Png)
-    $local=Read-OcrImage $encoded.ToArray()
-    foreach($line in $local.lines){
-     $titleLines+=@{text=$line.text;x=($x+$line.x/3);y=($y+$line.y/3);slot=$slot}
-    }
+    $stripGraphics.DrawImage($enlarged,0,$slot*$stride)
    }finally{if($crop){$crop.Dispose()};if($enlarged){$enlarged.Dispose()};$encoded.Dispose()}
   }
+   $stripBytes=[IO.MemoryStream]::new()
+   try{
+    $strip.Save($stripBytes,[Drawing.Imaging.ImageFormat]::Png);$local=Read-OcrImage $stripBytes.ToArray()
+    foreach($line in $local.lines){
+     $slot=[int][Math]::Floor($line.y/$stride)
+     if($slot -ge 0 -and $slot -lt 3 -and ($line.y-$slot*$stride) -lt $h*3){
+      $x=[int]($inputBitmap.Width/2+$inputBitmap.Height*(-0.4713+0.3413*$slot));$y=[int]($inputBitmap.Height*0.35)
+      $titleLines+=@{text=$line.text;x=($x+$line.x/3);y=($y+($line.y-$slot*$stride)/3);slot=$slot}
+     }
+    }
+   }finally{$stripBytes.Dispose()}
+  }finally{$stripGraphics.Dispose();$strip.Dispose()}
  }finally{if($inputBitmap){$inputBitmap.Dispose()};$inputStream.Dispose()}
- @{available=$true;foreground=$true;width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-titles'} | ConvertTo-Json -Depth 5 -Compress
+ @{available=$true;foreground=$true;width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-strip';cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 5 -Compress
 
 }catch{
  if($engineReady){Write-Output '{"available":true,"foreground":false,"reason":"capture_failed"}'}

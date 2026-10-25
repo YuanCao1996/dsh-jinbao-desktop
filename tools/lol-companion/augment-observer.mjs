@@ -54,10 +54,11 @@ export function createAugmentObserver(names, emit) {
       }
       misses=0;
       const next=[...current],changed=[];
+      const stableFirstFrame=!current.some(Boolean)&&frame.cardLayout==='stacked-title-regions'&&recognized===3&&new Set(candidates).size===3;
       candidates.forEach((name,slot)=>{
         if(!name||name===current[slot]){pending[slot]=null;return;}
         pending[slot]=pending[slot]?.name===name?{name,count:pending[slot].count+1}:{name,count:1};
-        if(pending[slot].count>=2&&slots[slot].length<2){next[slot]=name;changed.push(slot);}
+        if(pending[slot].count>=(stableFirstFrame?1:2)&&slots[slot].length<2){next[slot]=name;changed.push(slot);}
       });
       // Ambiguous or duplicate titles must not consume a slot's only reroll.
       const accepted=changed.filter(slot=>next.filter(name=>name===next[slot]).length===1);

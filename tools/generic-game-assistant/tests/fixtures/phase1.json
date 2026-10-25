@@ -1,0 +1,21 @@
+[
+  { "at_ms": 10000, "action": "start", "window_id": "board-a", "width": 1920, "height": 1080, "expected_status": "started" },
+  { "at_ms": 10001, "action": "question", "text": "当前轮到谁", "expected_status": "skipped", "expected_reason": "observation_incomplete" },
+  { "at_ms": 10002, "action": "observe", "rules": "unknown", "expected_status": "accepted" },
+  { "at_ms": 10003, "action": "question", "text": "哪里落子最好", "expected_status": "skipped", "expected_reason": "observation_incomplete" },
+  { "at_ms": 10004, "action": "observe", "expected_status": "accepted" },
+  { "at_ms": 10005, "action": "question", "text": "解释一下这个局面", "expected_status": "completed" },
+  { "at_ms": 10006, "action": "question", "text": "再解释一次", "expected_status": "skipped", "expected_reason": "cloud_cooldown" },
+  { "at_ms": 20005, "action": "observe", "turn": "white", "cells": [{ "index": 112, "value": "black" }], "expected_status": "accepted" },
+  { "at_ms": 20006, "action": "question", "text": "现在轮到谁", "expected_status": "completed" },
+  { "at_ms": 20007, "action": "observe", "cells": [{ "index": 113, "value": "unknown" }], "expected_status": "accepted" },
+  { "at_ms": 20008, "action": "question", "text": "这是黑子还是白子", "expected_status": "skipped", "expected_reason": "observation_incomplete" },
+  { "at_ms": 20009, "action": "observe", "assistant_excluded": false, "expected_status": "rejected", "expected_reason": "assistant_not_excluded" },
+  { "at_ms": 20010, "action": "question", "text": "继续解释", "expected_status": "skipped", "expected_reason": "observation_incomplete" },
+  { "at_ms": 30000, "action": "start", "window_id": "board-b", "width": 1080, "height": 1920, "expected_status": "started" },
+  { "at_ms": 30001, "action": "question", "text": "上一局呢", "expected_status": "skipped", "expected_reason": "observation_incomplete" },
+  { "at_ms": 30002, "action": "observe", "expected_status": "accepted" },
+  { "at_ms": 35003, "action": "question", "text": "现在的棋盘", "expected_status": "skipped", "expected_reason": "observation_stale" },
+  { "at_ms": 35004, "action": "stop", "expected_status": "stopped" },
+  { "at_ms": 35005, "action": "question", "text": "还在吗", "expected_status": "no_session" }
+]

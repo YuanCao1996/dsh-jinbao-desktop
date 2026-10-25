@@ -1,0 +1,5 @@
+import test from'node:test';import assert from'node:assert/strict';import{mkdtemp,readFile,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join}from'node:path';import{createCredentials}from'../credentials.mjs';
+test('standalone credentials persist without DSH and remain encrypted at rest',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-credentials-'));const crypt=async(action,v)=>action==='protect'?Buffer.from(v).toString('base64'):Buffer.from(v,'base64').toString();
+ try{const c=await createCredentials(dir,{crypt});await Promise.all([c.set('cloud','private'),c.set('local','access')]);assert.ok(!(await readFile(join(dir,'credentials.dpapi'),'utf8')).includes('private'));const restarted=await createCredentials(dir,{crypt});assert.equal((await restarted.resolve('cloud')).value,'private');assert.equal((await restarted.resolve('local')).value,'access');await restarted.unset('cloud');assert.equal(await restarted.resolve('cloud'),undefined);}finally{await rm(dir,{recursive:true,force:true});}
+});

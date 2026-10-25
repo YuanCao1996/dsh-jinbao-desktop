@@ -1,0 +1,11 @@
+import test from'node:test';import assert from'node:assert/strict';import{spawn,execFile}from'node:child_process';import{mkdtemp,readFile,writeFile,rm}from'node:fs/promises';import{tmpdir}from'node:os';import{join}from'node:path';import{fileURLToPath}from'node:url';import{once}from'node:events';import{promisify}from'node:util';
+test('Windows standalone entry serves settings, protects credentials and exits without launching DSH',{skip:process.platform!=='win32',timeout:25000},async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-cloud-entry-'));const child=spawn(process.execPath,[fileURLToPath(new URL('../main.mjs',import.meta.url)),'--headless','--state',dir,'--port','0'],{windowsHide:true,stdio:['ignore','pipe','pipe']});let output='',errors='';child.stderr.on('data',b=>errors+=b.toString());
+ try{
+  const report=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Standalone startup timeout: '+errors)),15000);child.stdout.on('data',b=>{output+=b.toString();const line=output.split('\n').find(x=>x.includes('"standalone":true'));if(line){clearTimeout(timer);resolve(JSON.parse(line));}});child.once('exit',code=>{if(!output.includes('"standalone":true')){clearTimeout(timer);reject(Error('Standalone exited '+code+': '+errors));}});});
+  assert.equal(report.requiresDshDesktop,false);const link=await readFile(join(dir,'settings-link.txt'),'utf8'),url=new URL(link.trim());const html=await(await fetch(url.origin)).text();assert.match(html,/runtimeNotice/);
+  const duplicate=await promisify(execFile)(process.execPath,[fileURLToPath(new URL('../main.mjs',import.meta.url)),'--headless','--state',dir],{windowsHide:true,timeout:10000});
+  assert.equal(JSON.parse(duplicate.stdout).alreadyRunning,true);assert.equal(await readFile(join(dir,'settings-link.txt'),'utf8'),link);
+  assert.ok((await readFile(join(dir,'credentials.dpapi'),'utf8')).length>20);const exit=once(child,'exit');await writeFile(join(dir,'overlay-stopped'),'test');await exit;assert.equal(child.exitCode,0);
+ }finally{if(child.exitCode===null)child.kill();await rm(dir,{recursive:true,force:true});}
+});

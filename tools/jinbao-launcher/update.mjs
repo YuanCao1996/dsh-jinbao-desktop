@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 export const UPDATE_FEED = 'https://api.jinbaoai.top/downloads/dsh/latest.json';
+export const STANDALONE_FEED = 'https://api.jinbaoai.top/downloads/jinbao/latest.json';
 const MAX_ARCHIVE = 160 * 1024 * 1024;
 const MAX_EXPANDED = 300 * 1024 * 1024;
 const exec = promisify(execFile);
@@ -22,14 +23,16 @@ export function compareVersions(a, b) {
   return 0;
 }
 
-export function verifyRelease(envelope, publicKey) {
+export function verifyRelease(envelope, publicKey, channel='legacy') {
+  if(!['legacy','standalone'].includes(channel))throw Error('Invalid update channel');
   if (!envelope || typeof envelope.payload !== 'string' || envelope.payload.length > 12000 || typeof envelope.signature !== 'string') throw Error('Invalid release envelope');
   const payload = Buffer.from(envelope.payload, 'base64');
   const signature = Buffer.from(envelope.signature, 'base64');
   if (payload.toString('base64') !== envelope.payload || signature.length !== 64 || !verify(null, payload, publicKey, signature)) throw Error('Invalid release signature');
   const release = JSON.parse(payload);
   compareVersions(release.version, release.version);
-  if (release.url !== `https://api.jinbaoai.top/downloads/dsh/v${release.version}/jinbao-desktop-windows.zip` ||
+  const directory=channel==='standalone'?'jinbao':'dsh';
+  if ((channel==='standalone'?release.runtime!=='standalone':release.runtime!==undefined&&release.runtime!=='legacy')||release.url !== `https://api.jinbaoai.top/downloads/${directory}/v${release.version}/jinbao-desktop-windows.zip` ||
       !Number.isSafeInteger(release.bytes) || release.bytes <= 0 || release.bytes > MAX_ARCHIVE ||
       !/^[a-f0-9]{64}$/.test(release.sha256) || !/^[a-f0-9]{64}$/.test(release.manifestSha256)) throw Error('Invalid release metadata');
   if(release.notes!==undefined&&(typeof release.notes!=='string'||release.notes.length>4000))throw Error('Invalid release notes');
@@ -45,6 +48,7 @@ export async function verifyPackage(root, release) {
   const manifestBytes = await readFile(join(root, 'manifest.json'));
   if (manifestBytes.length > 2 * 1024 * 1024 || digest(manifestBytes) !== release.manifestSha256) throw Error('Package manifest mismatch');
   const manifest = JSON.parse(manifestBytes);
+  if(release.runtime==='standalone'&&manifest.runtime!=='standalone')throw Error('Wrong package runtime');
   if (manifest.version !== release.version || !Array.isArray(manifest.files) || manifest.files.length > 5000) throw Error('Invalid package manifest');
   const expected = new Set(['manifest.json']); let total = 0;
   for (const item of manifest.files) {
@@ -71,7 +75,8 @@ export async function verifyPackage(root, release) {
     const path = join(root, item.path);
     if ((await lstat(path)).size !== item.bytes || digest(await readFile(path)) !== item.sha256) throw Error('Package file mismatch');
   }
-  for (const required of ['runtime/node.exe','start-jinbao.vbs','tools/jinbao-launcher/start.ps1','tools/jinbao-launcher/main.mjs','tools/jinbao-launcher/update.mjs']) {
+  const requiredFiles=release.runtime==='standalone'?['runtime/node.exe','start-preview.vbs','tools/cloud-desktop/entry.mjs','tools/cloud-desktop/main.mjs','tools/jinbao-launcher/update.mjs']:['runtime/node.exe','start-jinbao.vbs','tools/jinbao-launcher/start.ps1','tools/jinbao-launcher/main.mjs','tools/jinbao-launcher/update.mjs'];
+  for (const required of requiredFiles) {
     if (!found.has(required.toLowerCase())) throw Error('Incomplete launcher package');
   }
   return manifest;
@@ -98,7 +103,8 @@ export async function extractArchive(archive, destination) {
   await exec(ps, ['-NoProfile','-ExecutionPolicy','Bypass','-File',join(moduleDir,'extract-update.ps1'),'-Archive',archive,'-Destination',destination], { windowsHide: true, timeout: 120000, maxBuffer: 16384 });
 }
 
-export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, extract = extractArchive, now = Date.now }) {
+export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, extract = extractArchive, now = Date.now, channel='legacy' }) {
+  if(!['legacy','standalone'].includes(channel))throw Error('Invalid update channel');
   const updates = join(resolve(stateDir),'updates');
   let busy = false;
   async function key() { return publicKey ?? await readFile(join(moduleDir,'update-public.pem'),'utf8'); }
@@ -109,7 +115,7 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
   async function receipt(name) {
     const envelope = await readJson(join(updates,name+'.json'));
     if (!envelope) return null;
-    const release = verifyRelease(envelope,await key());
+    const release = verifyRelease(envelope,await key(),channel);
     const directory = join(updates,'releases','v'+release.version);
     await verifyPackage(directory,release);
     return {root:directory,envelope,release};
@@ -122,9 +128,9 @@ export function createUpdater({ root, stateDir, fetchImpl = fetch, publicKey, ex
         const current = JSON.parse(await readFile(join(root,'manifest.json'),'utf8'));
         currentVersion=current.version;
         await status({state:'checking',version:current.version,currentVersion,message:'正在检查更新…'});
-        const response = await fetchImpl(UPDATE_FEED,{redirect:'error',signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
+        const response = await fetchImpl(channel==='standalone'?STANDALONE_FEED:UPDATE_FEED,{redirect:'error',signal:AbortSignal.any([...(signal?[signal]:[]),AbortSignal.timeout(15000)])});
         const envelope = JSON.parse(await boundedResponse(response,16384));
-        const release = verifyRelease(envelope,await key());
+        const release = verifyRelease(envelope,await key(),channel);
         targetVersion=release.version;
         if (compareVersions(release.version,current.version) <= 0) {
           await status({state:'current',version:current.version,currentVersion,notes:release.notes,message:'已是最新版本 '+current.version}); return;

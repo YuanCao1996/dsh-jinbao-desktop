@@ -3,7 +3,7 @@ import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
-const validGame = game => ['lol', 'wzry'].includes(game);
+const validGame = game => ['lol', 'wzry', 'generic'].includes(game);
 const privateKey = /authorization|cookie|token|secret|password|api[_-]?key|puuid|riotId|summonerName|playerName|openid|unionid/i;
 // Preserve observations as data, never expose credentials or player identifiers to tools.
 export function cleanGameData(value, depth = 0) {
@@ -123,10 +123,15 @@ export function createGameMemory(stateDir) {
         if (snapshots.size > 64) snapshots.delete(snapshots.keys().next().value);
       });
     },
+    async currentFacts(game, match) {
+      await queue;
+      const [current, saved] = await Promise.all([load(game, match), preferences(game)]);
+      return { current, preferences: saved.slice(-6).map(row => ({ fact: row.fact, at: row.at, origin: row.origin })) };
+    },
     async context(game, match) {
       await queue;
-      const [current, past, saved] = await Promise.all([load(game, match), history(game, match), preferences(game)]);
-      const result = { current, previousMatches: past, preferences: saved.slice(-12).map(row => ({ fact: row.fact, at: row.at, origin: row.origin })), historyAvailableVia: 'game_log_query / game_memory_query' };
+      const [current, saved] = await Promise.all([load(game, match), preferences(game)]);
+      const result = { current, previousMatches: [], preferences: saved.slice(-12).map(row => ({ fact: row.fact, at: row.at, origin: row.origin })), historyAvailableVia: 'game_log_query / game_memory_query (only when user requests past matches)' };
       // Keep valid JSON; reduce whole fields rather than cutting serialized text in half.
       while (JSON.stringify(result).length > 16000 && result.previousMatches.length) result.previousMatches.pop();
       if (current && JSON.stringify(result).length > 16000) {
@@ -159,7 +164,8 @@ export function createGameMemory(stateDir) {
           const end = buffer.indexOf(10, used); if (end < 0) break;
           const line = buffer.subarray(used, end).toString('utf8');
           const row = JSON.parse(line);
-          const matches = (!query || line.toLowerCase().includes(query.toLowerCase())) && (!kind || row.event?.kind === kind);
+          const matches = (!query || line.toLowerCase().includes(query.toLowerCase())) && (!kind || row.event?.kind === kind ||
+            (row.event?.kind === 'chat_events' && Array.isArray(row.event.events) && row.event.events.some(event => event?.kind === kind)));
           if (matches && chars + line.length > 24000 && rows.length) break;
           used = end + 1;
           if (matches) {

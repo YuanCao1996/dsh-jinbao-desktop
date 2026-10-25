@@ -5,3 +5,15 @@ async function wait(check){for(let i=0;i<150;i++){if(check())return;await new Pr
 test('build lookup failure does not discard successful hero win rates',async t=>{const s=await start(t,async q=>{if(q.dataset)return {results:[{data:hero(q.query)}]};throw Object.assign(Error('unavailable'),{status:503});});await wait(()=>s.view().playerRows.every(r=>r.winRate===55));assert.match(s.view().knowledgeStatus,/检索暂时失败/);});
 test('failed hero retries automatically while successful heroes and valid empty base results stay cached',async t=>{const calls={};const s=await start(t,async q=>{const key=q.dataset?q.query:q.filter._type;calls[key]=(calls[key]??0)+1;if(q.dataset&&q.query==='安妮'&&calls[key]===1)throw Object.assign(Error('transient'),{status:503});return {results:q.dataset?[{data:hero(q.query)}]:[]};});await wait(()=>s.view().playerRows.length===2&&s.view().playerRows.every(r=>r.winRate===55));assert.equal(calls['安妮'],2);assert.equal(calls['锐雯'],1);assert.equal(calls.coreBuilds,1);await new Promise(r=>setTimeout(r,100));assert.equal(calls.coreBuilds,1);});
 test('429 keeps last successful hero data and identifies restricted retrieval instead of missing data',async t=>{let limited=false;const s=await start(t,async q=>{if(limited)throw Object.assign(Error('quota'),{status:429});return {results:q.dataset?[{data:hero(q.query)}]:[]};});await wait(()=>s.view().playerRows.every(r=>r.winRate===55));limited=true;await s.refresh();assert.ok(s.view().playerRows.every(r=>r.winRate===55));assert.match(s.view().knowledgeStatus,/受限/);});
+test('augment ranks publish before unrelated slow hero requests finish',async t=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'jinbao-fast-augments-'));await mkdir(join(stateDir,'logs'));
+ const at=Date.now();await writeFile(join(stateDir,'logs/live.jsonl'),[
+  {game:'lol',kind:'game_start',t:at,mode:'KIWI',me:{champion:'安妮'},allies:[{champion:'安妮'}]},
+  {game:'lol',kind:'augment_offer',t:at+1,options:['仆从大师','珠光护手','终极唤醒']}
+ ].map(e=>JSON.stringify(e)).join('\n')+'\n');
+ const release=[];
+ const service=await createOverlayService({stateDir,pollMs:10,search:async q=>q.dataset?new Promise(resolve=>release.push(resolve)):{results:q.filter?.name?[{data:{_type:'augments',champion:'安妮',name:q.filter.name,rank:1,tier:'T1'}}]:[]}});
+ t.after(async()=>{release.forEach(resolve=>resolve({results:[]}));await service.close();});
+ await wait(()=>service.view().augments.includes('仆从大师')&&service.view().augments.includes('#1'));
+ assert.ok(release.length>0);
+});

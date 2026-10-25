@@ -9,7 +9,7 @@ export function registerGameMemoryTools(ctx, memory, game, match, currentQuestio
     execute: args => memory.query({ ...args, game, match: args.match || match }),
   }));
   ctx.tools.register(defineTool({
-    name: 'game_memory_query', description: '查询同一游戏的历史对局摘要、已保存的用户偏好与当前局事实。历史对局不能当作当前事实。',
+    name: 'game_memory_query', description: '查询已保存用户偏好与当前局事实。只有用户明确要求复盘或回顾历史对局时才查询历史摘要；新局不自动继承旧局。历史对局不能当作当前事实。',
     parameters: { query: { type: 'string' }, cursor: { type: 'integer' }, limit: { type: 'integer' }, preferences: { type: 'boolean' } }, output, timeoutMs: 10000, isConcurrencySafe: () => true,
     execute: async args => {
       if (!Object.keys(args).length) return memory.context(game, match);
@@ -19,6 +19,8 @@ export function registerGameMemoryTools(ctx, memory, game, match, currentQuestio
         const rows = (await memory.preferences(game)).filter(row => !args.query || row.fact.includes(args.query)).slice(cursor, cursor + limit).map(row => ({ fact: row.fact, at: row.at, origin: row.origin }));
         return { preferences: rows, nextCursor: rows.length === limit ? cursor + rows.length : null };
       }
+      if (!/上一[局把场]|上[一次场把]|历史|过去.*对局|之前.*对局|复盘|last (?:match|game)|previous (?:match|game)|match history/i.test(currentQuestion() ?? ''))
+        return { matches: [], nextCursor: null, message: '本局只携带用户偏好；用户明确要求回顾历史对局后才查询旧局。' };
       const matches = await memory.history(game, match, limit, cursor, args.query ?? '');
       return { matches, nextCursor: matches.length === limit ? cursor + matches.length : null };
     },

@@ -7,6 +7,12 @@ export function createMonitorBank(create, limit = 8) {
     const key = game + ':' + source;
     let monitor = entries.get(key);
     if (!monitor) {
+      // A new match retires the previous game's Agent, including queued work.
+      // Keep the other game's session separate; never seed from another match.
+      for (const [oldKey, old] of entries) if (oldKey.startsWith(game + ':')) {
+        old.close(); entries.delete(oldKey);
+        if (current === old) current = null;
+      }
       if (entries.size >= limit) {
         const idle = [...entries].find(([, value]) => {
           const status = value.health(); return !status.running && status.queued === 0;

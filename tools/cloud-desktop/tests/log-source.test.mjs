@@ -1,0 +1,14 @@
+import test from'node:test';import assert from'node:assert/strict';import{mkdtemp,writeFile,appendFile,rm}from'node:fs/promises';import{join}from'node:path';import{tmpdir}from'node:os';
+import{createExternalLogSource}from'../log-source.mjs';import{createOverlayRouter}from'../../dsh-onboarding/overlay-state.mjs';
+test('explicit local log reads preserve split UTF8, redact credentials and recognize structured WZRY without ADB',async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'jinbao-game-log-')),path=join(stateDir,'game.log'),events=[];let source;
+ try{await writeFile(path,'');source=await createExternalLogSource({stateDir,publish:async e=>events.push(e)});await assert.rejects(source.start({path:join(stateDir,'.env')}));await source.start({path});const bytes=Buffer.from('升级到四级 password=fixture-secret\n');await appendFile(path,bytes.subarray(0,5));await source.tick();assert.equal(events.length,0);await appendFile(path,bytes.subarray(5));await source.tick();assert.match(events[0].text,/升级到四级/);assert.ok(!JSON.stringify(events).includes('fixture-secret'));assert.equal(events.at(-1).state.genericState.sourceKind,'log');assert.ok(Number.isInteger(events.at(-1).t));
+ await appendFile(path,JSON.stringify({game:'wzry',match:'mobile-one',kind:'state',state:{time:100,champion:'安琪拉',token:'hidden'}})+'\n');await source.tick();assert.equal(events.at(-1).game,'wzry');assert.equal(events.at(-1).state.token,undefined);
+ }finally{source?.close();await rm(stateDir,{recursive:true,force:true});}
+});
+test('log replay is bounded per tick and cursor recovery never replays published records',async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'jinbao-game-cursor-')),path=join(stateDir,'game.log'),events=[];let source;
+ try{await writeFile(path,Array.from({length:200},(_,i)=>'event '+i).join('\n')+'\n');source=await createExternalLogSource({stateDir,publish:async e=>events.push(e)});await source.start({path});await source.tick();assert.equal(events.filter(e=>e.kind==='external_log').length,100);const match=events.at(-1).match;source.close();source=await createExternalLogSource({stateDir,publish:async e=>events.push(e)});await source.tick();assert.equal(events.filter(e=>e.kind==='external_log').length,200);assert.equal(events.at(-1).match,match);assert.equal(new Set(events.filter(e=>e.kind==='external_log').map(e=>e.text)).size,200);
+ }finally{source?.close();await rm(stateDir,{recursive:true,force:true});}
+});
+test('specialized live games immediately replace a generic observation instead of waiting forever',()=>{const router=createOverlayRouter();router.apply({game:'generic',match:'window',kind:'state',t:100,state:{genericState:{identity:'unconfirmed'}}},'generic');router.apply({game:'lol',match:'game',kind:'state',t:101,state:{time:1,champion:'安妮'}},'lol');assert.equal(router.state().game,'lol');router.apply({game:'generic',match:'window',kind:'state',t:102,state:{}},'generic');assert.equal(router.state().game,'lol');});

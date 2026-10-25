@@ -105,6 +105,7 @@ export function buildLolCoachingPlan(events = [], current = null) {
 
 const canonical = value => fingerprint(names(value).sort());
 function dependencies(current, stage) {
+  if(current.game==='generic')return {windowTitle:current.me?.genericState?.windowTitle};
   const me = current.me ?? {};
   const common = {champion:me.champion,phase:current.phase,levelBand:Number(me.level)>=6?'ultimate':'early',items:canonical(me.items),owned:canonical(current.ownedAugments),dead:me.dead === true};
   if (stage === 'augment') return {...common,offers:canonical(current.offers)};

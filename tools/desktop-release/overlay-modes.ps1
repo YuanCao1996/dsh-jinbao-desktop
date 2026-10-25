@@ -124,6 +124,10 @@ $subtitleItem=New-Object Windows.Controls.MenuItem;$subtitleItem.Header='字幕�
 $scrollItem=New-Object Windows.Controls.MenuItem;$scrollItem.Header='窄条：横向滚动';$scrollItem.Add_Click({$script:subtitleMode=$false;Save-DisplayMode;Set-DisplayMode 'narrow'});$modeMenu.Items.Add($scrollItem)|Out-Null
 $speechItem=New-Object Windows.Controls.MenuItem;$speechItem.Header='语音播报（本机中文语音）';$speechItem.IsCheckable=$true;$speechItem.Add_Click({$script:speakEnabled=$speechItem.IsChecked;if(!$script:speakEnabled -and $script:synth){$script:synth.SpeakAsyncCancelAll()};Save-DisplayMode});$modeMenu.Items.Add($speechItem)|Out-Null
 $settingsMenu.Items.Add($modeMenu)|Out-Null
+$shortcutMenu=New-Object Windows.Controls.MenuItem;$shortcutMenu.Header='快捷键'
+$shortcutLabels=@(@(702,'展开：Ctrl+Alt+↑'),@(703,'收起：Ctrl+Alt+↓'),@(704,'上一页：Ctrl+Alt+←'),@(705,'下一页：Ctrl+Alt+→'),@(701,'交互/穿透：Ctrl+Alt+J'))
+foreach($entry in $shortcutLabels){$hint=New-Object Windows.Controls.MenuItem;$hint.Header=$entry[1];$hint.Tag=$entry[0];$hint.IsEnabled=$false;$shortcutMenu.Items.Add($hint)|Out-Null}
+$settingsMenu.Items.Add($shortcutMenu)|Out-Null
 $controls.NarrowExpand.Add_Click({Set-DisplayMode 'large'})
 $controls.NarrowClose.Add_Click({$window.Close()})
 $controls.NarrowMenu.Add_Click({$settingsMenu.PlacementTarget=$controls.NarrowMenu;$settingsMenu.IsOpen=$true})

@@ -1,6 +1,7 @@
 export function suggestOverlayQuestion(state) {
   if (!state || state.ended) return '';
   const game = state.game;
+  if(game==='generic')return '看一下当前窗口，识别游戏和模式，并给一条针对性建议。';
   const hero = String(state.me?.champion ?? '').trim();
   if (game === 'lol') {
     if (state.phase === 'ChampSelect') return '当前可选英雄里，哪个更适合海克斯大乱斗？';

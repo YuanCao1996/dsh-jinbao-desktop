@@ -29,7 +29,8 @@ test('one candidate failure retains other rankings and database builds',async t=
  const dir=await mkdtemp(join(tmpdir(),'jinbao-rank-fail-'));await mkdir(join(dir,'logs'));const at=Date.now();
  await writeFile(join(dir,'logs/live.jsonl'),[{game:'lol',kind:'game_start',t:at,me:{champion:'安妮'}},{game:'lol',kind:'augment_offer',t:at+1,roll:1,options:['甲','乙','丙']}].map(JSON.stringify).join('\n')+'\n');
  const svc=await createOverlayService({stateDir:dir,pollMs:10,search:async q=>{if(q.filter?.name==='乙')throw Error('transient');return {results:q.filter?._type==='augments'?[{data:{_type:'augments',champion:'安妮',name:q.filter.name??'甲',rank:2}}]:q.filter?._type==='coreBuilds'?[{data:{_type:'coreBuilds',champion:'安妮',items:'["残疫"]'}}]:[]};}});t.after(svc.close);
- for(let i=0;i<100&&!svc.view().augments.includes('#2 · 甲');i++)await new Promise(r=>setTimeout(r,20));
+ // Candidate rankings may now publish before the independent build lookup finishes.
+ for(let i=0;i<100&&(!svc.view().augments.includes('#2 · 甲')||!svc.view().equipment.includes('残疫'));i++)await new Promise(r=>setTimeout(r,20));
  assert.match(svc.view().augments,/#2 · 甲/);assert.match(svc.view().augments,/乙 · 暂无该英雄排名/);assert.match(svc.view().equipment,/残疫/);
 });
 test('settings check-update requires local authentication and live launcher, and exposes running version',async t=>{

@@ -9,7 +9,7 @@ import { createGameMemory } from '../dsh-coach-server/lib/game-memory.js';
 import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
 import {trackAugmentRound,updateAugmentRecommendations,createEquipmentCoach} from './equipment-context.mjs';
 import {augmentConfirmation} from './augment-confirmation.mjs';
-import {teamStrength,TEAM_STRENGTH_NOTE} from './team-strength.mjs';
+import {teamStrength,TEAM_STRENGTH_NOTE,liveTeamEstimate,LIVE_ESTIMATE_NOTE} from './team-strength.mjs';
 import {chatFailureMessage} from './chat-errors.mjs';
 import {suggestOverlayQuestion} from './chat-suggestion.mjs';
 import {adviceIsValid} from '../dsh-coach-server/lib/lol-coaching-plan.js';
@@ -66,6 +66,7 @@ export function applyOverlayEvent(state, event, file) {
   if (event.kind === 'game_start') {
     state.gameSeconds = Number.isFinite(event.gameTime) ? event.gameTime : null;
     state.me = event.me ?? {};
+    if(state.game==='generic'){state.me.genericState=event.genericState;state.phase='Observing';}
     state.allies = list(event.allies); state.enemies = list(event.enemies);
     observeEquipment(state);
   }
@@ -140,7 +141,7 @@ export function createOverlayRouter(limit = 64) {
         if(target)applyOverlayEvent(target,{...event,...(requested?{match:target.match}:{})},file);
         return target;
       }
-      if(!['lol','wzry'].includes(event.game))return;
+      if(!['lol','wzry','generic'].includes(event.game))return;
       const at=eventTimestamp(event);
       const identity=tracker.identify(event.game,file,{seconds:event.state?.time??event.gameTime,at,
         started:event.kind==='game_start'||event.kind==='match_start',ended:event.kind==='event'&&event.name==='GameEnd',match:event.match});
@@ -155,7 +156,7 @@ export function createOverlayRouter(limit = 64) {
       applyOverlayEvent(state,{...event,match:identity.match},file);
       state.source=file;
       const isMatch=event.kind==='state'||event.kind==='game_start'||event.kind==='match_start'||event.kind==='champ_select';
-      if(isMatch&&(!active.match||active===state||active.ended||
+      if(isMatch&&(!active.match||active===state||active.ended||(active.game==='generic'&&['lol','wzry'].includes(event.game)&&at>=active.at)||
           (at>=active.at&&(event.game===active.game||at-active.at>=30000))))active=state;
       if(active.ended&&event.kind!=='champ_select_end'){
         const next=[...states.values()].filter(candidate=>candidate!==active&&!candidate.ended&&candidate.match&&at-candidate.at<30000)
@@ -196,7 +197,8 @@ export function overlayView(state, knowledge = {}) {
   }).sort((a,b)=>(b.winRate??-1)-(a.winRate??-1));
   const roster=playerRows.map(p=>`${p.side} ${p.champion} · ${p.winRateText} · ${p.tierText}`);
   const weighted=side=>{const result=teamStrength(playerRows,side);return result.value===null?`待补齐 ${result.known}/5`:`${Number(result.value.toFixed(1))}%`;};
-  const teamWinRates=state.game==='lol'?`加权样本 · 我方 ${weighted('友')}｜敌方 ${weighted('敌')}`:'';
+  const liveEstimate=state.game==='lol'?liveTeamEstimate(playerRows,{seconds:state.gameSeconds,allyKills:me.teamKills,enemyKills:me.enemyKills,sideSource:me.sideSource}):null;
+  const teamWinRates=state.game==='lol'?(liveEstimate?`局势估计 · 我方 ${liveEstimate.ally}%｜敌方 ${liveEstimate.enemy}% · ${liveEstimate.allyKills}:${liveEstimate.enemyKills}`:`加权样本 · 我方 ${weighted('友')}｜敌方 ${weighted('敌')}`):'';
   const builds = rows.filter(r => r._type === 'coreBuilds').map(r => `${items(r.items)}\n  样本胜率 ${percent(r.winRate)} · 使用率 ${percent(r.pickRate)}`);
   const ranked = rankedAugments(rows, me.champion);
   const combinations=rows.filter(r=>r._type==='combos').sort((a,b)=>Number(b.winRate)-Number(a.winRate)).slice(0,5).map(r=>{
@@ -220,12 +222,12 @@ export function overlayView(state, knowledge = {}) {
     : state.augmentCaptureReason==='capture_failed'?'游戏画面暂未采集成功，正在自动重试；日志中的强化信息仍会同步。':'等待识别游戏内三选一面板';
   const heroStats = (state.game==='lol'?'大乱斗英雄样本胜率\n':'英雄样本胜率\n') + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?tierText(hero.tier):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
   return {
-    game: state.game, mode:state.mode, match: state.match, gameTime: clock(state.gameSeconds), phase:state.phase, ended: state.ended,
+    game: state.game, mode:state.mode, match: state.match, gameTime: state.game==='generic'?(state.phase==='CapturePaused'?'观察已停止':'观察中'):clock(state.gameSeconds), phase:state.phase, ended: state.ended,
     playback:validBroadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0,expiresAt:r.validity?.expiresAt??null})),
     revokedPlayback:state.broadcasts.filter(r=>r.revoked).map(r=>String(r.at)+':'+r.text),
     keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
-    summary: [me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
+    summary: state.game==='generic'?'所选窗口 · '+(me.genericState?.windowTitle??'等待观察'):[me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
     advice: ['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:''].filter(Boolean).join(' · ')+'\n\n'+current+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(!state.ended&&state.equipmentStatus?'\n'+state.equipmentStatus:'')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
@@ -234,7 +236,8 @@ export function overlayView(state, knowledge = {}) {
     players: (teamWinRates?teamWinRates+'\n\n':'')+'英雄胜率 ↓\n'+(roster.join('\n') || '等待双方英雄数据。'),
     teamWinRates,
     knowledgeStatus:knowledge.failed?knowledge.message:'',
-    teamWinRatesNote:TEAM_STRENGTH_NOTE,
+    teamWinRatesNote:liveEstimate?LIVE_ESTIMATE_NOTE:TEAM_STRENGTH_NOTE,
+    liveTeamEstimate:liveEstimate,
     confirmation:augmentConfirmation(state,rows),
     heroStats,
     playerRows,
@@ -248,7 +251,7 @@ export function overlayView(state, knowledge = {}) {
   };
 }
 
-export async function createOverlayService({ stateDir, agentChat, search, pollMs = 1000, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000 }) {
+export async function createOverlayService({ stateDir, agentChat, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000 }) {
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
   const router=createOverlayRouter(), offsets = new Map();
@@ -318,6 +321,10 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         const result=await search({game,query:champion,filter:{_type:'augments',name},limit:1});
         const rows=(result.results??[]).map(item=>item.data);cache.candidates.set(name,rows);
         if(cache.candidates.size>100)cache.candidates.delete(cache.candidates.keys().next().value);
+        if(stillCurrent()){
+          knowledge={...knowledge,rows:[...offered.flatMap(option=>cache.candidates.get(option)??[]),...cache.rows,...[...cache.heroes.values()].flat()]};
+          updateAugmentRecommendations(state,knowledge.rows);await flush();
+        }
         }catch(e){failed(e); /* Keep successful candidates and retry this slot later. */ }
       })]);
       if (stillCurrent()) knowledge = { rows: [...offered.flatMap(name=>cache.candidates.get(name)??[]),...cache.rows,...[...cache.heroes.values()].flat()].filter(row => row?._viewKind==='hero'|| (typeof row?.champion === 'string' && row.champion.includes(champion))||row?.name===champion||row?.title===champion), message: errors.includes(429)?'检索请求受限，稍后重试':errors.some(s=>s===401||s===403)?'检索授权暂不可用，请查看设置':errors.length?'检索暂时失败，正在重试':'未收录匹配的英雄数据', failed:errors.length>0 };

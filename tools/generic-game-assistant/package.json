@@ -1,0 +1,8 @@
+{
+  "name": "jinbao-generic-game",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "plugin.mjs",
+  "description": "Disabled-by-default experimental window-observation and bounded DSH tools; not installed by the production launcher."
+}

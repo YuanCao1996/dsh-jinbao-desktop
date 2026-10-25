@@ -8,6 +8,8 @@
   },
   "scripts": {
     "test": "node --test tools/dsh-onboarding/tests/*.test.mjs tools/dsh-coach-server/tests/*.test.mjs tools/jinbao-launcher/tests/*.test.mjs",
+    "test:generic": "node --test tools/game-observation/tests/*.test.mjs tools/generic-game-assistant/tests/*.test.mjs",
+    "test:all": "npm run test && npm run test:generic",
     "build": "node tools/desktop-release/build.mjs"
   },
   "dependencies": {

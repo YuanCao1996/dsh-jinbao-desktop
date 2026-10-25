@@ -6,6 +6,13 @@ import { join } from 'node:path';
 import { initialOverlayState,applyOverlayEvent,overlayView,createOverlayService } from '../overlay-state.mjs';
 import { createAugmentObserver } from '../../lol-companion/augment-observer.mjs';
 const row=(name,rank,extra={})=>({_type:'augments',champion:'黑暗之女 安妮',name,rank,tier:'T1',winRate:60,desc:'不能出现的效果详情',...extra});
+test('three exact title regions can publish first choices immediately, while rerolls still require confirmation',()=>{
+ const output=[],observer=createAugmentObserver(['甲','乙','丙','丁'],e=>output.push(e));
+ const frame=names=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',titleLines:names.map((text,slot)=>({text,slot,x:500+slot*370,y:430})),lines:[]});
+ observer.observe(frame(['甲','乙','丙']));assert.equal(output.length,1);assert.deepEqual(output[0].options.map(o=>o.name),['甲','乙','丙']);
+ observer.observe(frame(['丁','乙','丙']));assert.equal(output.length,1);
+ observer.observe(frame(['丁','乙','丙']));assert.equal(output.length,2);assert.equal(output[1].options[0].name,'丁');
+});
 const pause=()=>new Promise(r=>setTimeout(r,10));
 async function until(check){for(let i=0;i<200;i++){if(check())return;await pause();}throw Error('timed out');}
 

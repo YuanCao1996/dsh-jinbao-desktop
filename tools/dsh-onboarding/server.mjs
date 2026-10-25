@@ -13,7 +13,7 @@ const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buff
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
 async function body(req,max=512*1024,onBytes){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){onBytes?.(declared);req.resume();throw error(413);}let size=0;const chunks=[];for await(const c of req){size+=c.length;onBytes?.(size);if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
-export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch}) {
+export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource}) {
  if(!Number.isInteger(coachPort)||coachPort<1||coachPort>65535)throw Error('Invalid coach port');
  const coachOrigin='http://127.0.0.1:'+coachPort;
  const service=serviceUrl(serviceBaseUrl),nonce=randomBytes(32).toString('hex');
@@ -88,7 +88,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   for(const name of files){const info=await stat(join(stateDir,'logs',name));if(!recent||info.mtimeMs>recent.modifiedAt)recent={name,modifiedAt:info.mtimeMs,bytes:info.size};}
   let validTail=false;
   if(recent&&recent.bytes){const f=await open(join(stateDir,'logs',recent.name),'r');try{const n=Math.min(recent.bytes,65536),buffer=Buffer.alloc(n);await f.read(buffer,0,n,recent.bytes-n);const lines=buffer.toString('utf8').trim().split('\n');if(recent.bytes>n)lines.shift();validTail=lines.slice(-10).every(line=>{try{return !!JSON.parse(line);}catch{return false;}});}finally{await f.close();}}
-  let coachReady=false;try{const r=await fetchImpl(coachOrigin+'/coach/state',{headers:{Authorization:'Bearer '+local},signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
+  let coachReady=!!cloudAgent&&config.mode==='cloud'||!!localAgent&&config.mode==='byok';if(!coachReady&&runtimeId!=='standalone')try{const r=await fetchImpl(coachOrigin+'/coach/state',{headers:{Authorization:'Bearer '+local},signal:AbortSignal.timeout(2000),redirect:'error'});if(r.ok)coachReady=(await limitedJson(r,1024*1024)).monitor?.ready===true;else await r.body?.cancel();}catch{}
   const snapshot=overlay.view();
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
    activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000,updateBlocked:!!snapshot.match&&!snapshot.ended&&(snapshot.gameTime!=='等待对局'||snapshot.phase==='ChampSelect')&&Date.now()-snapshot.updatedAt<30000};
@@ -96,6 +96,8 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  const overlay=await createOverlayService({stateDir,
   agentChat:async request=>{
    if(config.mode==='demo')throw error(409);
+   if(config.mode==='cloud'&&cloudAgent)return cloudAgent.ask(request);
+   if(config.mode==='byok'&&localAgent)return localAgent.ask(request);
    let response;
    try { response=await fetchImpl(coachOrigin+'/coach/chat',{method:'POST',headers:{Authorization:'Bearer '+local,'Content-Type':'application/json'},body:JSON.stringify(request),redirect:'error',signal:AbortSignal.timeout(300000)}); }
    catch { throw error(503); }
@@ -150,6 +152,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    if(!same(req.headers['x-jinbao-setup'],nonce))throw error(403);
    if(req.headers.origin&&req.headers.origin!=='http://'+expectedHost)throw error(403);
    if(req.url==='/api/overlay'&&req.method==='GET'){send(res,200,overlay.view());return;}
+   if(req.url==='/api/observation/windows'&&req.method==='GET'&&observation){send(res,200,{windows:await observation.list()});return;}
    if(req.url==='/api/overlay/confirm'&&req.method==='POST'){send(res,200,await overlay.confirm(await body(req,4096)));return;}
    if(['/api/overlay/ask','/api/overlay/refresh'].includes(req.url)&&req.method==='POST'){
     if(!String(req.headers['content-type']).startsWith('application/json'))throw error(400);
@@ -191,12 +194,14 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     let releaseNotes=null;try{const bundled=JSON.parse(await readFile(new URL('./release-notes.json',import.meta.url),'utf8'));if(bundled.version===version)releaseNotes=bundled.notes;}catch{}
     let maintenance=null;try{maintenance=JSON.parse(await readFile(join(stateDir,'maintenance-status.json'),'utf8'));}catch{}
     let emailDisplay=null;if(account?.loginMethod==='email')try{emailDisplay=JSON.parse(await readFile(join(stateDir,'email-account.json'),'utf8')).display;}catch{}
-    send(res,200,{...config,version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    send(res,200,{...config,agentRuntime:runtimeId??(cloudAgent?'cloud-preview':'local-dsh'),observation:observation?.status(),logSource:logSource?.status(),nativeInstallation:nativeInstaller?.status(),version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
+   if(req.url==='/api/native/install'&&nativeInstaller){send(res,202,nativeInstaller.start());return;}
    if(req.url==='/api/maintenance'){
     if(!['repair','exit'].includes(b.action)||Object.keys(b).some(k=>k!=='action'))throw error(400);
+    if(b.action==='repair'&&runtimeId==='standalone'){await prepareModel?.(config);await onModelChange?.(config);send(res,200,{message:'已重新检查运行环境，下一次请求将重新建立 Agent 连接。'});return;}
     await locked(async()=>{
      if(b.action==='repair'){
       await writeFile(join(stateDir,'repair-pending.json'),JSON.stringify({at:Date.now()}));
@@ -220,6 +225,8 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     await writeFile(join(stateDir,'updates/apply-cancel.json'),JSON.stringify({id:current.id,at:Date.now()}));send(res,202,{message:'已请求取消自动安装，确认后可从原入口重新打开金宝。'});return;
    }
    if(req.url==='/api/update/apply'){
+    if(updateController){const result=await updateController.apply(overlay.view());send(res,202,result);return;}
+    if(cloudAgent){send(res,409,{error:'云端预览包暂不接收正式版更新。'});return;}
     const view=overlay.view();if(view.match&&!view.ended&&(view.gameTime!=='等待对局'||view.phase==='ChampSelect')&&Date.now()-view.updatedAt<30000){send(res,409,{error:'正在选英雄或对局，请结束后再安装。后台下载不会影响游戏。'});return;}
     await locked(async()=>{
      let launcher,update;try{launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));update=JSON.parse(await readFile(join(stateDir,'updates/status.json'),'utf8'));}catch{throw error(409);}
@@ -231,6 +238,8 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     });send(res,202,{message:'已安排更新。金宝会先退出，请保存工作并正常退出 DSH，随后将自动重新启动。'});return;
    }
    if(req.url==='/api/update/check'){
+    if(updateController){void updateController.check();send(res,202,{message:'正在检查独立桌面版更新…'});return;}
+    if(cloudAgent){send(res,409,{error:'云端预览包暂不接收正式版更新。'});return;}
     let launcher;try{launcher=JSON.parse(await readFile(join(stateDir,'launcher-state.json'),'utf8'));}catch{}
     if(!launcher||Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase)){send(res,409,{error:'金宝启动器未运行，请双击“开始使用”后再检查更新。'});return;}
     const path=join(stateDir,'launcher-control.json');await writeFile(path+'.tmp',JSON.stringify({action:'check-update',at:Date.now()}));await rename(path+'.tmp',path);
@@ -247,15 +256,22 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
      if(!['demo','byok','cloud'].includes(b.mode))throw error(400);
      const next={mode:b.mode,baseUrl:'',model:''};
      if(b.mode==='byok'){
+      if(cloudAgent&&!localAgent)throw error(409);
       const endpoint=chatUrl(b.baseUrl);if(endpoint.origin===service.origin)throw error(400);
       if(typeof b.model!=='string'||b.model.length<1||b.model.length>120)throw error(400);
       next.baseUrl=b.baseUrl;next.model=b.model;
+      if(b.desktopPath!==undefined){if(typeof b.desktopPath!=='string'||b.desktopPath.length>1024)throw error(400);next.desktopPath=b.desktopPath;}
+      else if(config.desktopPath)next.desktopPath=config.desktopPath;
       if(b.apiKey!==undefined){if(typeof b.apiKey!=='string'||!b.apiKey.trim()||b.apiKey.length>4096)throw error(400);await credentials.set(refs.byok,b.apiKey.trim());}
       if(!await resolve('byok'))throw error(401);
      }
      if(b.mode==='cloud'&&!await resolve('cloud'))throw error(401);
-     await saveConfig(next);return {saved:true};
+     await prepareModel?.(next);await saveConfig(next);await onModelChange?.(next);return {saved:true};
     }
+    if(req.url==='/api/observation/start'&&observation){const result=await observation.start(b);await logSource?.stop();return result;}
+    if(req.url==='/api/observation/stop'&&observation)return observation.stop();
+    if(req.url==='/api/log-source/start'&&logSource){const result=await logSource.start(b);await observation?.stop();return result;}
+    if(req.url==='/api/log-source/stop'&&logSource)return logSource.stop();
     if(req.url==='/api/login/ip'){
      const result=await remote('/desktop/auth/ip/register',null,{});
      await acceptCloud(result);
@@ -313,10 +329,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    if(value?.disableSync){await phoneSync.disable();send(res,200,{disabled:true});return;}
    if(value?.enableSync){await phoneSync.enable();send(res,200,{enabled:true});return;}
    send(res,200,value);
-  }catch(e){if(res.headersSent){res.destroy();return;}const status=[400,401,403,404,409,410,413,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:status===401?'请登录或配置模型密钥':status===403?'配置访问被拒绝':status===409?'请先配置模型或重新生成配对码':status===410?'配对码已过期':status===429?'首批体验名额已满或请求过于频繁':status===400?'配置格式不正确':'连接失败，请稍后重试'});}
+  }catch(e){if(res.headersSent){res.destroy();return;}if(e.code==='local_dsh_unavailable'){send(res,409,{error:'未找到兼容的 DSH 原生引擎。请使用此页的官方安装按钮安装或更新 DSH，或填写正确的程序路径；官方云端仍可使用。'});return;}const status=[400,401,403,404,409,410,413,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:status===401?'请登录或配置模型密钥':status===403?'配置访问被拒绝':status===409?'请先配置模型或重新生成配对码':status===410?'配对码已过期':status===429?'首批体验名额已满或请求过于频繁':status===400?'配置格式不正确':'连接失败，请稍后重试'});}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;
  await writeFile(join(stateDir,'settings-link.txt'),url,{mode:0o600});
- return {url,port:server.address().port,close:async()=>{await phoneSync.close();await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
+ return {url,port:server.address().port,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{await phoneSync.close();await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
 }

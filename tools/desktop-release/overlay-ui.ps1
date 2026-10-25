@@ -27,7 +27,7 @@ function Show-OverlayModeMenu {
   $item.IsChecked=($entry[0] -eq $script:displayMode) -or ($script:displayMode -eq 'narrow' -and (($entry[0] -eq 'subtitle' -and $script:subtitleMode) -or ($entry[0] -eq 'scroll' -and !$script:subtitleMode)))
   $item.Add_Click({param($sender,$eventArgs) if($sender.Tag -eq 'subtitle'){$script:subtitleMode=$true;Set-DisplayMode 'narrow'}elseif($sender.Tag -eq 'scroll'){$script:subtitleMode=$false;Set-DisplayMode 'narrow'}else{Set-DisplayMode ([string]$sender.Tag)}});$menu.Items.Add($item)|Out-Null
  }
- $script:overlayModeMenu=$menu;$menu.PlacementTarget=$controls.ModeButton;$menu.IsOpen=!$SelfTest
+ $script:overlayModeMenu=$menu;$menu.PlacementTarget=$controls.SettingsButton;$menu.IsOpen=!$SelfTest
 }
 function Update-ChatJump {
  if(!$controls.LatestMessageButton){return}
@@ -87,6 +87,5 @@ $controls.ScreenButton.Add_Click({
  $controls.QuestionBox.Text=if($question){'请先查看当前游戏画面，再回答：'+$question}else{'请查看当前游戏画面，结合本局日志说出下一步最重要的决策。'}
  Send-Question
 })
-$controls.ModeButton.Add_Click({Show-OverlayModeMenu})
 $controls.PageScroll.Add_ScrollChanged({Update-ChatJump})
 $controls.LatestMessageButton.Add_Click({$controls.PageScroll.ScrollToEnd()})

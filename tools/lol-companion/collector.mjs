@@ -6,7 +6,8 @@ import { createEventLog } from './eventlog.mjs';
 import { stateEvent } from './collector-state.mjs';
 import { createChampionSelectionReader } from './champ-select.mjs';
 import { createChatObserver,createChatCatalogReader } from './chat-observer.mjs';
-import { createAugmentObserver,captureAugmentPanel,augmentNames } from './augment-observer.mjs';
+import { createAugmentObserver,augmentNames } from './augment-observer.mjs';
+import {createAugmentCaptureWorker} from './capture-worker.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -18,20 +19,21 @@ let selectionLog=null,selectionMatch=null;
 console.log('LoL collector started; waiting for client. Logs: '+folder);
 let running=true,lastLiveState=null,capturing=false,lastCaptureAvailable=null,nextCaptureAt=0,captureGeneration=0;
 const captureStop=new AbortController();
+const captureWorker=createAugmentCaptureWorker();
 const names=await augmentNames();
 const observer=createAugmentObserver(names,event=>{if(running)log.append(event);});
 const chatObserver=createChatObserver(names,event=>{if(running)log.append(event);});
 const readChatCatalog=createChatCatalogReader(lcuRequest);
-const stop=()=>{running=false;captureStop.abort();};
+const stop=()=>{running=false;captureStop.abort();captureWorker.close();};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 process.on('message',message=>{if(message?.action==='stop')stop();});
 if(process.connected)process.once('disconnect',stop);
 const captureTimer=setInterval(async()=>{
  if(!running||capturing||Date.now()<nextCaptureAt||!lastLiveState||!['KIWI','ARAM'].includes(lastLiveState.mode))return;
- capturing=true;nextCaptureAt=Date.now()+1000;
+ capturing=true;nextCaptureAt=Date.now()+500;
  const generation=captureGeneration;
  try{
-  const frame=await captureAugmentPanel(captureStop.signal);
+  const frame=await captureWorker.capture(captureStop.signal);
   if(running&&generation===captureGeneration&&lastLiveState){
    observer.observe(frame);
    const diagnostic=observer.status();
@@ -72,7 +74,7 @@ while(running){
    for(const e of changed.fresh)log.append({kind:'event',id:e.EventID,name:e.EventName,time:e.EventTime,killer:e.KillerName,victim:e.VictimName,turret:e.TurretKilled,dragon:e.DragonType,...e});
   }
  }catch{ /* Client can disappear between polling steps; no credential is logged. */ }
- await sleep(3000);
+ await sleep(lastLiveState?1000:3000);
 }
-clearInterval(captureTimer);captureStop.abort();
+clearInterval(captureTimer);captureStop.abort();captureWorker.close();
 if(process.connected)process.disconnect();

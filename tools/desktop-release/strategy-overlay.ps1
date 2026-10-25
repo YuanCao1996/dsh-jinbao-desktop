@@ -463,14 +463,14 @@ function Start-Request([string]$route,[hashtable]$payload){
     @{ok=$true}
    }catch{
     $status=0;try{$status=[int]$_.Exception.Response.StatusCode}catch{}
-    $message=switch($status){401{'登录已失效，请在设置页重新登录。'}403{'当前账号没有服务权限，请检查设置页。'}409{'教练忙碌或对局已切换，请稍后重试。'}429{'服务额度已用完或请求过于频繁，请稍后重试。'}default{'连接失败或回复超时，请检查网络后重试。'}}
+    $message=switch($status){401{'登录已失效，请在设置页重新登录。'}403{'当前账号没有服务权限，请检查设置页。'}409{'教练忙碌或对局已切换，请稍后重试。'}429{'服务额度已用完或请求过于频繁，请稍后重试。'}504{'本次分析超时，问题已恢复，可重试。'}default{'连接失败或回复超时，请检查网络后重试。'}}
     @{ok=$false;message=$message}
    }
   }
   $controls.SendButton.IsEnabled=$false
   Update-OverlayComposer
   $controls.HintText.Text=if($route -eq 'ask'){'教练思考中…'}else{'正在检索推荐…'}
- }catch{$controls.HintText.Text='请先启动 DSH，再打开金宝设置页。'}
+ }catch{$controls.HintText.Text='无法连接金宝本机服务，请从“开始使用”重新启动。'}
 }
 function Send-Question {
  $question=$controls.QuestionBox.Text.Trim()

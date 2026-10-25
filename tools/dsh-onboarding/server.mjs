@@ -177,7 +177,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     const b=await body(req,8192);
     let result;
     try{result=req.url.endsWith('/ask')?await overlay.ask(b.question,b.topic):await overlay.refresh();}
-    catch(e){const status=[400,401,403,409,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:chatFailureMessage({...e,status})});return;}
+    catch(e){const status=[400,401,403,409,429,502,503,504].includes(e.status)?e.status:503;send(res,status,{error:chatFailureMessage({...e,status})});return;}
     send(res,200,result??{refreshed:true});return;
    }
    if(req.url==='/api/advice'&&req.method==='GET'){

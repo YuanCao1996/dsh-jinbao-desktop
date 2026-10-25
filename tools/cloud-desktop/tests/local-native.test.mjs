@@ -1,6 +1,15 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {createLocalAgent} from '../local-agent.mjs';
+
+test('native BYOK authentication failures retain their status and switching matches interrupts an in-flight model',{skip:!process.env.JINBAO_TEST_DSH_MODULES,timeout:15000},async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'jinbao-native-failure-'));let match='one',mode='denied',started=false,aborted=false,agent;
+ try{
+  agent=await createLocalAgent({stateDir,moduleRoot:process.env.JINBAO_TEST_DSH_MODULES,getConfig:async()=>({baseUrl:'https://model.example/v1',model:'fixture'}),getKey:async()=> 'fixture',isCurrent:(_game,m)=>m===match,getContext:async()=>({}),fetchImpl:async(_url,o)=>{if(mode==='denied')return new Response('',{status:401});started=true;return new Promise((_resolve,reject)=>o.signal.addEventListener('abort',()=>{aborted=true;reject(o.signal.reason);},{once:true}));}});
+  await assert.rejects(agent.ask({game:'lol',match,question:'hi'}),e=>e.status===401);
+  mode='waiting';const old=agent.ask({game:'lol',match,question:'旧局问题'}),failure=assert.rejects(old,e=>e.status===409);while(!started)await new Promise(r=>setTimeout(r,10));match='two';await failure;assert.equal(aborted,true);
+ }finally{await agent?.close();await rm(stateDir,{recursive:true,force:true});}
+});
 test('installed DSH native sessions execute a real tool turn, resume and isolate matches',{skip:!process.env.JINBAO_TEST_DSH_MODULES,timeout:30000},async()=>{
  const stateDir=await mkdtemp(join(tmpdir(),'jinbao-native-'));let match='one',calls=0;const requests=[];
  const options={stateDir,moduleRoot:process.env.JINBAO_TEST_DSH_MODULES,getConfig:async()=>({baseUrl:'https://model.example/v1',model:'fixture'}),getKey:async()=>'test-only-key',isCurrent:(_game,m)=>m===match,getContext:async()=>({current:{game:'lol',match,at:Date.now(),mode:'KIWI',me:{champion:'安妮'}}}),queryEvents:async()=>({status:'ok',rows:[{text:'购买残疫'}]}),fetchImpl:async(_url,options)=>{const body=JSON.parse(options.body);requests.push(body);calls++;return Response.json({choices:[calls===1?{finish_reason:'tool_calls',message:{content:null,reasoning_content:'fixture-reasoning',tool_calls:[{id:'read-current',type:'function',function:{name:'get_current_match_state',arguments:'{}'}}]}}:{finish_reason:'stop',message:{content:'先等控制技能，再接爆发。'}}]});}};

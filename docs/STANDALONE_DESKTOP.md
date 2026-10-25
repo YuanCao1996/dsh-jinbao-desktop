@@ -1,6 +1,6 @@
 # 独立桌面版：架构、使用与验收
 
-此文对应 `0.2.0-standalone-preview.6`，独立于 v0.1.x 插件启动方式。
+此文对应 `0.2.2-standalone-preview.1`，独立于 v0.1.x 插件启动方式。
 
 ## 两条 Agent 路径
 

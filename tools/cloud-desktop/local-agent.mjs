@@ -3,21 +3,22 @@ import {join} from 'node:path';
 import {locateNativeModules,nativeImporter} from './native-modules.mjs';
 import {chatUrl,limitedJson} from '../dsh-game-services/client.mjs';
 import {gameModePrompt} from '../dsh-coach-server/lib/game-mode-prompt.js';
-import {cloudContext} from './cloud-agent.mjs';
+import {cloudContext,agentQuestion} from './cloud-agent.mjs';
 const fail=(status,message)=>Object.assign(Error(message),{status});
 export async function createLocalAgent({stateDir,getConfig,getKey,getContext,queryEvents,isCurrent=()=>true,capture,search,webSearch,observationPlan,onProgress=()=>{},moduleRoot,fetchImpl=fetch}){
  const config=await getConfig();
  const modules=await locateNativeModules({stateDir,desktopPath:config.desktopPath,moduleRoot});
  const load=n=>nativeImporter(modules)('@deepseek-ai/'+n);
  const [{Context},llm,{default:Sessions},{default:Projection},{default:Tools},{default:Agents},{default:Loop},{default:Prompt},{default:Persistence},{default:Meter},{default:Compaction}]=await Promise.all(['cordis','dsh-llm','dsh-session','dsh-session-projection','dsh-tools','dsh-agent','dsh-agent-loop','dsh-system-prompt','dsh-session-persistence-jsonl','dsh-token-meter','dsh-compaction-basic'].map(load));
- const ctx=new Context(),fibers=[];const lifetime=new AbortController();let owned=null,scope='',busy=false,closing=false;
+ const ctx=new Context(),fibers=[];const lifetime=new AbortController();let owned=null,scope='',busy=false,closing=false,lastModelError=null;
  const mount=async(plugin,options)=>{const fiber=ctx.plugin(plugin,options);fibers.push(fiber);await fiber.inertia;};
  class Model extends llm.LlmAdapter{
   async *stream(options){
+   lastModelError=null;
    const cfg=await getConfig(),key=await getKey();if(!key)throw fail(401,'请配置自己的 API Key');
    const messages=options.messages.map(m=>({role:m.role,content:m.content.filter(b=>b.type==='text').map(b=>b.text).join('\n')||null,...(m.role==='tool'?{tool_call_id:m.toolCallId}:{}),...(m.role==='assistant'&&m.content.some(b=>b.type==='reasoning')?{reasoning_content:m.content.filter(b=>b.type==='reasoning').map(b=>b.text).join('')}:{}),...(m.content.some(b=>b.type==='tool-call')?{tool_calls:m.content.filter(b=>b.type==='tool-call').map(b=>({id:b.id,type:'function',function:{name:b.name,arguments:b.arguments}}))}:{})}));
    const response=await fetchImpl(chatUrl(cfg.baseUrl),{method:'POST',redirect:'error',signal:AbortSignal.any([lifetime.signal,options.signal??lifetime.signal,AbortSignal.timeout(60000)]),headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:cfg.model,messages,stream:false,max_tokens:options.maxTokens??2048,...(options.purpose!=='compaction'&&options.tools?.length?{tools:options.tools.map(t=>({type:'function',function:t}))}:{})})});
-   if(!response.ok){await response.body?.cancel();throw fail(response.status,'本地 DSH 的模型请求失败');}
+   if(!response.ok){await response.body?.cancel();lastModelError=fail(response.status,'本地 DSH 的模型请求失败');throw lastModelError;}
    const result=await limitedJson(response,512*1024),choice=result.choices?.[0];if(!choice?.message||!['stop','tool_calls'].includes(choice.finish_reason))throw fail(502,'模型未提交完整回答');
    const blocks=[...(choice.message.reasoning_content?[{type:'reasoning',text:choice.message.reasoning_content}]:[]),...(choice.message.content?[{type:'text',text:choice.message.content}]:[]),...(choice.message.tool_calls??[]).map(call=>({type:'tool-call',id:call.id,name:call.function.name,arguments:call.function.arguments}))];
    for(const [index,block]of blocks.entries()){yield{type:'block-start',index,blockType:block.type};yield block.type==='text'?{type:'text-delta',index,text:block.text}:block.type==='reasoning'?{type:'reasoning-delta',index,text:block.text}:{type:'tool-call-delta',index,id:block.id,name:block.name,argumentsDelta:block.arguments};yield{type:'block-end',index,block};}
@@ -51,7 +52,7 @@ export async function createLocalAgent({stateDir,getConfig,getKey,getContext,que
   owned=existing?await ctx.agentLoop.resume(ctx,{...options,resumeSessionId:sessionId}):await ctx.agentLoop.createAgent(ctx,{...options,sessionId});return owned.agent;
  }
  return{busy:()=>busy,async ask(request){
-  if(closing||busy)throw fail(409,'本地 Agent 正忙');busy=true;let timer;
+  if(closing||busy)throw fail(409,'本地 Agent 正忙');busy=true;let timer,matchTimer,timedOut=false;
   try{
    if(!isCurrent(request.game,request.match))throw fail(409,'对局已切换');const agent=await ensure(request.game,request.match),from=agent.session.snapshotEvents().length;
    // DSH's character heuristic underprices Chinese text. Compact through its
@@ -59,11 +60,13 @@ export async function createLocalAgent({stateDir,getConfig,getKey,getContext,que
    if(ctx.tokenMeter.measure(agent.session).totalTokens>9000){onProgress({game:request.game,match:request.match,event:'compaction'});await ctx.compaction.compactNow(agent,lifetime.signal);if(ctx.tokenMeter.measure(agent.session).totalTokens>9000)throw fail(503,'本局上下文压缩未完成，请重试');}
    const current=(await getContext(request.game,request.match)).current;const rules=gameModePrompt({game:request.game,mode:current?.mode});
    onProgress({game:request.game,match:request.match,event:'started'});
-   timer=setTimeout(()=>void agent.cancel({kind:'user'}),90000);
-   agent.followup(llm.createUserMessage({content:[{type:'text',text:rules+'\n'+request.question+'\n请先按需使用工具。当前游戏：'+request.game+'；会话仅属于本局。'}],source:{kind:'user'}}));await agent.whenIdle();
+   timer=setTimeout(()=>{timedOut=true;void agent.cancel({kind:'user'});},90000);
+   matchTimer=setInterval(()=>{if(!isCurrent(request.game,request.match))void agent.cancel({kind:'user'});},500);
+   agent.followup(llm.createUserMessage({content:[{type:'text',text:rules+'\n'+agentQuestion(request)+'\n请先按需使用工具。当前游戏：'+request.game+'；会话仅属于本局。'}],source:{kind:'user'}}));await agent.whenIdle();
    if(closing||!isCurrent(request.game,request.match))throw fail(409,'对局已切换');
-   const final=agent.session.snapshotEvents().slice(from).filter(e=>e.type==='assistant/message').at(-1);if(!final||llm.lastAssistantStreamChunk(final.data.stream,'finish')?.reason?.kind!=='stop')throw fail(502,'DSH 未能提交有效回答');
+   if(timedOut)throw fail(504,'本次分析超时');
+   const final=agent.session.snapshotEvents().slice(from).filter(e=>e.type==='assistant/message').at(-1);if(!final||llm.lastAssistantStreamChunk(final.data.stream,'finish')?.reason?.kind!=='stop')throw lastModelError??fail(502,'DSH 未能提交有效回答');
    const text=llm.joinAssistantStreamText(final.data.stream).trim();if(!text)throw fail(502,'DSH 未能提交有效回答');await ctx.sessionPersistence.flush();return text.slice(0,12000);
-  }finally{clearTimeout(timer);busy=false;onProgress({game:request.game,match:request.match,event:'completed'});}
+  }finally{clearTimeout(timer);clearInterval(matchTimer);busy=false;onProgress({game:request.game,match:request.match,event:'completed'});}
  },async close(){closing=true;lifetime.abort();await owned?.dispose();for(const fiber of fibers.reverse())await fiber.dispose();}};
 }

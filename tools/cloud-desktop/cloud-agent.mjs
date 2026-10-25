@@ -1,17 +1,27 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {serviceUrl,limitedJson} from '../dsh-game-services/client.mjs';
+import {equipmentContext} from '../dsh-onboarding/equipment-context.mjs';
 const fail=(status,message)=>Object.assign(Error(message),{status});
+export function agentQuestion(request){
+ let message=request.question;
+ if(request.topic==='equipment'&&typeof message==='string'&&message.includes('【装备决策事实 JSON】'))message=message.split('【装备决策事实 JSON】')[0].replace('只用 coach_reply 提交','直接提交')+'\n按需读取当前事实中的 equipment_decision；区分 confirmedAugments 与 assumedAugments，推测不当作已拥有。';
+ if(typeof message!=='string'||!message.trim()||message.length>2000)throw fail(413,'Agent message exceeds the bounded task budget');
+ return message;
+}
 export function cloudContext(memory,game,match,{eventQuery=false,observationPlan=false}={}){
  const c=memory.current;
  if(c&&(c.game!==game||c.match!==match))throw fail(409,'Match changed');
- const player=p=>p?Object.fromEntries(['champion','level','gold','dead','hpPct','k','d','a','items','spells'].filter(k=>p[k]!==undefined).map(k=>[k,Array.isArray(p[k])?p[k].slice(0,8):p[k]])):undefined;
+ const compact=value=>typeof value==='string'?value.slice(0,120):value&&typeof value==='object'?Object.fromEntries(['name','id','count','level','ready','cooldown'].filter(k=>['string','number','boolean'].includes(typeof value[k])).map(k=>[k,typeof value[k]==='string'?value[k].slice(0,120):value[k]])):value;
+ const player=p=>p?Object.fromEntries(['champion','level','gold','dead','hpPct','k','d','a','items','spells','canShop','respawn'].filter(k=>p[k]!==undefined).map(k=>[k,Array.isArray(p[k])?p[k].slice(0,8).map(compact):compact(p[k])])):undefined;
+ const equipment=c&&game!=='generic'?equipmentContext({...c,me:c.me??{},enemies:c.enemies??[],ownedAugments:c.ownedAugments??[],augmentRounds:c.augmentRounds??[]}):undefined;
  const value={current_match_state:{game_id:game,status:c?'observed':'unknown',revision:c?.at??0,captured_at_ms:c?.at??Date.now(),
   game_seconds:c?.gameSeconds,mode:c?.mode,phase:c?.phase,me:player(c?.me),allies:c?.allies?.slice(0,5).map(player),enemies:c?.enemies?.slice(0,5).map(player),
   generic_state:game==='generic'?c?.me?.genericState:undefined,
   team_score:Number.isInteger(c?.me?.teamKills)&&Number.isInteger(c?.me?.enemyKills)?{ally:c.me.teamKills,enemy:c.me.enemyKills}:undefined,
   bench:c?.phase==='ChampSelect'?c?.bench?.slice(0,20):undefined,
-  offers:c?.offers?.slice(0,6),owned_augments:c?.ownedAugments?.slice(0,12)},
+  offers:c?.offers?.slice(0,6).map(compact),owned_augments:c?.ownedAugments?.slice(0,12).map(compact),
+  equipment_decision:equipment?{...equipment,currentItems:equipment.currentItems.slice(0,8).map(compact),enemies:equipment.enemies.slice(0,5).map(e=>({hero:String(e.hero??'').slice(0,120),items:e.items.slice(0,8).map(compact)})),unassignedEnemyItems:equipment.unassignedEnemyItems.slice(0,8).map(compact),confirmedAugments:equipment.confirmedAugments.slice(0,12).map(compact),assumedAugments:equipment.assumedAugments.slice(0,6)}:undefined},
   events:(c?.events??[]).slice(-20).map(e=>({time:e.time,text:String(e.text??'').slice(0,240)})),client_context:{game_id:game,mode:c?.mode??'',capabilities:{event_query_v1:eventQuery,observation_plan_v1:game==='generic'&&observationPlan},user_memory:{confirmed_preferences:(memory.preferences??[]).slice(-6)}}};
  if(Buffer.byteLength(JSON.stringify(value))>24000)throw fail(413,'Current facts exceed the bounded context budget');
  return value;
@@ -35,19 +45,19 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
    token=await getToken();if(!token)throw fail(401,'Login required');if(!current())throw fail(409,'Match changed');
    const session='desktop-'+createHash('sha256').update(JSON.stringify([deviceId,request.game,request.match])).digest('hex');
    const context=cloudContext(await getContext(request.game,request.match),request.game,request.match,{eventQuery:!!queryEvents,observationPlan:!!observationPlan});
-   const message=request.topic==='equipment'?'根据本局装备、全部已选海克斯与对手威胁，推荐下一件具体装备并解释理由。':request.question;
+   const message=agentQuestion(request);
    const key=randomUUID();let created;
    for(let attempt=0;attempt<2;attempt++){
     try{created=await call('/tasks',token,{session_id:session,message,context},signal,key);break;}
     catch(error){if(error.status||signal.aborted||attempt)throw error;}
    }
    if(!/^[a-f0-9-]{32,36}$/.test(created.task_id??''))throw fail(502,'Invalid task');task=created.task_id;
-   let cursor=0,revision=context.current_match_state.revision,nextContextAt=0;const handled=new Set();
+   let cursor=0,revision=context.current_match_state.revision,nextContextAt=0,pollFailures=0;const handled=new Set();
    while(true){
     signal.throwIfAborted();if(!current())throw fail(409,'Match changed');
     let update;
-    try{update=await call('/tasks/'+task+'?after='+cursor,token,undefined,signal);}
-    catch(error){if(error.status!==429)throw error;onProgress({game:request.game,match:request.match,event:'rate_limited'});await sleep(error.retryAfterMs,undefined,{signal});continue;}
+    try{update=await call('/tasks/'+task+'?after='+cursor,token,undefined,signal);pollFailures=0;}
+    catch(error){if(error.status===429){onProgress({game:request.game,match:request.match,event:'rate_limited'});await sleep(error.retryAfterMs,undefined,{signal});continue;}if(!signal.aborted&&(!error.status||[502,503,504].includes(error.status))&&pollFailures++<2){await sleep(250*pollFailures,undefined,{signal});continue;}throw error;}
     if(!Number.isSafeInteger(update.cursor)||update.cursor<cursor)throw fail(502,'Invalid cursor');cursor=update.cursor;
     const terminalUpdate=['completed','failed','cancelled'].includes(update.status);
     for(const event of update.events??[]){
@@ -82,7 +92,7 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
     }
     await sleep(pollMs,undefined,{signal});
    }
-  }finally{
+  }catch(error){if(signal.aborted&&!lifetime.signal.aborted)throw fail(504,'Agent analysis timed out');throw error;}finally{
    if(task&&!terminal&&token)await call('/tasks/'+task+'/cancel',token,{},AbortSignal.timeout(5000)).catch(()=>{});
    busy=false;finish();
   }

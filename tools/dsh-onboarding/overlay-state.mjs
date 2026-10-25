@@ -59,7 +59,7 @@ export function applyOverlayEvent(state, event, file) {
   const mode=normalizeLolMode(event.mode??event.queue??event.state?.mode);
   if(state.game==='lol'&&mode)state.mode=mode;
   if(event.kind==='champ_select_end'){
-    state.ended=true;state.phase=event.cancelled?'Lobby':'Loading';
+    state.ended=event.cancelled===true;state.phase=event.cancelled?'Lobby':'Loading';
     if(event.cancelled){state.me={};state.allies=[];state.enemies=[];state.bench=[];}
   }
   if (event.kind === 'phase') { state.phase = text(event.phase); if(event.phase==='EndOfGame')state.ended=true; }
@@ -413,15 +413,16 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       if (busy) throw Object.assign(Error('教练正在回复'), { status: 409 });
       if (typeof question !== 'string' || !question.trim() || question.length > 1000) throw Object.assign(Error('问题格式不正确'), { status: 400 });
       busy = true;
-      const match = state.match, started = state.matchStartedAt;
+      const game=state.game||'lol',match = state.match, started = state.matchStartedAt;
       const stillCurrent = () => state.match === match && state.matchStartedAt === started;
       const q = { role: 'user', text: question.trim(), origin: metadata.origin === 'phone' ? 'phone' : 'desktop' }; state.chat.push(q);
       state.chat = state.chat.slice(-50);
       try {
         await memory.record(state, { kind: 'chat', ...q, gameSeconds: state.gameSeconds }, 'overlay-chat');
         await flush();
+        if(!stillCurrent())throw Object.assign(Error('对局已切换，请在当前对局重新提问'),{status:409});
         if (!agentChat) throw Object.assign(Error('DSH Agent 聊天接口尚未就绪，请重新打开金宝'), { status: 503 });
-        const answer = await agentChat({ game: state.game || 'lol', match: state.match || 'waiting', question: q.text, topic });
+        const answer = await agentChat({ game, match: match || 'waiting', question: q.text, topic:topic??'chat',priority:'manual' });
         if(!stillCurrent())throw Object.assign(Error('对局已切换，请在当前对局重新提问'),{status:409});
         if(typeof answer!=='string'||!answer.trim())throw Object.assign(Error('Empty Agent answer'),{status:502});
         const reply=answer.trim();

@@ -19,20 +19,23 @@ import https from "node:https";
  * @returns {Promise<{status:number, data:any}>} data 为解析后的 JSON(非 JSON 则为原文)
  */
 export function lcuRequest(lcu, path, opts = {}) {
+  if(opts.binary&&!/^\/lol-game-data\/assets\/v1\/champion-icons\/\d{1,6}\.png$/.test(path))return Promise.reject(new Error('Binary LCU asset scope denied'));
   const timeoutMs = opts.timeoutMs ?? 5000;
   const payload = opts.body === undefined ? null : Buffer.from(JSON.stringify(opts.body), "utf8");
-  const headers = { authorization: lcu.auth, accept: "application/json" };
+  const headers = { authorization: lcu.auth, accept: opts.binary?'image/png':"application/json" };
   if (payload) {
     headers["content-type"] = "application/json";
     headers["content-length"] = String(payload.length);
   }
   return new Promise((resolve, reject) => {
     const req = https.request(
-      { host: "127.0.0.1", port: lcu.port, path, method: opts.method ?? "GET", headers, rejectUnauthorized: false, timeout: timeoutMs },
+      { host: "127.0.0.1", port: lcu.port, path, method: opts.method ?? "GET", headers, rejectUnauthorized: false, timeout: timeoutMs,signal:opts.signal },
       (res) => {
-        const chunks = [];
-        res.on("data", (c) => chunks.push(c));
+        const chunks = [];let size=0;
+        res.on("error",reject);
+        res.on("data", (c) => {size+=c.length;if(size>(opts.binary?65536:8*1024*1024)){req.destroy(new Error('LCU response exceeds bounded budget'));return;}chunks.push(c);});
         res.on("end", () => {
+          if(opts.binary){resolve({status:res.statusCode??0,data:Buffer.concat(chunks)});return;}
           const text = Buffer.concat(chunks).toString("utf8");
           let data = text;
           try { data = text ? JSON.parse(text) : null; } catch { /* 保留原文 */ }

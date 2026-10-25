@@ -9,6 +9,7 @@ if($Worker){
  exit 0
 }
 $engineReady=$false
+$capturedAt=$null
 try{
  if(-not('JinbaoAugmentCapture' -as [type])){Add-Type @'
 using System;
@@ -35,9 +36,8 @@ public static class JinbaoAugmentCapture {
  $language=[Windows.Globalization.Language]::new('zh-Hans')
  $engine=$global:JinbaoAugmentOcrEngine
  if(!$engine){$engine=[Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage($language);$global:JinbaoAugmentOcrEngine=$engine}
- if(!$engine){Write-Output '{"available":false,"reason":"chinese_language_unavailable"}';exit 0}
- $engineReady=$true
- if($CheckOnly){Write-Output '{"available":true}';exit 0}
+ $engineReady=[bool]$engine
+ if($CheckOnly){@{available=$engineReady;reason=$(if($engineReady){''}else{'chinese_language_unavailable'})} | ConvertTo-Json -Compress;exit 0}
  if($ImagePath){$bytes=[IO.File]::ReadAllBytes([IO.Path]::GetFullPath($ImagePath))}else{
  [JinbaoAugmentCapture]::SetProcessDPIAware() | Out-Null
  $handle=[JinbaoAugmentCapture]::GetForegroundWindow();$gamePid=[uint32]0
@@ -54,7 +54,7 @@ public static class JinbaoAugmentCapture {
  $graphics=[Drawing.Graphics]::FromImage($bitmap)
  . (Join-Path $PSScriptRoot '../desktop-release/capture-coordination.ps1')
  $lease=$null
- try{$lease=Enter-JinbaoCapture $StateDir;$graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size)}finally{Exit-JinbaoCapture $lease;$graphics.Dispose()}
+ try{$lease=Enter-JinbaoCapture $StateDir;$graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size);$capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}finally{Exit-JinbaoCapture $lease;$graphics.Dispose()}
  $scaled=$null;$memory=[IO.MemoryStream]::new()
  try{
   if($width -gt 2000){$scaled=[Drawing.Bitmap]::new($bitmap,[Drawing.Size]::new(2000,[int]($height*2000/$width)));$width=$scaled.Width;$height=$scaled.Height;$scaled.Save($memory,[Drawing.Imaging.ImageFormat]::Png)}
@@ -62,6 +62,10 @@ public static class JinbaoAugmentCapture {
   $bytes=$memory.ToArray()
  }finally{if($scaled){$scaled.Dispose()};$memory.Dispose();$bitmap.Dispose()}
  }
+ if(!$capturedAt){$capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+ . (Join-Path $PSScriptRoot 'observe-ally-ultimates.ps1')
+ $allyHud=Read-JinbaoAllyHud $bytes $StateDir
+ if(!$engineReady){@{available=$true;ocrAvailable=$false;foreground=$true;capturedAt=$capturedAt;reason='chinese_language_unavailable';lines=@();allyHud=$allyHud} | ConvertTo-Json -Depth 6 -Compress;exit 0}
  $asTask=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {$_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1} | Select-Object -First 1
  function Await-Operation($operation,[Type]$type){$task=$asTask.MakeGenericMethod($type).Invoke($null,@($operation));$task.Wait();return $task.Result}
  function Read-OcrImage([byte[]]$imageBytes){
@@ -124,7 +128,7 @@ public static class JinbaoAugmentCapture {
    }finally{$stripBytes.Dispose()}
   }finally{$stripGraphics.Dispose();$strip.Dispose()}
  }finally{if($inputBitmap){$inputBitmap.Dispose()};$inputStream.Dispose()}
- @{available=$true;foreground=$true;width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-strip';cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 5 -Compress
+ @{available=$true;ocrAvailable=$true;foreground=$true;capturedAt=$capturedAt;allyHud=$allyHud;width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-strip';cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 6 -Compress
 
 }catch{
  if($engineReady){Write-Output '{"available":true,"foreground":false,"reason":"capture_failed"}'}

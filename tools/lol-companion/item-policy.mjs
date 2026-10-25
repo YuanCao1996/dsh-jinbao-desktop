@@ -10,13 +10,24 @@ export function isCompletedItem(item){
  return finishedIds.has(baseItemId(item?.id??item?.itemId))||finishedNames.has(name)||['焚天','心之钢','无终恨意'].includes(name);
 }
 export function createItemCatalogue(rows=[]){
- const map=new Map(),used=new Set();
- for(const row of rows){for(const id of row.from??[])used.add(Number(id));}
+ const map=new Map(),byId=new Map(rows.map(row=>[Number(row.id),row])),usedBy=new Map();
+ for(const row of rows){for(const id of Array.isArray(row.from)?row.from:[]){const used=usedBy.get(Number(id))??[];used.push(row);usedBy.set(Number(id),used);}}
  for(const row of rows){
-  const id=Number(row.id),into=row.into;
-  const consumable=row.consumable===true||(row.categories??[]).some(v=>/consumable/i.test(v));
+  const id=Number(row.id),into=row.into,categories=Array.isArray(row.categories)?row.categories:Array.isArray(row.cats)?row.cats:[];
+  const consumable=row.consumable===true||categories.some(v=>/consumable/i.test(v));
   const graphKnown=Array.isArray(into)||Array.isArray(row.from);
-  const completed=consumable?false:graphKnown?!(Array.isArray(into)?into.length>0:used.has(id))&&(row.from?.length>0||Number(row.price??row.gold?.total)>=2000):undefined;
+  const upgrades=Array.isArray(into)?into.map(id=>byId.get(Number(id))??{inStore:true}):usedBy.get(id)??[];
+  const ordinaryUpgrade=upgrades.some(target=>target.inStore!==false&&!/ornn|奥恩/i.test(String(target.requiredChampion??target.requiredAlly??'')));
+  const icon=String(row.iconPath??row.icon??''),tier=Number(/_T([1-5])_/i.exec(icon)?.[1]),price=Number(row.gold?.total??row.price);
+  const known=finishedIds.has(baseItemId(id))||finishedNames.has(row.name);
+  let completed;
+  if(consumable)completed=false;
+  else if(known||tier>=3)completed=true;
+  else if(ordinaryUpgrade)completed=false;
+  else if(categories.includes('Boots')&&baseItemId(id)!==1001&&price>=700)completed=true;
+  else if(tier>0&&tier<=2)completed=false;
+  else if(graphKnown&&(row.from?.length>0||price>=2000))completed=true;
+  else if(row.inStore===true&&price>=2000)completed=true;
   map.set(id,{...(completed===undefined?{}:{completed}),consumable});
  }
  return item=>({...item,...(map.get(Number(item.id))??map.get(baseItemId(item.id))??{})});

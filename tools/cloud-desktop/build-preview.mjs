@@ -8,7 +8,7 @@ import {promisify} from 'node:util';
 
 // Separate preview artifact: never changes stable release metadata or update feeds.
 export async function buildPreview({root,out,runtime=process.execPath}) {
- const updateVersion='0.2.3',version=updateVersion+'-standalone-preview.1';
+ const updateVersion='0.2.4',version=updateVersion+'-standalone-preview.1';
  const files=new Set();
  async function include(name) {
   const path=resolve(root,name),local=relative(root,path);
@@ -28,6 +28,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
  for(const name of [
   'tools/cloud-desktop/protect.ps1','tools/cloud-desktop/instance.ps1','tools/dsh-onboarding/settings.html',
   'tools/dsh-coach-server/capture-game.ps1','tools/lol-companion/capture-augments.ps1','tools/lol-companion/augment-names.json',
+  'tools/lol-companion/AllyUltimateVision.cs','tools/lol-companion/observe-ally-ultimates.ps1',
   'tools/jinbao-launcher/platform.ps1','tools/jinbao-launcher/legacy-overlay.ps1','tools/jinbao-launcher/legacy-window.ps1',
   'tools/jinbao-launcher/update-public.pem','tools/jinbao-launcher/extract-update.ps1',
   'tools/jinbao-launcher/install-host.ps1',
@@ -41,7 +42,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
  await copyFile(runtime,join(out,'runtime/node.exe'));
  await copyFile(join(root,'third-party/node-LICENSE.txt'),join(out,'runtime/LICENSE'));
  await writeFile(join(out,'package.json'),JSON.stringify({name:'jinbao-cloud-preview',private:true,type:'module',version}));
- await writeFile(join(out,'tools/dsh-onboarding/release-notes.json'),JSON.stringify({version:version+' (独立预览)',notes:"独立桌面版预览更新：\n• 聊天支持明确保存、查询和删除游戏偏好；设置页可查看和删除，跨对局保留。\n• 官方云端与自有 Key 共用 DSH 原生记忆工具，写入需用户本轮明确授权。\n• 偏好查询按字节分页；精简初始上下文，修复偏好变化造成的上下文版本冲突。\n• 修复聊天未抢占后台任务、运行时启动与会话关闭时的竞争。\n• 修复加载页被当作对局结束、战况建议过期后不再触发的问题。\n• 出装任务保留原要求；已确认/推测海克斯通过工具事实分开提供，去除冗余原始字段。\n• 云端轮询短暂断线重试原任务，超时单独提示；自有 Key 保留认证错误，换局中断旧请求。\n• 同一设备只需首次配对；现有有效配对自动升级，重启、更新和暂停同步后自动重连。\n• 新增明确的解除配对入口；长期配对凭据只允许本机同步，不能调用模型账号。\n• 默认官方服务使用云端 DSH，无需安装宿主；已有体验名额会自动开通，保留邮箱登录。\n• 自有 API Key 模式复用本机 DSH 原生 Agent、会话、工具和压缩，无需另开 DSH 窗口。\n• 独立签名更新通道，支持进度、安装和启动失败回退。\n• 配对码同步与手机主动聊天；手动聊天优先于自动建议。\n• LoL 自动采集；已有王者及其他游戏日志可按需接入，通用窗口支持按需看图和受预算约束的截图计划。\n• 团队局势估计随时间与击杀变化，海克斯识别提速。\n• 显示模式放入设置、退出确认、Ctrl+Alt+方向键。\n• 保留本局日志按需检索，中文长会话通过 DSH 原生压缩控制请求大小。\n\n仍为预览版；真实对局效果和启发式估计尚待实战验收。"}));
+ await writeFile(join(out,'tools/dsh-onboarding/release-notes.json'),JSON.stringify({version:version+' (独立预览)',notes:"独立桌面版修复更新：\n• 使用原生 jinbao.exe 启动，不再执行 VBS；保留旧更新器要求的纯注释占位文件。\n• 修复强化方案因无关散件变化被撤销、战况长期等待；生成失败显示可诊断状态。\n• 自动教练不再反复污染手动聊天历史；中文长会话继续使用 DSH 原生压缩和本局日志按需检索。\n• 胜率与英雄 Top10 基础查询独立于自主工具检索额度；空结果可重试，海克斯查询优先。\n• 装备动态仅记录成装，敌方成装变化触发针对性建议；海克斯方案与装备建议联动战况。\n• 修复中文交互确认乱码、短暂关闭强化面板被误判为新轮次。\n• 截图期间同时避让主窗、确认弹窗和设置菜单，拷贝像素后立即恢复。\n• 新增 Ctrl+Shift+F7/F8/F9/F10 备用快捷键及注册、输入诊断。\n• 新增实验性队友大招画面提醒：核对我方头像、连续识别就绪标记，过滤死亡队友；隐藏或未知时不猜冷却。\n• 保留用户记忆、邮箱登录、首次配对与独立签名更新。\n\n仍为预览版。原生入口未作代码签名，尚未通过用户所用杀毒软件复测；HUD 多布局及游戏前台输入仍需实战验收。"}));
  const compiler=join(process.env.SystemRoot??'C:/Windows','Microsoft.NET/Framework64/v4.0.30319/csc.exe');
  await promisify(execFile)(compiler,['/nologo','/target:winexe','/optimize+','/reference:System.Windows.Forms.dll','/out:'+join(out,'jinbao.exe'),join(root,'tools/cloud-desktop/Launcher.cs')],{windowsHide:true});
  // Old signed-update verifiers require this filename. Keep only an inert

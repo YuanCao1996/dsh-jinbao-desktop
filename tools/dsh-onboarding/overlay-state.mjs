@@ -4,7 +4,7 @@ import { WZRY_ADAPTER } from '../dsh-coach-server/lib/adapters/wzry.js';
 import { projectWzryFacts } from '../dsh-coach-server/lib/adapters/wzry-facts.js';
 import { createMatchTracker } from '../dsh-coach-server/lib/match-tracker.js';
 import { rankedAugments, augmentLine, offerNames } from './augment-ranking.mjs';
-import { projectProgressEvent,observeEquipment } from './progress-events.mjs';
+import { projectProgressEvent,observeEquipment,addProgressEvent } from './progress-events.mjs';
 import { createGameMemory } from '../dsh-coach-server/lib/game-memory.js';
 import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
 import {trackAugmentRound,updateAugmentRecommendations,createEquipmentCoach} from './equipment-context.mjs';
@@ -55,6 +55,18 @@ export function applyOverlayEvent(state, event, file) {
   }
   state.at = at;
   state.game = event.game;
+  if(event.kind==='ally_ultimate'){
+    const ally=state.allies.find(p=>p.championAlias===event.championAlias&&p.championAlias!==state.me.championAlias);
+    if(!ally||event.source!=='hud-indicator'||!Number.isFinite(event.capturedAt)||Math.abs(at-event.capturedAt)>4000)return;
+    for(const reply of state.broadcasts)if(reply.allyUltimate===event.championAlias)reply.revoked=true;
+    if(event.ready===true&&event.notify===true&&ally.dead===false){
+      const message=`画面观察：队友${ally.champion}大招可用，可留意配合窗口。`;
+      state.broadcasts.push({at,text:message,priority:1,allyUltimate:event.championAlias,expiresAt:event.capturedAt+4000});
+      state.broadcasts=state.broadcasts.slice(-12);
+      addProgressEvent(state,'ally-r:'+event.championAlias+':'+event.capturedAt,message,event.gameTime,'ally-ultimate');
+    }
+    return;
+  }
   if(event.kind==='champ_select'){
     if(state.match!==match||state.phase!=='ChampSelect')Object.assign(state,initialOverlayState(),{match,matchStartedAt:at,game:event.game,at});
     state.phase='ChampSelect';state.me=event.me??{};state.allies=list(event.allies);state.enemies=list(event.enemies);state.bench=list(event.bench);state.gameSeconds=null;
@@ -213,7 +225,7 @@ export function overlayView(state, knowledge = {}) {
   const candidates = ranked.filter(row => offered.includes(row.name)).map(augmentLine);
   for(const name of offered)if(!ranked.some(row=>row.name===name))candidates.push(name+' · 暂无该英雄排名');
   // Revocation is permanent: a later death or item swap must not revive old advice.
-  for (const reply of state.broadcasts) if (!adviceIsValid(reply.validity,state)) reply.revoked = true;
+  for (const reply of state.broadcasts) if (!adviceIsValid(reply.validity,state)||(reply.expiresAt&&Date.now()>=reply.expiresAt)||(reply.allyUltimate&&state.allies.find(p=>p.championAlias===reply.allyUltimate)?.dead!==false)) reply.revoked = true;
   const validBroadcasts = state.broadcasts.filter(r => !r.revoked);
   const current = validBroadcasts.at(-1)?.text || state.coachStatus?.label || (state.broadcasts.length?'局势已变化，正在更新针对性建议…':'等待进入游戏，检测到对局后自动生成策略建议。');
   const playbook=!state.ended&&state.augmentPlaybook?.owned===JSON.stringify([...state.ownedAugments].sort())&&state.augmentPlaybook.text!==current?'\n\n强化方案参考 · '+clock(state.augmentPlaybook.gameSeconds)+'\n'+state.augmentPlaybook.text:'';
@@ -227,7 +239,7 @@ export function overlayView(state, knowledge = {}) {
   const heroStats = (state.game==='lol'?'大乱斗英雄样本胜率\n':'英雄样本胜率\n') + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?tierText(hero.tier):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
   return {
     game: state.game, mode:state.mode, match: state.match, gameTime: state.game==='generic'?(state.phase==='CapturePaused'?'观察已停止':'观察中'):clock(state.gameSeconds), phase:state.phase, ended: state.ended,
-    playback:validBroadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0,expiresAt:r.validity?.expiresAt??null})),
+    playback:validBroadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0,expiresAt:r.expiresAt??r.validity?.expiresAt??null})),
     revokedPlayback:state.broadcasts.filter(r=>r.revoked).map(r=>String(r.at)+':'+r.text),
     keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),

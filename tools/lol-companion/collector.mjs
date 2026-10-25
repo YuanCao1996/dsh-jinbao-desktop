@@ -9,8 +9,10 @@ import { createChatObserver,createChatCatalogReader } from './chat-observer.mjs'
 import { createAugmentObserver,augmentNames } from './augment-observer.mjs';
 import {createAugmentCaptureWorker} from './capture-worker.mjs';
 import {createItemCatalogue} from './item-policy.mjs';
+import {createHudAssets} from './hud-assets.mjs';
+import {createAllyUltimateObserver} from './ally-ultimates.mjs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join,dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 const folder=process.env.JINBAO_LOG_DIR??join(homedir(),'.dsh','jinbao','logs');
 let log=createEventLog(folder,'client-'+Date.now()),phase=null,lastEvent=-1,gameTime=null;
@@ -25,9 +27,15 @@ const names=await augmentNames();
 const observer=createAugmentObserver(names,event=>{if(running)log.append(event);});
 const chatObserver=createChatObserver(names,event=>{if(running)log.append(event);});
 const readChatCatalog=createChatCatalogReader(lcuRequest);
-let enrichItem=item=>item,championNames=new Map();
-const acceptCatalog=catalog=>{chatObserver.setCatalog(catalog);if(catalog.items)enrichItem=createItemCatalogue(catalog.items);if(catalog.champions)championNames=new Map(catalog.champions.filter(c=>c.alias&&c.name).map(c=>[c.alias.toLowerCase(),c.name]));};
-const stop=()=>{running=false;captureStop.abort();captureWorker.close();};
+let enrichItem=item=>item,championNames=new Map(),champions=[];
+const ultimateObserver=createAllyUltimateObserver(event=>{if(running)log.append(event);});
+const hudAssets=createHudAssets({stateDir:process.env.JINBAO_STATE_DIR??dirname(folder),load:async(id,signal)=>{
+ const credentials=readCredentials();if(!credentials.ok)throw Error('Client unavailable');
+ const result=await lcuRequest(credentials,`/lol-game-data/assets/v1/champion-icons/${id}.png`,{binary:true,timeoutMs:3000,signal});
+ if(result.status!==200)throw Error('Portrait unavailable');return result.data;
+}});
+const acceptCatalog=catalog=>{chatObserver.setCatalog(catalog);if(catalog.items)enrichItem=createItemCatalogue(catalog.items);if(catalog.champions){champions=catalog.champions;championNames=new Map(champions.filter(c=>c.alias&&c.name).map(c=>[c.alias.toLowerCase(),c.name]));}};
+const stop=()=>{running=false;captureStop.abort();captureWorker.close();void hudAssets.close();};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 process.on('message',message=>{if(message?.action==='stop')stop();});
 if(process.connected)process.once('disconnect',stop);
@@ -39,9 +47,10 @@ const captureTimer=setInterval(async()=>{
   const frame=await captureWorker.capture(captureStop.signal);
   if(running&&generation===captureGeneration&&lastLiveState){
    observer.observe(frame);
+   ultimateObserver.observe(frame,lastLiveState,hudAssets.key());
    const diagnostic=observer.status();
    const captureStatus=JSON.stringify([frame.available,frame.foreground===true,frame.reason??'',diagnostic.recognized,diagnostic.method]);
-   if(captureStatus!==lastCaptureAvailable){lastCaptureAvailable=captureStatus;log.append({kind:'augment_capture_status',available:frame.available,foreground:frame.foreground===true,reason:frame.reason??'',...diagnostic});}
+   if(captureStatus!==lastCaptureAvailable){lastCaptureAvailable=captureStatus;log.append({kind:'augment_capture_status',available:frame.ocrAvailable??frame.available,foreground:frame.foreground===true,reason:frame.reason??'',...diagnostic});}
    if(!frame.available)nextCaptureAt=Date.now()+60000;
    chatObserver.observe(frame,lastLiveState);
   }
@@ -72,10 +81,11 @@ while(running){
    }
    const time=all.gameData.gameTime;
    if(nextMatch||gameTime===null||time<gameTime){
-    nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();chatObserver.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
+    nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();chatObserver.reset();ultimateObserver.reset();hudAssets.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
     log.append({kind:'game_start',me:state.me??{},queue:state.mode,gameTime:state.gameTime,allies:state.allies,enemies:state.enemies});
    }
    gameTime=time;log.append(stateEvent(state));
+   if(credentials.ok)void hudAssets.update({state,champions,match:log.file,source:credentials.port});
    if(credentials.ok)void readChatCatalog(credentials,acceptCatalog).catch(()=>{});
    const changed=diffEvents(lastEvent,all);lastEvent=changed.maxId;
    for(const e of changed.fresh)log.append({kind:'event',id:e.EventID,name:e.EventName,time:e.EventTime,killer:e.KillerName,victim:e.VictimName,turret:e.TurretKilled,dragon:e.DragonType,...e});
@@ -84,4 +94,5 @@ while(running){
  await sleep(lastLiveState?1000:3000);
 }
 clearInterval(captureTimer);captureStop.abort();captureWorker.close();
+await hudAssets.close();
 if(process.connected)process.disconnect();

@@ -21,7 +21,7 @@ export async function createPhoneChat({stateDir,deviceId,getToken,view,ask,servi
     if(closed||busy||!enabled()||Date.now()<nextAttempt)return;
     busy=true;
     try{
-      const token=await getToken();if(!(allowEmail?/^j[cd]_[a-f0-9]{64}$/:/^jd_[a-f0-9]{64}$/).test(token??''))return;
+      const token=await getToken();if(!(allowEmail?/^j[cdp]_[a-f0-9]{64}$/:/^j[dp]_[a-f0-9]{64}$/).test(token??''))return;
       if(receipt&&receipt.account!==fingerprint(token)){receipt=null;await rm(file,{force:true});}
       if(!receipt){
         const {request}=await remote('next',token);if(!request)return;

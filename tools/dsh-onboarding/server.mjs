@@ -28,6 +28,8 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  let email={enabled:false,checkedAt:0};
  let nextRenewAttempt=0;
  let nextSyncRenewAttempt=0;
+ let pairingUpgrade=null,syncForgotten=false,nextPairUpgradeAttempt=0;
+ try{syncForgotten=JSON.parse(await readFile(join(stateDir,'sync-forgotten.json'),'utf8')).forgotten===true;}catch{}
  const locked=fn=>{const next=mutation.then(fn);mutation=next.catch(()=>{});return next;};
  const resolve=async key=>(await credentials.resolve(refs[key]))?.value;
  async function saveConfig(next){await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;}
@@ -45,8 +47,9 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   pairing=null;
  }
  async function acceptSync(result){
-  if(typeof result.sessionToken!=='string'||!/^jd_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
-  await credentials.set(refs.sync,result.sessionToken);nextSyncRenewAttempt=0;
+  if(typeof result.sessionToken!=='string'||!/^j[dp]_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
+  await credentials.set(refs.sync,result.sessionToken);nextSyncRenewAttempt=0;nextPairUpgradeAttempt=0;
+  syncForgotten=false;await rm(join(stateDir,'sync-forgotten.json'),{force:true});
   if(Number.isFinite(result.expiresIn)&&result.expiresIn>0&&result.expiresIn<=2592000){
    await writeFile(join(stateDir,'sync-login.json'),JSON.stringify({expiresAt:Date.now()+result.expiresIn*1000,renewAfter:Date.now()+86400000}));
   }else await rm(join(stateDir,'sync-login.json'),{force:true});
@@ -59,8 +62,23 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   pairing=null;void phoneSync.enable().catch(()=>{});
  }
  async function syncToken(){
-  let token=await resolve('sync')??await resolve('cloud');
+  let token=await resolve('sync')??(syncForgotten?null:await resolve('cloud'));
+  if(token?.startsWith('jp_'))return token;
   if(!token?.startsWith('jd_'))return null;
+  if(Date.now()>=nextPairUpgradeAttempt){
+   if(!pairingUpgrade)pairingUpgrade=(async()=>{
+    nextPairUpgradeAttempt=Date.now()+300000;
+    try{
+     const device=JSON.parse(await readFile(join(stateDir,'sync-device.json'),'utf8'));
+     const remembered=await remote('/desktop/auth/pair/remember',token,{deviceId:device.id});
+     if(!/^jp_[a-f0-9]{64}$/.test(remembered.sessionToken??''))return;
+     if((await resolve('sync')??await resolve('cloud'))===token&&!syncForgotten)await acceptSync(remembered);
+    }catch{} // An older server or temporary outage retains the existing pairing.
+   })().finally(()=>{pairingUpgrade=null;});
+   await pairingUpgrade;
+   token=await resolve('sync')??(syncForgotten?null:await resolve('cloud'));
+   if(token?.startsWith('jp_'))return token;
+  }
   try{
    const path=join(stateDir,await resolve('sync')?'sync-login.json':'cloud-login.json');
    const lifetime=JSON.parse(await readFile(path,'utf8'));
@@ -244,6 +262,16 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     if(!launcher||Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase)){send(res,409,{error:'金宝启动器未运行，请双击“开始使用”后再检查更新。'});return;}
     const path=join(stateDir,'launcher-control.json');await writeFile(path+'.tmp',JSON.stringify({action:'check-update',at:Date.now()}));await rename(path+'.tmp',path);
     send(res,202,{message:'已请求检查更新，下载完成后下次启动生效。'});return;
+   }
+   if(req.url==='/api/sync/forget'){
+    if(b.confirm!==true||Object.keys(b).some(key=>key!=='confirm'))throw error(400);
+    await phoneSync.disable();await pairingUpgrade;
+    const token=await resolve('sync');
+    if(token?.startsWith('jp_'))await remote('/desktop/auth/pair/forget',token,{});
+    syncForgotten=true;await writeFile(join(stateDir,'sync-forgotten.json'),JSON.stringify({forgotten:true}),{mode:0o600});
+    await credentials.unset(refs.sync);await rm(join(stateDir,'sync-login.json'),{force:true});
+    phoneSync.forgotten();
+    send(res,200,{forgotten:true});return;
    }
    if(req.url==='/api/logout'&&(await resolve('sync')??await resolve('cloud'))===await resolve('cloud'))await phoneSync.disable();
    const value=await locked(async()=>{

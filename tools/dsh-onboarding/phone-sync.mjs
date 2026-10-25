@@ -15,7 +15,7 @@ export function phoneSnapshot(view,now=Date.now()){
   return out;
 }
 export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl,fetchImpl=fetch,pollMs=3000,now=Date.now,allowEmail=false}){
-  const validToken=token=>(allowEmail?/^j[cd]_[a-f0-9]{64}$/:/^jd_[a-f0-9]{64}$/).test(token??'');
+  const validToken=token=>(allowEmail?/^j[cdp]_[a-f0-9]{64}$/:/^j[dp]_[a-f0-9]{64}$/).test(token??'');
   const file=join(stateDir,'sync-device.json'),preferences=join(stateDir,'sync-preferences.json');
   let device;
   try{device=JSON.parse(await readFile(file,'utf8'));}catch{}
@@ -45,7 +45,7 @@ export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl
       if(hash===lastHash&&now()-lastSent<10000)return;
       await request('PUT',token,{deviceName:device.name,snapshot});
       if(closed)return;
-      lastHash=hash;lastSent=now();current={...current,state:'connected',lastSyncedAt:lastSent,message:'已配对并同步，可在 App 的“电脑对局”中查看；无需账号一致'};
+      lastHash=hash;lastSent=now();current={...current,state:'connected',remembered:token.startsWith('jp_'),lastSyncedAt:lastSent,message:token.startsWith('jp_')?'已记住此设备，重启后自动连接，无需重复输入配对码；可在 App 的“电脑对局”中查看':'已配对并同步；正在兼容现有配对会话，可在 App 的“电脑对局”中查看'};
     }catch(error){
       nextAttempt=now()+([401,403].includes(error.status)?60000:15000);
       current={...current,linked:![401,403].includes(error.status),state:'error',message:[401,403].includes(error.status)?'手机配对已失效，请重新生成配对码':'同步连接失败，正在自动重试'};
@@ -56,6 +56,7 @@ export async function createPhoneSync({stateDir,view,ask,getToken,serviceBaseUrl
   const chat=typeof ask==='function'?await createPhoneChat({stateDir,deviceId:device.id,getToken,view,ask,serviceBaseUrl,fetchImpl,enabled:()=>enabled&&!closed,pollMs,allowEmail}):null;
   return {
     status:()=>({...current,enabled}),tick:run,
+    forgotten(){current={...current,linked:false,remembered:false,state:'unlinked',message:'配对已解除；首次连接手机时请生成配对码'};},
     async enable(){enabled=true;await writeFile(preferences,JSON.stringify({enabled:true}),{mode:0o600});nextAttempt=0;lastHash='';return run();},
     async disable(){
       enabled=false;await writeFile(preferences,JSON.stringify({enabled:false}),{mode:0o600});await task.catch(()=>{});

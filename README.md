@@ -4,13 +4,13 @@
 
 [下载 Windows 版](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/latest/download/jinbao-desktop-windows.zip) · [金宝官网 / 手机 App](https://www.jinbaoai.top/#download) · [版本与更新记录](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases)
 
-## 独立桌面版预览（v0.2.0）
+## 独立桌面版预览（v0.2.1）
 
-[下载独立版预览 ZIP](https://api.jinbaoai.top/downloads/jinbao/v0.2.0/jinbao-desktop-windows.zip)。完整解压后双击 `开始使用.cmd`，自动打开悬浮窗与设置页，等待进入游戏。
+[下载独立版预览 ZIP](https://api.jinbaoai.top/downloads/jinbao/v0.2.1/jinbao-desktop-windows.zip)。完整解压后双击 `开始使用.cmd`，自动打开悬浮窗与设置页，等待进入游戏。
 
 - 默认使用金宝官方云端 DSH，**无需另装 DSH Desktop**。自动尝试已开放的免登录体验名额；名额不足或需要固定账号时使用邮箱登录。额度由服务器管理。
 - 自带 API Key 可在同一设置页切换。此模式复用已安装 DSH Desktop 的原生模块，**无需同时运行 DSH 窗口**。没有安装时可从设置页下载官方安装程序。
-- 配对码连接手机；支持手机查看与主动聊天，电脑邮箱和手机微信无需一致。
+- 同一设备只需首次配对，重启和更新自动连接；暂停同步保留配对，设置中可主动解除。支持手机查看与主动聊天，电脑邮箱和手机微信无需一致。
 - LoL 自动采集；其他游戏可选择一个游戏窗口，或在设置中接入本机 `.log` / `.jsonl` 日志。由 DSH 按需读图、检索日志和搜索攻略，未知游戏及模式保持待确认。
 - 使用独立的签名更新通道，不会误装旧版 DSH 插件包。设置页可检查更新、查看日志和安装进度；对局中不安装。
 

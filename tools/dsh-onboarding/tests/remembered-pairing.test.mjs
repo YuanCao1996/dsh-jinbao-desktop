@@ -1,0 +1,20 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {mkdtemp} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {createSetupServer} from '../server.mjs';
+test('remembered device survives restart and billing logout; pause retains it; explicit forget revokes it',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-remember-')),legacy='jd_'+'1'.repeat(64),paired='jp_'+'2'.repeat(64),billing='jc_'+'3'.repeat(64);
+ const values=new Map([['JINBAO_SYNC_TOKEN',legacy],['JINBAO_SERVICE_TOKEN',billing]]),calls=[];
+ const credentials={resolve:async k=>values.has(k)?{value:values.get(k)}:undefined,set:async(k,v)=>values.set(k,v),unset:async k=>values.delete(k)};
+ const fetchImpl=async(url,o={})=>{const path=new URL(url).pathname;calls.push({path,...o});if(path.endsWith('/remember'))return Response.json({sessionToken:paired,remembered:true});return Response.json({accepted:true});};
+ let setup=await createSetupServer({credentials,stateDir:dir,port:0,fetchImpl});t.after(()=>setup.close());
+ const wait=async()=>{for(let i=0;i<100&&!calls.some(c=>c.method==='PUT'&&c.headers.Authorization==='Bearer '+paired);i++)await new Promise(r=>setTimeout(r,10));};await wait();
+ assert.equal(values.get('JINBAO_SYNC_TOKEN'),paired);assert.equal(values.get('JINBAO_SERVICE_TOKEN'),billing);
+ const device=JSON.parse(calls.find(c=>c.path.endsWith('/remember')).body).deviceId;assert.match(device,/^[a-f0-9-]{36}$/);
+ const post=(path,data={})=>{const[base,nonce]=setup.url.split('/#');return fetch(base+'/api/'+path,{method:'POST',headers:{'x-jinbao-setup':nonce,'Content-Type':'application/json'},body:JSON.stringify(data)});};
+ await post('sync/disable');assert.equal(values.get('JINBAO_SYNC_TOKEN'),paired);await post('sync/enable');
+ await post('logout');assert.equal(values.get('JINBAO_SYNC_TOKEN'),paired);
+ await setup.close();const n=calls.length;setup=await createSetupServer({credentials,stateDir:dir,port:0,fetchImpl});await wait();
+ for(let i=0;i<100&&!calls.slice(n).some(c=>c.method==='PUT');i++)await new Promise(r=>setTimeout(r,10));
+ assert.ok(calls.slice(n).some(c=>c.method==='PUT'&&c.headers.Authorization==='Bearer '+paired));assert.equal(calls.filter(c=>c.path.endsWith('/remember')).length,1);
+ assert.equal((await post('sync/forget')).status,400);assert.equal((await post('sync/forget',{confirm:true})).status,200);assert.equal(values.has('JINBAO_SYNC_TOKEN'),false);assert.ok(calls.some(c=>c.path.endsWith('/forget')));
+});

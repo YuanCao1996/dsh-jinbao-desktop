@@ -1,6 +1,12 @@
 import test from'node:test';import assert from'node:assert/strict';
 import{createCloudAgent,cloudContext}from'../cloud-agent.mjs';
 const memory={current:{game:'lol',match:'one',at:1,mode:'KIWI',me:{champion:'安妮'},events:[{text:'已购买残疫'}]},preferences:[{fact:'喜欢前排'}]};
+test('long Chinese memory and events reduce initial context without changing observed facts',()=>{
+ const state={...memory,current:{...memory.current,events:Array.from({length:20},()=>({text:'前'.repeat(240)}))},preferences:Array.from({length:6},()=>({fact:'前'.repeat(500)}))};
+ state.current.me={champion:'安妮',items:Array.from({length:8},()=>({name:'前'.repeat(60)}))};
+ state.current.enemies=Array.from({length:5},()=>({...state.current.me}));
+ const value=cloudContext(state,'lol','one');assert.ok(Buffer.byteLength(JSON.stringify(value))<=24000);assert.equal(value.client_context.context_reduced,true);assert.equal(value.current_match_state.captured_at_ms,1);assert.equal(value.current_match_state.me.champion,'安妮');
+});
 test('cloud task uses bounded current context, idempotency and tool progress without local DSH',async()=>{
  const calls=[],keys=[],progress=[];let attempt=0;
  const agent=createCloudAgent({getToken:async()=>'private-token',getContext:async()=>memory,pollMs:1,onProgress:e=>progress.push(e),fetchImpl:async(url,options)=>{

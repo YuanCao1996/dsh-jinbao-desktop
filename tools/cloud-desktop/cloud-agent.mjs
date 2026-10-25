@@ -9,7 +9,7 @@ export function agentQuestion(request){
  if(typeof message!=='string'||!message.trim()||message.length>2000)throw fail(413,'Agent message exceeds the bounded task budget');
  return message;
 }
-export function cloudContext(memory,game,match,{eventQuery=false,observationPlan=false}={}){
+export function cloudContext(memory,game,match,{eventQuery=false,observationPlan=false,userMemory=false}={}){
  const c=memory.current;
  if(c&&(c.game!==game||c.match!==match))throw fail(409,'Match changed');
  const compact=value=>typeof value==='string'?value.slice(0,120):value&&typeof value==='object'?Object.fromEntries(['name','id','count','level','ready','cooldown'].filter(k=>['string','number','boolean'].includes(typeof value[k])).map(k=>[k,typeof value[k]==='string'?value[k].slice(0,120):value[k]])):value;
@@ -22,14 +22,24 @@ export function cloudContext(memory,game,match,{eventQuery=false,observationPlan
   bench:c?.phase==='ChampSelect'?c?.bench?.slice(0,20):undefined,
   offers:c?.offers?.slice(0,6).map(compact),owned_augments:c?.ownedAugments?.slice(0,12).map(compact),
   equipment_decision:equipment?{...equipment,currentItems:equipment.currentItems.slice(0,8).map(compact),enemies:equipment.enemies.slice(0,5).map(e=>({hero:String(e.hero??'').slice(0,120),items:e.items.slice(0,8).map(compact)})),unassignedEnemyItems:equipment.unassignedEnemyItems.slice(0,8).map(compact),confirmedAugments:equipment.confirmedAugments.slice(0,12).map(compact),assumedAugments:equipment.assumedAugments.slice(0,6)}:undefined},
-  events:(c?.events??[]).slice(-20).map(e=>({time:e.time,text:String(e.text??'').slice(0,240)})),client_context:{game_id:game,mode:c?.mode??'',capabilities:{event_query_v1:eventQuery,observation_plan_v1:game==='generic'&&observationPlan},user_memory:{confirmed_preferences:(memory.preferences??[]).slice(-6)}}};
- if(Buffer.byteLength(JSON.stringify(value))>24000)throw fail(413,'Current facts exceed the bounded context budget');
+  events:(c?.events??[]).slice(-20).map(e=>({time:e.time,text:String(e.text??'').slice(0,240)})),client_context:{game_id:game,mode:c?.mode??'',capabilities:{event_query_v1:eventQuery,observation_plan_v1:game==='generic'&&observationPlan,user_memory_v1:userMemory},user_memory:{confirmed_preferences:(memory.preferences??[]).slice(-6)}}};
+ const oversized=()=>Buffer.byteLength(JSON.stringify(value))>24000;
+ while(oversized()&&value.events.length){value.events.shift();value.client_context.context_reduced=true;}
+ while(oversized()&&value.client_context.user_memory.confirmed_preferences.length){value.client_context.user_memory.confirmed_preferences.shift();value.client_context.context_reduced=true;}
+ if(oversized())throw fail(413,'Current facts exceed the bounded context budget');
  return value;
 }
-export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgress=()=>{},capture,queryEvents,observationPlan,
+export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgress=()=>{},capture,queryEvents,observationPlan,memoryTools,
  serviceBaseUrl='https://api.jinbaoai.top',apiPrefix='/desktop/agent',deviceId='default',fetchImpl=fetch,pollMs=800,timeoutMs=90000}){
  if(!['/desktop/agent','/desktop/agent-preview'].includes(apiPrefix))throw Error('Invalid Agent route');
- const service=serviceUrl(serviceBaseUrl);const lifetime=new AbortController();let busy=false,settled=Promise.resolve(),finish=()=>{};
+ const service=serviceUrl(serviceBaseUrl);const lifetime=new AbortController();let busy=false,settled=Promise.resolve(),finish=()=>{},wireRevision=0,wireKey='',wireValue;
+ function transportContext(memory,request){
+  const value=cloudContext(memory,request.game,request.match,{eventQuery:!!queryEvents,observationPlan:!!observationPlan,userMemory:!!memoryTools});
+  if(value.current_match_state.status==='unknown')delete value.current_match_state.captured_at_ms;
+  const key=JSON.stringify(value);
+  if(key!==wireKey){wireRevision=Math.max(Date.now(),wireRevision+1);value.current_match_state.source_revision=value.current_match_state.revision;value.current_match_state.revision=wireRevision;wireKey=key;wireValue=value;}
+  return structuredClone(wireValue);
+ }
  async function call(path,token,data,signal,key){
   const response=await fetchImpl(new URL(apiPrefix+path,service),{method:data===undefined?'GET':'POST',redirect:'error',signal,
    headers:{Authorization:'Bearer '+token,...(data===undefined?{}:{'Content-Type':'application/json'}),...(key?{'Idempotency-Key':key}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
@@ -44,7 +54,7 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
   try{
    token=await getToken();if(!token)throw fail(401,'Login required');if(!current())throw fail(409,'Match changed');
    const session='desktop-'+createHash('sha256').update(JSON.stringify([deviceId,request.game,request.match])).digest('hex');
-   const context=cloudContext(await getContext(request.game,request.match),request.game,request.match,{eventQuery:!!queryEvents,observationPlan:!!observationPlan});
+   const context=transportContext(await getContext(request.game,request.match),request);
    const message=agentQuestion(request);
    const key=randomUUID();let created;
    for(let attempt=0;attempt<2;attempt++){
@@ -62,6 +72,14 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
     const terminalUpdate=['completed','failed','cancelled'].includes(update.status);
     for(const event of update.events??[]){
      onProgress({game:request.game,match:request.match,...event});
+     if(!terminalUpdate&&event.event==='memory_requested'&&!handled.has(event.request_id)){
+      if(!/^[a-f0-9]{32}$/.test(event.request_id??''))throw fail(502,'Invalid memory request');handled.add(event.request_id);
+      let result={status:'unavailable',reason:'memory_unavailable'};
+      try{if(memoryTools&&current())result=await memoryTools({...request,args:event.args});}catch{}
+      if(!current())throw fail(409,'Match changed');
+      if(!result||typeof result!=='object'||Buffer.byteLength(JSON.stringify(result))>10000)result={status:'unavailable',reason:'memory_unavailable'};
+      await call('/tasks/'+task+'/memory-results',token,{request_id:event.request_id,result},signal);
+     }
      if(!terminalUpdate&&event.event==='observation_plan_requested'&&!handled.has(event.request_id)){
       if(!/^[a-f0-9]{32}$/.test(event.request_id??''))throw fail(502,'Invalid plan request');handled.add(event.request_id);let status='unavailable';
       try{if(request.game==='generic'&&observationPlan&&current()){await observationPlan(event.plan);status='applied';}}catch{}
@@ -85,7 +103,7 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
     }
     if(update.status==='completed'){terminal=true;if(typeof update.reply!=='string'||!update.reply.trim())throw fail(502,'Empty reply');return update.reply;}
     if(['failed','cancelled'].includes(update.status)){terminal=true;throw fail(503,'Cloud Agent task failed');}
-    const latest=cloudContext(await getContext(request.game,request.match),request.game,request.match,{eventQuery:!!queryEvents,observationPlan:!!observationPlan});
+    const latest=transportContext(await getContext(request.game,request.match),request);
     if(latest.current_match_state.revision>revision&&Date.now()>=nextContextAt){
      try{await call('/context',token,{session_id:session,context:latest},signal);revision=latest.current_match_state.revision;nextContextAt=Date.now()+2000;}
      catch(error){if(error.status!==429)throw error;nextContextAt=Date.now()+error.retryAfterMs;onProgress({game:request.game,match:request.match,event:'rate_limited'});}

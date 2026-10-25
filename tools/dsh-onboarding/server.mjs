@@ -8,12 +8,13 @@ import { serviceUrl,chatUrl,limitedJson } from '../dsh-game-services/client.mjs'
 import { createOverlayService } from './overlay-state.mjs';
 import { createPhoneSync } from './phone-sync.mjs';
 import {chatFailureMessage} from './chat-errors.mjs';
+import {createUserMemory} from '../cloud-desktop/user-memory.mjs';
 const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY',sync:'JINBAO_SYNC_TOKEN'};
 const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
 async function body(req,max=512*1024,onBytes){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){onBytes?.(declared);req.resume();throw error(413);}let size=0;const chunks=[];for await(const c of req){size+=c.length;onBytes?.(size);if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
-export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource}) {
+export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource,userMemory}) {
  if(!Number.isInteger(coachPort)||coachPort<1||coachPort>65535)throw Error('Invalid coach port');
  const coachOrigin='http://127.0.0.1:'+coachPort;
  const service=serviceUrl(serviceBaseUrl),nonce=randomBytes(32).toString('hex');
@@ -127,6 +128,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
  });
  const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
+ const memories=userMemory??createUserMemory({stateDir});
  const server=http.createServer(async(req,res)=>{
   const expectedHost='127.0.0.1:'+server.address().port;
   if(req.headers.host!==expectedHost){send(res,403,{error:'invalid_host'});return;}
@@ -169,6 +171,8 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    }
    if(!same(req.headers['x-jinbao-setup'],nonce))throw error(403);
    if(req.headers.origin&&req.headers.origin!=='http://'+expectedHost)throw error(403);
+   const memoryPage=/^\/api\/memory\/(lol|wzry|generic)$/.exec(req.url);
+   if(memoryPage&&req.method==='GET'){send(res,200,{game:memoryPage[1],preferences:await memories.list(memoryPage[1])});return;}
    if(req.url==='/api/overlay'&&req.method==='GET'){send(res,200,overlay.view());return;}
    if(req.url==='/api/observation/windows'&&req.method==='GET'&&observation){send(res,200,{windows:await observation.list()});return;}
    if(req.url==='/api/overlay/confirm'&&req.method==='POST'){send(res,200,await overlay.confirm(await body(req,4096)));return;}
@@ -262,6 +266,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     if(!launcher||Date.now()-launcher.updatedAt>30000||['stopped','error','legacy-active'].includes(launcher.phase)){send(res,409,{error:'金宝启动器未运行，请双击“开始使用”后再检查更新。'});return;}
     const path=join(stateDir,'launcher-control.json');await writeFile(path+'.tmp',JSON.stringify({action:'check-update',at:Date.now()}));await rename(path+'.tmp',path);
     send(res,202,{message:'已请求检查更新，下载完成后下次启动生效。'});return;
+   }
+   if(req.url==='/api/memory/forget'){
+    if(Object.keys(b).some(key=>!['game','id','confirm'].includes(key))||!['lol','wzry','generic'].includes(b.game)||!/^[a-f0-9]{24}$/.test(b.id??'')||b.confirm!==true)throw error(400);
+    send(res,200,await memories.forget(b));return;
    }
    if(req.url==='/api/sync/forget'){
     if(b.confirm!==true||Object.keys(b).some(key=>key!=='confirm'))throw error(400);
@@ -362,5 +370,5 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;
  await writeFile(join(stateDir,'settings-link.txt'),url,{mode:0o600});
- return {url,port:server.address().port,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{await phoneSync.close();await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
+ return {url,port:server.address().port,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{await phoneSync.close();await memories.close();await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
 }

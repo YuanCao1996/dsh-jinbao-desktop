@@ -3,12 +3,15 @@ import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
+const preferenceQueues=new Map();
+export const preferenceId=(game,fact)=>hash(game+':'+fact).slice(0,24);
 const validGame = game => ['lol', 'wzry', 'generic'].includes(game);
 const privateKey = /authorization|cookie|token|secret|password|api[_-]?key|puuid|riotId|summonerName|playerName|openid|unionid/i;
+const privatePreference=value=>/密码|口令|授权码|API\s*key|password|secret|Bearer\s/i.test(value)||cleanGameData(value)!==value;
 // Preserve observations as data, never expose credentials or player identifiers to tools.
 export function cleanGameData(value, depth = 0) {
   if (depth > 12) return null;
-  if (typeof value === 'string') return value.replace(/\bj[cdw]_[a-f0-9]{64}\b|\bBearer\s+[A-Za-z0-9._-]+|\bsk-[A-Za-z0-9_-]{16,}\b/gi, '[凭据已隐藏]').slice(0, 8000);
+  if (typeof value === 'string') return value.replace(/\bj[cdwp]_[a-f0-9]{64}\b|\bBearer\s+[A-Za-z0-9._-]+|\bsk-[A-Za-z0-9_-]{16,}\b/gi, '[凭据已隐藏]').slice(0, 8000);
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
   if (Array.isArray(value)) return value.slice(0, 200).map(item => cleanGameData(item, depth + 1));
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
@@ -22,6 +25,12 @@ export function createGameMemory(stateDir) {
   const snapshots = new Map();
   let cursors;
   const ordered = action => { const task = queue.then(action); queue = task.catch(() => {}); return task; };
+  const preferenceOrdered=action=>{
+    const previous=preferenceQueues.get(root)??Promise.resolve();
+    const task=previous.catch(()=>{}).then(action);preferenceQueues.set(root,task);
+    void task.finally(()=>{if(preferenceQueues.get(root)===task)preferenceQueues.delete(root);}).catch(()=>{});
+    return task;
+  };
   const id = (game, match) => {
     if (!validGame(game) || typeof match !== 'string' || !match || match.length > 300) throw Error('Invalid game or match');
     return hash(game + ':' + match);
@@ -36,7 +45,8 @@ export function createGameMemory(stateDir) {
     catch (error) { if (error.code === 'ENOENT') return null; throw error; }
   }
   async function preferences(game) {
-    try { const value = JSON.parse(await readFile(join(root, 'preferences-' + game + '.json'), 'utf8')); return Array.isArray(value) ? value : []; }
+    if(!validGame(game))throw Error('Invalid preference game');
+    try { const value = JSON.parse(await readFile(join(root, 'preferences-' + game + '.json'), 'utf8')); return Array.isArray(value) ? value.filter(row=>row&&row.origin==='user'&&typeof row.fact==='string'&&row.fact.trim()&&row.fact.length<=500&&!privatePreference(row.fact)) : []; }
     catch (error) { if (error.code === 'ENOENT') return []; throw error; }
   }
   async function history(game, match, limit = 6, cursor = 0, query = '') {
@@ -179,12 +189,20 @@ export function createGameMemory(stateDir) {
     },
     async remember(game, fact, quote, question) {
       if (!validGame(game) || typeof fact !== 'string' || !fact.trim() || fact.length > 500 || typeof quote !== 'string' || quote.length < 2 || !question?.includes(quote)) throw Error('Memory requires an explicit statement in the current user question');
-      return ordered(async () => {
+      if(privatePreference(fact))throw Error('Sensitive values are not preference memory');
+      return ordered(()=>preferenceOrdered(async () => {
         const rows = await preferences(game);
         if (!rows.some(row => row.fact === fact)) rows.push({ fact, quote, at: Date.now(), origin: 'user' });
         await atomic(join(root, 'preferences-' + game + '.json'), rows.slice(-30));
         return { ok: true };
-      });
+      }));
+    },
+    async forgetPreference(game,id){
+      if(!validGame(game)||typeof id!=='string'||!/^[a-f0-9]{24}$/.test(id))throw Error('Invalid preference');
+      return ordered(()=>preferenceOrdered(async()=>{
+        const rows=await preferences(game),next=rows.filter(row=>preferenceId(game,row.fact)!==id);
+        await atomic(join(root,'preferences-'+game+'.json'),next);return{ok:true,removed:next.length!==rows.length};
+      }));
     },
     flush: () => ordered(async () => { if (cursors) await atomic(join(root, 'ingest.json'), cursors); }),
   };

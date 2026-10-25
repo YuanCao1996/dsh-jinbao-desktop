@@ -14,6 +14,6 @@ test('augment ranks publish before unrelated slow hero requests finish',async t=
  const release=[];
  const service=await createOverlayService({stateDir,pollMs:10,search:async q=>q.dataset?new Promise(resolve=>release.push(resolve)):{results:q.filter?.name?[{data:{_type:'augments',champion:'安妮',name:q.filter.name,rank:1,tier:'T1'}}]:[]}});
  t.after(async()=>{release.forEach(resolve=>resolve({results:[]}));await service.close();});
- await wait(()=>service.view().augments.includes('仆从大师')&&service.view().augments.includes('#1'));
+ await wait(()=>release.length>0&&service.view().augments.includes('仆从大师')&&service.view().augments.includes('#1'));
  assert.ok(release.length>0);
 });

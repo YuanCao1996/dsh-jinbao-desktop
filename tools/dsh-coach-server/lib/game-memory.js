@@ -119,7 +119,7 @@ export function createGameMemory(stateDir) {
         gameSeconds: state.gameSeconds, ended: state.ended, phase: state.phase, me: state.me,
         allies: state.allies, enemies: state.enemies, bench: state.bench, offers: state.offers,
         offerHistory: state.offerHistory, ownedAugments: state.ownedAugments, augmentRounds:state.augmentRounds,
-        events: state.events, broadcasts: state.broadcasts, chat: state.chat, knowledge });
+        events: state.events, completedEquipmentEvents:state.completedEquipmentEvents, broadcasts: state.broadcasts, chat: state.chat, knowledge });
       const encoded = JSON.stringify(value);
       if (snapshots.get(key) === encoded) return queue;
       return ordered(async () => {

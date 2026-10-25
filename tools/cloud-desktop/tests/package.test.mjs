@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {buildPreview} from '../build-preview.mjs';
+import {claimInstance} from '../instance.mjs';
 
 test('portable cloud artifact starts with its own runtime and no node_modules or ADB',{skip:process.platform!=='win32',timeout:30000},async()=>{
  const root=fileURLToPath(new URL('../../../',import.meta.url));
@@ -18,8 +19,9 @@ test('portable cloud artifact starts with its own runtime and no node_modules or
   await assert.rejects(access(join(out,'node_modules')));
   await assert.rejects(access(join(out,'runtime/platform-tools/adb.exe')));
   await assert.rejects(access(join(out,'tools/dsh-onboarding/plugin.mjs')));
-  const vbs=await readFile(join(out,'start-preview.vbs'),'utf8');
-  assert.match(vbs,/--collect --coach/);assert.ok(!vbs.includes('dsh-launcher'));
+  assert.match(await readFile(join(out,'start-preview.vbs'),'utf8'),/^Rem [^\r\n]+\r\n$/);
+  assert.equal((await readFile(join(out,'jinbao.exe'))).subarray(0,2).toString(),'MZ');
+  assert.match(await readFile(join(out,'开始使用.cmd'),'utf8'),/jinbao.exe/);
   child=spawn(join(out,'runtime/node.exe'),[join(out,'tools/cloud-desktop/entry.mjs'),'--headless','--collect','--state',state],{windowsHide:true,stdio:['ignore','pipe','pipe'],cwd:temp});
   let output='',errors='';child.stderr.on('data',b=>errors+=b);
   await new Promise((resolve,reject)=>{
@@ -36,6 +38,13 @@ test('portable cloud artifact starts with its own runtime and no node_modules or
   assert.equal(status.mode,'cloud');assert.equal(child.exitCode,null);
   const exited=once(child,'exit');await writeFile(join(state,'overlay-stopped'),'test');await exited;
   assert.equal(child.exitCode,0);
+  const nativeState=join(temp,'native-state'),launcher=spawn(join(out,'jinbao.exe'),['--headless','--state',nativeState],{windowsHide:true});
+  const nativeExit=once(launcher,'exit');let nativeUrl;
+  for(let i=0;i<150;i++){try{nativeUrl=new URL((await readFile(join(nativeState,'settings-link.txt'),'utf8')).trim());break;}catch{await new Promise(r=>setTimeout(r,50));}}
+  assert.ok(nativeUrl,'Native launcher must start the actual managed desktop');
+  const nativeStatus=await(await fetch(nativeUrl.origin+'/api/status',{headers:{'X-Jinbao-Setup':nativeUrl.hash.slice(1)}})).json();assert.equal(nativeStatus.agentRuntime,'standalone');
+  await writeFile(join(nativeState,'overlay-stopped'),'native launcher test');assert.equal((await nativeExit)[0],0);
+  let released=false;for(let i=0;i<25;i++){const lock=await claimInstance(nativeState);released=lock.owned;await lock.close();if(released)break;await new Promise(r=>setTimeout(r,100));}assert.equal(released,true,'Native launcher descendants must release their runtime lock after exit');
  }finally{
   if(child&&child.exitCode===null){const exited=once(child,'exit');child.kill();await exited;}
   await rm(temp,{recursive:true,force:true,maxRetries:3,retryDelay:100});

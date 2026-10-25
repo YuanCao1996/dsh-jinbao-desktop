@@ -30,7 +30,7 @@ const credentials=await createCredentials(stateDir),memory=createGameMemory(stat
 const observation=createDesktopObservation({stateDir,view:()=>setup?.view()??{}});
 const nativeInstaller=createNativeInstaller({root,stateDir});
 const logSource=await createExternalLogSource({stateDir,publish:event=>appendFile(join(stateDir,'logs/external-live.jsonl'),JSON.stringify(event)+'\n',{mode:0o600})});
-const context=(game,match)=>memory.currentFacts(game,match),queryEvents=createEventQuery(memory),specializedCapture=createCloudCapture({readState:()=>setup?.view()}),capture=request=>request.game==='generic'?observation.capture(request):specializedCapture(request);
+const context=(game,match)=>memory.currentFacts(game,match),queryEvents=createEventQuery(memory),specializedCapture=createCloudCapture({stateDir,readState:()=>setup?.view()}),capture=request=>request.game==='generic'?observation.capture(request):specializedCapture(request);
 const isCurrent=(game,match)=>{const v=setup?.view();return (v?.game||'lol')===game&&(v?.match||'waiting')===match;};
 const userMemory=createUserMemory({stateDir,memory,isCurrent});
 const onProgress=event=>createAgentStatus(stateDir,event.game,event.match)(event.event==='completed'?'complete':event.event==='tool_start'?'tool':'start',event.name);

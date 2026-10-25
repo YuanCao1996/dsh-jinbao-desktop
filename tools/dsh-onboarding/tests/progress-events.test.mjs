@@ -15,7 +15,7 @@ test('historical purchase and augment formats remain visible, retain match time 
  emit({kind:'augment_mutate',augment:'终极唤醒',champion:'安妮',who:'self',confidence:'high',time:'14:02'});
  assert.deepEqual(s.ownedAugments,['终极唤醒']);
  const events=overlayView(s).events;
- assert.match(events,/03:56 .*购买装备：残疫/);assert.match(events,/装备名称未识别/);
+ assert.match(events,/03:56 .*购买装备：残疫/);assert.doesNotMatch(events,/装备名称未识别/);
  assert.match(events,/疑似海克斯选择.*不动如山/);assert.match(events,/13:06 海克斯选择：锐雯 · 珠光护手/);
  assert.match(events,/归属未确认 · 双刀流/);assert.doesNotMatch(events,/隐藏玩家|ocr-inferred|source/);
 });
@@ -26,7 +26,7 @@ test('inventory differences record item updates rather than fabricate purchases;
  emit([{id:1,name:'长剑'}],'game_start');assert.equal(s.events.length,0);
  emit([{id:1,name:'长剑'},{id:2,name:'残疫'}]);assert.equal(s.events.length,1);
  emit([{id:2,name:'残疫'},{id:1,name:'长剑'}]);assert.equal(s.events.length,1);
- emit([{id:2,name:'残疫'},{id:1,name:'长剑',count:2}]);assert.equal(s.events.length,2);
+ emit([{id:2,name:'残疫'},{id:1,name:'长剑',count:2}]);assert.equal(s.events.length,1,'component count changes are not shown');
  assert.match(overlayView(s).events,/装备更新：安妮.*新增 残疫/);assert.doesNotMatch(overlayView(s).events,/购买装备/);
 });
 

@@ -24,7 +24,7 @@ export function createSupervisor({ root, stateDir, run = exec, spawnImpl = spawn
   function start(key, script, env = {}) {
     if (closed || children.has(key) || (retries.get(key) ?? 0) > now()) return;
     const child = spawnImpl(process.execPath, [join(root, script)], {
-      windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: { ...process.env, JINBAO_LOG_DIR: join(stateDir, 'logs'), ...env },
+      windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: { ...process.env, JINBAO_LOG_DIR: join(stateDir, 'logs'), JINBAO_STATE_DIR:stateDir, ...env },
     });
     children.set(key, child);
     const removed = () => {

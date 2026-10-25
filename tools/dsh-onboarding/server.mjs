@@ -125,7 +125,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    if(typeof result.answer!=='string'||!result.answer.trim())throw error(502);
    return result.answer;
   },
-  search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},
+  search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote(runtimeId==='standalone'?'/desktop/agent-preview/knowledge':'/site/search',token,query);},
  });
  const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
  const memories=userMemory??createUserMemory({stateDir});

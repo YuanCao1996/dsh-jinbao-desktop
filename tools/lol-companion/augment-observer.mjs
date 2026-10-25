@@ -9,12 +9,12 @@ const normalize = value => String(value??'').replace(/[\s:：!！·•,，。.]/
 export function createAugmentObserver(names, emit) {
   const catalog = new Map(names.map(name=>[normalize(name),name]));
   let current=[null,null,null],history=[],round=0,misses=0,slots=[[],[],[]],anchors=null;
-  let pending=[null,null,null];
+  let pending=[null,null,null],suspended=null;
   const clearPanel=()=>{current=[null,null,null];history=[];slots=[[],[],[]];anchors=null;pending=[null,null,null];misses=0;};
   let diagnostic={recognized:0,method:'none'};
   return {
     status(){return {...diagnostic};},
-    reset(){clearPanel();round=0;diagnostic={recognized:0,method:'none'};},
+    reset(){clearPanel();round=0;suspended=null;diagnostic={recognized:0,method:'none'};},
     observe(frame){
       if(!frame?.foreground || !frame.available){pending=[null,null,null];diagnostic={recognized:0,method:frame?.method??'none'};return;}
       const lines=[...(frame.titleLines??[]).map(line=>({...line,source:'title'})),...(frame.lines??[]).map(line=>({...line,source:'full'}))];
@@ -42,6 +42,12 @@ export function createAugmentObserver(names, emit) {
         return names.length===1?names[0]:null;
       });
       const recognized=candidates.filter(Boolean).length;
+      // An animation/overlay may hide the same panel briefly. Recover its slot
+      // history instead of inventing a new selection round and fresh rerolls.
+      if(!current.some(Boolean)&&suspended&&Date.now()-suspended.at<90000&&candidates.filter((name,i)=>name&&name===suspended.current[i]).length>=2){
+        ({current,history,round,slots,anchors}=suspended);suspended=null;misses=0;
+        emit({kind:'augment_offer',roll:round,reopened:true,options:current.map((name,slot)=>name?{name,slot,rerollsUsed:slots[slot].length-1}:null).filter(Boolean),seen:history});
+      }
       diagnostic={recognized,method:frame.method??'full',knownSlots:current.filter(Boolean).length};
       // A single tooltip elsewhere in the game can contain an augment name.
       // Establish a panel from at least two distinct card slots, then track
@@ -49,7 +55,7 @@ export function createAugmentObserver(names, emit) {
       if(!current.some(Boolean)&&new Set(candidates.filter(Boolean)).size<2){pending=[null,null,null];return;}
       if(!recognized&&!titles.length){
         pending=[null,null,null];
-        if(++misses>=5&&current.some(Boolean)){emit({kind:'augment_offer_closed',roll:round});clearPanel();}
+        if(++misses>=5&&current.some(Boolean)){emit({kind:'augment_offer_closed',roll:round});suspended={current:[...current],history:[...history],round,slots:slots.map(s=>[...s]),anchors,at:Date.now()};clearPanel();}
         return;
       }
       misses=0;

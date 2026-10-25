@@ -1,4 +1,4 @@
-# One countdown shared by large panel and narrow popup. Snapshot refreshes never restart it.
+﻿# One countdown shared by large panel and narrow popup. Snapshot refreshes never restart it.
 $script:confirmationClockId='';$script:confirmationClockKey='';$script:confirmationDeadline=0.0;$script:confirmationHandledId=''
 $script:confirmationLastTick=0.0;$script:confirmationPaused=$false
 function Get-ConfirmationNow {

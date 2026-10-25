@@ -27,7 +27,7 @@ test('mid-game capture uses elapsed seconds, ends at GameEnd, resets across matc
  applyOverlayEvent(s,{at:1002,game:'lol',broadcast:'保持站位'},'coach');
  const v=overlayView(s,{rows:[{name:'锐雯',title:'放逐之刃',_viewKind:'hero',winRate:47.3},{champion:'放逐之刃 锐雯',_type:'coreBuilds',items:'["星蚀","焚天"]',winRate:48.9},{champion:'放逐之刃 锐雯',_type:'augments',name:'全凭身法',winRate:49.85,desc:'冲刺技能急速'}]});
  assert.equal(v.gameTime,'01:59');assert.match(v.advice,/保持站位$/);
- assert.match(v.equipment,/星蚀、焚天/);assert.doesNotMatch(v.augments,/全凭身法/);assert.match(v.stats,/47.3%/);assert.doesNotMatch(v.stats,/48.9%/);
+ assert.match(v.equipment,/星蚀、焚天/);assert.match(v.augments,/英雄 Top10[\s\S]*全凭身法/);assert.match(v.stats,/47.3%/);assert.doesNotMatch(v.stats,/48.9%/);
  assert.doesNotMatch(v.stats,/玩家战绩|场次/);assert.doesNotMatch(v.players,/0%/);
  applyOverlayEvent(s,{game:'lol',t:2000,kind:'event',name:'GameEnd',time:559},'match1');
  applyOverlayEvent(s,{game:'lol',t:2001,kind:'state',state:{time:560}},'match1');

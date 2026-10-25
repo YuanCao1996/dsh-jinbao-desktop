@@ -20,15 +20,15 @@ test('hero-specific ranks beat win rate, omit details, and only rank the current
  const s=initialOverlayState();s.game='lol';s.me.champion='安妮';
  const knowledge={rows:[row('一号',1,{winRate:40}),row('二号',2,{winRate:80}),row('三号',3),row('旧选项',4),row('其他英雄',1,{champion:'锐雯'}),{_type:'combos',champion:'安妮',augments:['组合甲','组合乙'],winRate:65}]};
  const all=overlayView(s,knowledge).augments;
- assert.match(all,/组合甲 \+ 组合乙/);assert.doesNotMatch(all,/当前三选一|适配排名|#\d|效果详情|其他英雄/);
+ assert.match(all,/组合甲 \+ 组合乙/);assert.match(all,/英雄 Top10[\s\S]*#1 · 一号/);assert.doesNotMatch(all,/当前三选一|效果详情|其他英雄/);
  applyOverlayEvent(s,{game:'lol',kind:'augment_offer',t:1,roll:1,options:['旧选项','二号','三号']},'game');
  applyOverlayEvent(s,{game:'lol',kind:'augment_offer',t:2,roll:1,options:['一号','二号','三号']},'game');
  const current=overlayView(s,knowledge).augments;
- assert.doesNotMatch(current,/旧选项|效果详情/);assert.match(current,/4\/6/);assert.ok(current.indexOf('一号')<current.indexOf('二号'));
+ assert.doesNotMatch(current.split('英雄 Top10')[0],/旧选项|效果详情/);assert.match(current,/4\/6/);assert.ok(current.indexOf('一号')<current.indexOf('二号'));
  assert.ok(current.indexOf('#1 · 一号')<current.indexOf('资料库推荐组合'));
  applyOverlayEvent(s,{game:'lol',kind:'augment_offer_closed',t:3,roll:1},'game');
  const closed=overlayView(s,knowledge).augments;
- assert.match(closed,/组合甲 \+ 组合乙/);assert.doesNotMatch(closed,/当前三选一|适配排名|#\d/);
+ assert.match(closed,/组合甲 \+ 组合乙/);assert.match(closed,/英雄 Top10[\s\S]*#1 · 一号/);assert.doesNotMatch(closed,/当前三选一/);
 });
 
 test('three independent rerolls keep one round and at most six observed choices',()=>{
@@ -58,12 +58,12 @@ test('manual refresh waits for results and a changed slot queries its new candid
   return {results:rows.filter(r=>!q.filter?.name||r.name===q.filter.name).map(data=>({data}))};
  }});t.after(service.close);
  await until(()=>calls.some(q=>q.filter?._type==='augments'));
- version=4;await service.refresh();assert.doesNotMatch(service.view().augments,/#4 · 新候选/);
+ version=4;await service.refresh();assert.doesNotMatch(service.view().augments.split('英雄 Top10')[0],/#4 · 新候选/);
  await appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options:['初始','另一个','未知']})+'\n');
  await until(()=>service.view().augments.includes('当前三选一'));
  await appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options:['新候选','另一个','未知']})+'\n');
  await until(()=>calls.some(q=>q.filter?.name==='新候选'));
- await service.refresh();assert.doesNotMatch(service.view().augments,/初始/);assert.match(service.view().augments,/#4 · 新候选/);
+ await service.refresh();assert.doesNotMatch(service.view().augments.split('英雄 Top10')[0],/初始/);assert.match(service.view().augments,/#4 · 新候选/);
 });
 
 
@@ -189,6 +189,6 @@ test('unchanged candidate rankings stay visible while a refreshed slot is being 
  const offer=options=>appendFile(file,JSON.stringify({game:'lol',t:++at,kind:'augment_offer',roll:1,options})+'\n');
  await offer(['甲','乙','丙']);await until(()=>service.view().augments.includes('#2 · 乙'));
  await offer(['丁','乙','丙']);await until(()=>!!release);
- assert.match(service.view().augments,/#2 · 乙/);assert.doesNotMatch(service.view().augments,/#1 · 甲/);
+ assert.match(service.view().augments,/#2 · 乙/);assert.doesNotMatch(service.view().augments.split('英雄 Top10')[0],/#1 · 甲/);
  release();await until(()=>service.view().augments.includes('#1 · 丁'));
 });

@@ -12,7 +12,9 @@ import {augmentConfirmation} from './augment-confirmation.mjs';
 import {teamStrength,TEAM_STRENGTH_NOTE,liveTeamEstimate,LIVE_ESTIMATE_NOTE} from './team-strength.mjs';
 import {chatFailureMessage} from './chat-errors.mjs';
 import {suggestOverlayQuestion} from './chat-suggestion.mjs';
-import {adviceIsValid} from '../dsh-coach-server/lib/lol-coaching-plan.js';
+import {adviceIsValid,createAdviceValidity} from '../dsh-coach-server/lib/lol-coaching-plan.js';
+import {createKnowledgeSearch} from './knowledge-search.mjs';
+import {isCompletedItem} from '../lol-companion/item-policy.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
@@ -43,6 +45,7 @@ export function applyOverlayEvent(state, event, file) {
       state.broadcasts.push(reply); state.broadcasts.sort((a, b) => a.at - b.at);
       state.broadcasts = state.broadcasts.slice(-12);
     }
+    if(event.key==='postAugment')state.augmentPlaybook={text:reply.text,at,gameSeconds:state.gameSeconds,owned:JSON.stringify([...state.ownedAugments].sort())};
     return;
   }
   if (!event.game || at < state.at) return;
@@ -185,7 +188,7 @@ export function overlayView(state, knowledge = {}) {
   const me = state.me;
   const rows = knowledge.rows ?? [];
   const hero = rows.find(row => row._viewKind==='hero' && heroStatMatches(row,me.champion));
-  const own = items(me.items);
+  const own = items(state.game==='lol'?list(me.items).filter(isCompletedItem):me.items);
   const players = [...state.allies.map(p => ({ ...p, side: '友' })), ...state.enemies.map(p => ({ ...p, side: '敌' })),...state.bench.map(p=>({...p,side:'备选'}))];
   if(!players.length&&me.champion)players.push({...me,side:'我'});
   const playerRows = players.map(p => {
@@ -212,7 +215,8 @@ export function overlayView(state, knowledge = {}) {
   // Revocation is permanent: a later death or item swap must not revive old advice.
   for (const reply of state.broadcasts) if (!adviceIsValid(reply.validity,state)) reply.revoked = true;
   const validBroadcasts = state.broadcasts.filter(r => !r.revoked);
-  const current = validBroadcasts.at(-1)?.text || (state.broadcasts.length?'局势已变化，等待新的针对性建议…':'等待新的游戏策略建议…');
+  const current = validBroadcasts.at(-1)?.text || state.coachStatus?.label || (state.broadcasts.length?'局势已变化，正在更新针对性建议…':'等待进入游戏，检测到对局后自动生成策略建议。');
+  const playbook=!state.ended&&state.augmentPlaybook?.owned===JSON.stringify([...state.ownedAugments].sort())&&state.augmentPlaybook.text!==current?'\n\n强化方案参考 · '+clock(state.augmentPlaybook.gameSeconds)+'\n'+state.augmentPlaybook.text:'';
   const augmentTitle='当前三选一 · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
   const augmentBody=candidates.join('\n')+(offered.length<3?'\n已识别 '+offered.length+'/3 个位置，其余卡片继续识别中…':'');
   const equipmentUpdates=state.events.filter(e=>e.topic==='equipment').slice(-12).map(e=>`${e.time} ${e.text}`).join('\n');
@@ -228,10 +232,10 @@ export function overlayView(state, knowledge = {}) {
     keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
     summary: state.game==='generic'?'所选窗口 · '+(me.genericState?.windowTitle??'等待观察'):[me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
-    advice: ['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:''].filter(Boolean).join(' · ')+'\n\n'+current+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
+    advice: ['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:''].filter(Boolean).join(' · ')+'\n\n'+current+playbook+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(!state.ended&&state.equipmentStatus?'\n'+state.equipmentStatus:'')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
-      (offered.length?augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n':'')+'资料库推荐组合 · '+(me.champion||'等待英雄')+'\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
+      (offered.length?augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n':'')+'英雄 Top10 海克斯 · '+(me.champion||'等待英雄')+'\n'+(ranked.slice(0,10).map(augmentLine).join('\n')||knowledge.message||'正在查询英雄适配排名…')+'\n\n资料库推荐组合 · '+(me.champion||'等待英雄')+'\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
     players: (teamWinRates?teamWinRates+'\n\n':'')+'英雄胜率 ↓\n'+(roster.join('\n') || '等待双方英雄数据。'),
     teamWinRates,
@@ -252,6 +256,7 @@ export function overlayView(state, knowledge = {}) {
 }
 
 export async function createOverlayService({ stateDir, agentChat, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000 }) {
+  search=createKnowledgeSearch(search);
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
   const router=createOverlayRouter(), offsets = new Map();
@@ -275,9 +280,13 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   // Serialize disk snapshots: model requests and polling may finish concurrently.
   let writes = Promise.resolve();
   const flush = () => (writes = writes.catch(() => {}).then(save));
-  const equipmentCoach=createEquipmentCoach({getState:()=>state,agentChat,save:flush,debounceMs:equipmentDebounceMs,cooldownMs:equipmentCooldownMs});
+  const equipmentCoach=createEquipmentCoach({getState:()=>state,agentChat,save:flush,onAdvice:async(current,answer)=>{
+    const event={game:current.game,match:current.match,at:Date.now(),kind:'equipment-advice',broadcast:answer,priority:2,validity:createAdviceValidity('purchase',current)};
+    router.apply(event,'coach_broadcasts.jsonl');await appendFile(join(logs,'coach_broadcasts.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
+  },debounceMs:equipmentDebounceMs,cooldownMs:equipmentCooldownMs});
   function refresh(force = true) {
     if(closed)return Promise.resolve();
+    if(force)search.clear();
     forceRefresh ||= force;
     if(refreshTask){refreshQueued=true;return refreshTask;}
     refreshTask=(async()=>{do{refreshQueued=false;await performRefresh();}while(refreshQueued&&!closed);})().finally(()=>{refreshTask=null;});
@@ -291,6 +300,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
     const key = contextKey();
     const baseKey = baseContextKey();
     const force = forceRefresh; forceRefresh = false;
+    if(force)search.clear();
     if(cached.key!==baseKey)cached={key:baseKey,rows:[],candidates:new Map(),heroes:new Map()};
     const cache = cached;
     const stillCurrent = () => !closed && key === contextKey();
@@ -303,7 +313,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         if(selecting||(!force&&cache.baseLoaded))return;
         const results=await Promise.allSettled(game==='wzry'?[search({game,query:champion,limit:3})]:[
           search({game,query:champion,filter:{_type:'coreBuilds'},limit:3}),
-          search({game,query:champion,filter:{_type:'augments'},limit:5}),
+          search({game,query:champion,filter:{_type:'augments'},limit:10}),
           search({game,query:champion,filter:{_type:'combos'},limit:5}),
         ]);
         for(const r of results)if(r.status==='rejected')failed(r.reason);
@@ -314,7 +324,8 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       await Promise.all([base(),...rosterChampions(state).filter(name=>game==='lol'&&(force||!cache.heroes.has(name))).map(async name=>{
         try{
           const result=await search({game,query:name,dataset:'aram-ranking',limit:1});
-          cache.heroes.set(name,(result.results??[]).map(item=>({...item.data,_viewKind:'hero'})).filter(row=>heroStatMatches(row,name)));
+          const found=(result.results??[]).map(item=>({...item.data,_viewKind:'hero'})).filter(row=>heroStatMatches(row,name));
+          if(found.length)cache.heroes.set(name,found);
         }catch(e){failed(e);}
       }),...offered.filter(name=>game==='lol'&&(force||!cache.candidates.has(name))).map(async name=>{
         try{
@@ -374,6 +385,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       for (const observed of observedStates) await memory.snapshot(observed);
       await memory.flush();
       state=router.state();
+      try{const progress=JSON.parse(await readFile(join(stateDir,'coach-status.json'),'utf8'));state.coachStatus=progress.game===state.game&&progress.match===state.match&&Date.now()-progress.at<120000?progress:null;}catch{state.coachStatus=null;}
       try{const progress=JSON.parse(await readFile(join(stateDir,'agent-status.json'),'utf8'));state.agentStatus=progress.game===state.game&&progress.match===state.match&&Date.now()-progress.at<30000?String(progress.label??''):'';}catch{state.agentStatus='';}
       if(state.match&&restoredChat){
         if(restoredChat.game===state.game&&restoredChat.match===state.match&&restoredChat.matchStartedAt===state.matchStartedAt){
@@ -393,7 +405,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         retryKnowledgeAt=Date.now()+knowledgeRetryMs;void refresh(false).catch(()=>{});
       }
       await flush();
-      equipmentCoach.tick();
+      if(!knowledge.loading)equipmentCoach.tick();
     } catch {} finally { scanning = false; }
   }
   await scan();
@@ -437,6 +449,6 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         throw e;
       } finally { busy = false; await flush(); }
     },
-    async close() { closed = true; equipmentCoach.close(); clearInterval(timer); await writes.catch(() => {}); await memory.flush(); },
+    async close() { closed = true; search.close(); equipmentCoach.close(); clearInterval(timer); await writes.catch(() => {}); await memory.flush(); },
   };
 }

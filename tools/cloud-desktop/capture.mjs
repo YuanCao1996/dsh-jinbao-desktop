@@ -1,7 +1,7 @@
 import{execFile}from'node:child_process';import{promisify}from'node:util';import{fileURLToPath}from'node:url';
 const exec=promisify(execFile);
-export function createCloudCapture({readState,capture=async game=>{
- const {stdout}=await exec('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',fileURLToPath(new URL('../dsh-coach-server/capture-game.ps1',import.meta.url)),'-Game',game],{windowsHide:true,timeout:12000,maxBuffer:900000});return JSON.parse(stdout.replace(/^\uFEFF/,''));
+export function createCloudCapture({readState,stateDir,capture=async game=>{
+ const {stdout}=await exec('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',fileURLToPath(new URL('../dsh-coach-server/capture-game.ps1',import.meta.url)),'-Game',game,...(stateDir?['-StateDir',stateDir]:[])],{windowsHide:true,timeout:12000,maxBuffer:900000});return JSON.parse(stdout.replace(/^\uFEFF/,''));
 },now=Date.now}){
  return async({game,match})=>{
   const fresh=at=>Number.isFinite(at)&&at<=now()&&now()-at<30000;

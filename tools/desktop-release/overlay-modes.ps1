@@ -25,7 +25,7 @@ function Show-QuickConfirmation($confirmation){
   $button.Add_Click({param($s,$e) Start-Confirmation $s.Tag;$quickConfirm.IsOpen=$false});$stack.Children.Add($button)|Out-Null
  }
  $skip=New-Object Windows.Controls.Button;$skip.Content='都不是 / 暂不确认';$skip.Margin='3';$skip.Tag=@{id=$script:popupConfirmId;dismiss=$true};$skip.Add_Click({param($s,$e) Start-Confirmation $s.Tag;$quickConfirm.IsOpen=$false});$stack.Children.Add($skip)|Out-Null
- $border.Child=$stack;$quickConfirm.Child=$border;$quickConfirm.IsOpen=!$SelfTest
+ $border.Child=$stack;if($script:captureLeaseId){$border.Opacity=0};$quickConfirm.Child=$border;$quickConfirm.IsOpen=!$SelfTest
 }
 function Save-DisplayMode {
  if($SelfTest){return}

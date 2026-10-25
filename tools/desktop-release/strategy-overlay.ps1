@@ -19,7 +19,7 @@ public static class JinbaoOverlayNative {
     [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr handle,int index);
     [DllImport("user32.dll")] public static extern int SetWindowLong(IntPtr handle,int index,int value);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr handle,IntPtr after,int x,int y,int w,int h,uint flags);
-    [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr handle,int id,uint modifiers,uint key);
+    [DllImport("user32.dll",SetLastError=true)] public static extern bool RegisterHotKey(IntPtr handle,int id,uint modifiers,uint key);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr handle,int id);
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr handle,uint message,IntPtr wParam,IntPtr lParam);
     public static void InputMode(IntPtr handle,bool through,bool focusable) {
@@ -543,12 +543,35 @@ function Test-PointerHotzone([Windows.Point]$screenPoint) {
  return $false
 }
 function Pointer-Tick {
+ Update-CaptureLease
  $p=New-Object 'JinbaoOverlayNative+Point'
  [JinbaoOverlayNative]::GetCursorPos([ref]$p) | Out-Null
  Update-Drag $p.X $p.Y (([JinbaoOverlayNative]::GetAsyncKeyState(1) -band 0x8000) -ne 0)
  Set-PointerMode (Test-PointerHotzone (New-Object Windows.Point($p.X,$p.Y)))
 }
+function Update-CaptureLease {
+ $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+ if(!$script:lastCaptureHeartbeat -or $now-$script:lastCaptureHeartbeat -gt 500){
+  [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-capture-host.json'),(@{pid=$PID;at=$now}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false));$script:lastCaptureHeartbeat=$now
+ }
+ $id='';try{$request=[IO.File]::ReadAllText((Join-Path $StateDir 'overlay-capture-request.json'))|ConvertFrom-Json;if($request.id -match '^[a-f0-9]{32}$' -and $request.expiresAt -gt $now -and $request.expiresAt -le $now+1100){$id=[string]$request.id}}catch{}
+ if($id -and $script:captureLeaseId -ne $id){
+  $script:captureLeaseId=$id;$window.Opacity=0
+  if($quickConfirm.Child){$quickConfirm.Child.Opacity=0};$settingsMenu.Opacity=0
+  $window.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+  [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-capture-ready.json'),(@{id=$id;at=$now}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+ }elseif(!$id -and $script:captureLeaseId){
+  $script:captureLeaseId='';$window.Opacity=1;if($quickConfirm.Child){$quickConfirm.Child.Opacity=1};$settingsMenu.Opacity=1
+  $window.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+ }
+}
+function Save-ShortcutDiagnostics {
+ if($SelfTest){return}
+ [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-hotkeys.json'),(@{pid=$PID;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();bindings=@($script:shortcutResults);lastReceived=$script:lastShortcutReceived}|ConvertTo-Json -Depth 5 -Compress),[Text.UTF8Encoding]::new($false))
+}
 function Invoke-OverlayShortcut([int]$id){
+ if($id -ge 712 -and $id -le 715){$id-=10}
+ $script:lastShortcutReceived=@{id=$id;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()};Save-ShortcutDiagnostics
  if($id -eq 701){Set-Interaction (!$script:interactiveMode);return}
  if($id -eq 703){Set-Collapsed $true;return}
  if($id -in @(702,704,705)){
@@ -563,7 +586,7 @@ function Invoke-OverlayShortcut([int]$id){
 $script:registeredShortcuts=@()
 $hook=[Windows.Interop.HwndSourceHook]{
  param($handle,$message,$wParam,$lParam,[ref]$handled)
- if($message -eq 0x0312 -and $wParam.ToInt32() -in @(701,702,703,704,705)){Invoke-OverlayShortcut $wParam.ToInt32();$handled.Value=$true}
+ if($message -eq 0x0312 -and $wParam.ToInt32() -in @(701,702,703,704,705,712,713,714,715)){Invoke-OverlayShortcut $wParam.ToInt32();$handled.Value=$true}
  return [IntPtr]::Zero
 }
 $window.Add_SourceInitialized({
@@ -571,7 +594,12 @@ $window.Add_SourceInitialized({
  $script:source=[Windows.Interop.HwndSource]::FromHwnd($script:windowHandle);$script:source.AddHook($hook)
  Set-CaptureVisibility $script:showInCapture | Out-Null
  $script:hotkeyRegistered=[JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,701,$(if($SelfTest){7}else{3}),$(if($SelfTest){123}else{74}))
- if(!$SelfTest){foreach($entry in @(@(702,38),@(703,40),@(704,37),@(705,39))){if([JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,$entry[0],16387,$entry[1])){$script:registeredShortcuts+=@($entry[0])}else{$shortcutMenu.Header='快捷键（有组合被占用）';foreach($item in $shortcutMenu.Items){if($item.Tag -eq $entry[0]){$item.Header=[string]$item.Header+'（已被占用）'}}}}}
+ $script:shortcutResults=@()
+ if(!$SelfTest){foreach($entry in @(@(702,38,16387,'Ctrl+Alt+Up'),@(703,40,16387,'Ctrl+Alt+Down'),@(704,37,16387,'Ctrl+Alt+Left'),@(705,39,16387,'Ctrl+Alt+Right'),@(712,118,16390,'Ctrl+Shift+F7'),@(713,119,16390,'Ctrl+Shift+F8'),@(714,120,16390,'Ctrl+Shift+F9'),@(715,121,16390,'Ctrl+Shift+F10'))){
+  $ok=[JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,$entry[0],$entry[2],$entry[1]);$code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+  $script:shortcutResults+=@{id=$entry[0];combination=$entry[3];registered=$ok;errorCode=$(if($ok){0}else{$code})}
+  if($ok){$script:registeredShortcuts+=@($entry[0])}else{$shortcutMenu.Header='快捷键（有组合被占用，可用备用组合）';foreach($item in $shortcutMenu.Items){if($item.Tag -eq $entry[0]){$item.Header=[string]$item.Header+'（已被占用）'}}}
+ };$fallback=New-Object Windows.Controls.MenuItem;$fallback.Header='备用：Ctrl+Shift+F7 展开 / F8 收起 / F9 上页 / F10 下页';$fallback.IsEnabled=$false;$shortcutMenu.Items.Add($fallback)|Out-Null;Save-ShortcutDiagnostics}
  Set-Interaction $script:interactiveMode
  if(!$SelfTest){
   $script:tray=New-Object Windows.Forms.NotifyIcon

@@ -1,4 +1,4 @@
-param([ValidateSet('lol','wzry')][string]$Game='lol',[ValidateSet('game','augments')][string]$Area='game',[string]$ImagePath)
+﻿param([ValidateSet('lol','wzry')][string]$Game='lol',[ValidateSet('game','augments')][string]$Area='game',[string]$ImagePath,[string]$StateDir=$env:JINBAO_STATE_DIR)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 try{
@@ -35,7 +35,9 @@ public static class JinbaoGameFrame {
   $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
   if($w -lt 320 -or $h -lt 200){throw 'bounds'}
   $bitmap=[Drawing.Bitmap]::new($w,$h);$graphics=[Drawing.Graphics]::FromImage($bitmap)
-  try{$graphics.CopyFromScreen($origin.X,$origin.Y,0,0,$bitmap.Size)}finally{$graphics.Dispose()}
+  . (Join-Path $PSScriptRoot '../desktop-release/capture-coordination.ps1')
+  $lease=$null
+  try{$lease=Enter-JinbaoCapture $StateDir;$graphics.CopyFromScreen($origin.X,$origin.Y,0,0,$bitmap.Size)}finally{Exit-JinbaoCapture $lease;$graphics.Dispose()}
  }
  try{
   if($Area -eq 'augments'){

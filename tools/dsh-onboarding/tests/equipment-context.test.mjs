@@ -37,7 +37,7 @@ test('automatic build task is debounced, rate limited, uses enemy items and all 
  coach.tick();time+=100;coach.tick();assert.equal(calls.length,1);time+=900;coach.tick();assert.equal(calls.length,2);
  resolve('下一件优先购买推荐装备');await new Promise(r=>setImmediate(r));assert.equal(s.equipment,'下一件优先购买推荐装备');
  time+=2000;coach.tick();assert.equal(calls.length,2,'unchanged equipment never repeats model calls');
- s.me.items.push({name:'帽子'});coach.tick();time+=1000;coach.tick();assert.equal(calls.length,3);
+ s.me.items.push({name:'灭世者的死亡之帽'});coach.tick();time+=1000;coach.tick();assert.equal(calls.length,3);
  s=initialOverlayState();resolve('跨局旧建议');await new Promise(r=>setImmediate(r));assert.notEqual(s.equipment,'跨局旧建议');coach.close();
 });
 

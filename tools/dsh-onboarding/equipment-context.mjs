@@ -1,4 +1,5 @@
 import {rankedAugments,offerNames} from './augment-ranking.mjs';
+import {isCompletedItem} from '../lol-companion/item-policy.mjs';
 
 export function trackAugmentRound(state,event,previousOwned) {
   if(event.kind==='augment_offer'){
@@ -28,8 +29,9 @@ export function updateAugmentRecommendations(state,rows=[]){
     if(best)round.recommended=best.name;
   }
 }
-const ownFacts=facts=>JSON.stringify([facts.hero,facts.currentItems,facts.confirmedAugments,facts.assumedAugments]);
-const items=value=>(Array.isArray(value)?value:[]).map(i=>({name:typeof i==='string'?i:i?.name,count:i?.count??1})).filter(i=>i.name);
+const ownFacts=facts=>JSON.stringify([facts.hero,facts.currentItems.filter(isCompletedItem),facts.confirmedAugments,facts.assumedAugments]);
+const decisionKey=(state,facts)=>JSON.stringify([state.game,state.match,state.matchStartedAt,ownFacts(facts),facts.enemies.map(e=>[e.hero,e.items.filter(isCompletedItem)]),facts.unassignedEnemyItems.filter(isCompletedItem)]);
+const items=value=>(Array.isArray(value)?value:[]).map(i=>({name:typeof i==='string'?i:i?.name,count:i?.count??1,...(i?.id!=null?{id:i.id}:{}),...(typeof i?.completed==='boolean'?{completed:i.completed}:{})})).filter(i=>i.name);
 export function equipmentContext(state){
   return {hero:state.me.champion,mode:state.mode,currentItems:items(state.me.items),
     enemies:state.enemies.map(p=>({hero:p.champion,items:items(p.items)})),
@@ -39,7 +41,7 @@ export function equipmentContext(state){
       .map(r=>({round:r.id,name:r.recommended,reason:'未确认选择，按本轮当前候选中英雄适配排名最高项推测'}))};
 }
 
-export function createEquipmentCoach({getState,agentChat,save,now=Date.now,debounceMs=2000,cooldownMs=30000}){
+export function createEquipmentCoach({getState,agentChat,save,onAdvice=()=>{},now=Date.now,debounceMs=2000,cooldownMs=30000}){
   let pending='',since=0,lastAt=-Infinity,lastDone='',busy=false,closed=false;
   return {
     tick(){
@@ -47,7 +49,7 @@ export function createEquipmentCoach({getState,agentChat,save,now=Date.now,debou
       if(closed||typeof agentChat!=='function'||!state.match||!state.me.champion||state.ended||state.phase==='ChampSelect'||now()-state.at>30000)return;
       const facts=equipmentContext(state);
       if(!facts.currentItems.length&&!facts.enemies.some(e=>e.items.length)&&!facts.unassignedEnemyItems.length&&!facts.confirmedAugments.length&&!facts.assumedAugments.length)return;
-      const key=JSON.stringify([state.game,state.match,state.matchStartedAt,facts]);
+      const key=decisionKey(state,facts);
       if(key!==pending){pending=key;since=now();state.equipmentStatus=lastDone?'正在结合最新装备与海克斯更新建议…':'正在生成出装建议…';}
       if(busy||key===lastDone||now()-since<debounceMs||now()-lastAt<cooldownMs)return;
       busy=true;lastAt=now();
@@ -56,10 +58,10 @@ export function createEquipmentCoach({getState,agentChat,save,now=Date.now,debou
       void agentChat({game:state.game,match,question,topic:'equipment',automatic:true}).then(async answer=>{
         const current=getState();
         if(closed||current.match!==match||current.matchStartedAt!==started||current.game!==state.game||ownFacts(equipmentContext(current))!==ownFacts(facts))return;
-        if(typeof answer==='string'&&answer.trim()){current.equipment=answer.trim().slice(0,4000);current.equipmentAssumptions=facts.assumedAugments;current.equipmentStatus=JSON.stringify([current.game,current.match,current.matchStartedAt,equipmentContext(current)])===key?'':'敌方装备已变化，稍后更新建议';lastDone=key;await save();}
+        if(typeof answer==='string'&&answer.trim()){current.equipment=answer.trim().slice(0,4000);current.equipmentAssumptions=facts.assumedAugments;current.equipmentStatus=decisionKey(current,equipmentContext(current))===key?'':'敌方装备已变化，稍后更新建议';lastDone=key;if(!current.equipmentStatus)await onAdvice(current,current.equipment);await save();}
       }).catch(()=>{
         const current=getState();
-        if(!closed&&current.match===match&&current.matchStartedAt===started&&JSON.stringify([current.game,current.match,current.matchStartedAt,equipmentContext(current)])===key){current.equipmentStatus='出装建议暂未生成，稍后自动重试';}
+        if(!closed&&current.match===match&&current.matchStartedAt===started&&decisionKey(current,equipmentContext(current))===key){current.equipmentStatus='出装建议暂未生成，稍后自动重试';}
       }).finally(()=>{busy=false;});
     },
     close(){closed=true;},

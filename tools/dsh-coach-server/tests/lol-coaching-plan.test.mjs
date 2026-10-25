@@ -111,7 +111,7 @@ test('augment rerolls use only live choices; confirmation keeps all owned augmen
   assert.equal(plan.stage,'postAugment');
   assert.deepEqual(plan.facts.ownedAugments,['甲','旧强化']);
   assert.equal(plan.facts.selectionEvidence.source,'user-confirmed');
-  assert.match(plan.prompt,/下一件具体装备/);
+  assert.match(plan.prompt,/下一件成装/);
 });
 
 test('late champion selection and ended match replies are suppressed', () => {

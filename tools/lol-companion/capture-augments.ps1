@@ -1,10 +1,10 @@
-﻿param([switch]$CheckOnly,[string]$ImagePath,[switch]$Worker)
+﻿param([switch]$CheckOnly,[string]$ImagePath,[switch]$Worker,[string]$StateDir=$env:JINBAO_STATE_DIR)
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 if($Worker){
  while($null -ne ($captureCommand=[Console]::In.ReadLine())){
   if($captureCommand -eq 'exit'){break}
-  if($captureCommand -eq 'capture'){$captureResult=if($ImagePath){& $PSCommandPath -ImagePath $ImagePath}else{& $PSCommandPath};[Console]::Out.WriteLine([string]$captureResult);[Console]::Out.Flush()}
+  if($captureCommand -eq 'capture'){$captureResult=if($ImagePath){& $PSCommandPath -ImagePath $ImagePath}else{& $PSCommandPath -StateDir $StateDir};[Console]::Out.WriteLine([string]$captureResult);[Console]::Out.Flush()}
  }
  exit 0
 }
@@ -52,7 +52,9 @@ public static class JinbaoAugmentCapture {
  $width=$w;$height=$h
  $bitmap=[Drawing.Bitmap]::new($width,$height)
  $graphics=[Drawing.Graphics]::FromImage($bitmap)
- try{$graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size)}finally{$graphics.Dispose()}
+ . (Join-Path $PSScriptRoot '../desktop-release/capture-coordination.ps1')
+ $lease=$null
+ try{$lease=Enter-JinbaoCapture $StateDir;$graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size)}finally{Exit-JinbaoCapture $lease;$graphics.Dispose()}
  $scaled=$null;$memory=[IO.MemoryStream]::new()
  try{
   if($width -gt 2000){$scaled=[Drawing.Bitmap]::new($bitmap,[Drawing.Size]::new(2000,[int]($height*2000/$width)));$width=$scaled.Width;$height=$scaled.Height;$scaled.Save($memory,[Drawing.Imaging.ImageFormat]::Png)}

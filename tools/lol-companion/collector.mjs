@@ -8,6 +8,7 @@ import { createChampionSelectionReader } from './champ-select.mjs';
 import { createChatObserver,createChatCatalogReader } from './chat-observer.mjs';
 import { createAugmentObserver,augmentNames } from './augment-observer.mjs';
 import {createAugmentCaptureWorker} from './capture-worker.mjs';
+import {createItemCatalogue} from './item-policy.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -24,6 +25,8 @@ const names=await augmentNames();
 const observer=createAugmentObserver(names,event=>{if(running)log.append(event);});
 const chatObserver=createChatObserver(names,event=>{if(running)log.append(event);});
 const readChatCatalog=createChatCatalogReader(lcuRequest);
+let enrichItem=item=>item,championNames=new Map();
+const acceptCatalog=catalog=>{chatObserver.setCatalog(catalog);if(catalog.items)enrichItem=createItemCatalogue(catalog.items);if(catalog.champions)championNames=new Map(catalog.champions.filter(c=>c.alias&&c.name).map(c=>[c.alias.toLowerCase(),c.name]));};
 const stop=()=>{running=false;captureStop.abort();captureWorker.close();};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 process.on('message',message=>{if(message?.action==='stop')stop();});
@@ -63,13 +66,17 @@ while(running){
   const all=phase==='ChampSelect'?null:await getAllGameData(),state=compactState(all);
   lastLiveState=state;
   if(state){
+   for(const player of [state.me,...state.allies,...state.enemies]){
+    const name=championNames.get(String(player.championAlias??'').toLowerCase());if(name){player.championTitle=player.champion;player.champion=name;}
+    player.items=(player.items??[]).map(enrichItem);
+   }
    const time=all.gameData.gameTime;
    if(nextMatch||gameTime===null||time<gameTime){
     nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();chatObserver.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
     log.append({kind:'game_start',me:state.me??{},queue:state.mode,gameTime:state.gameTime,allies:state.allies,enemies:state.enemies});
    }
    gameTime=time;log.append(stateEvent(state));
-   if(credentials.ok)void readChatCatalog(credentials,catalog=>chatObserver.setCatalog(catalog)).catch(()=>{});
+   if(credentials.ok)void readChatCatalog(credentials,acceptCatalog).catch(()=>{});
    const changed=diffEvents(lastEvent,all);lastEvent=changed.maxId;
    for(const e of changed.fresh)log.append({kind:'event',id:e.EventID,name:e.EventName,time:e.EventTime,killer:e.KillerName,victim:e.VictimName,turret:e.TurretKilled,dragon:e.DragonType,...e});
   }

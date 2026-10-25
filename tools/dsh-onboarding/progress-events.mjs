@@ -1,3 +1,4 @@
+import {isCompletedItem} from '../lol-companion/item-policy.mjs';
 const clean=value=>typeof value==='string'?value.trim().slice(0,120):'';
 export function progressSeconds(value,fallback=null){
   if(typeof value==='number'&&Number.isFinite(value)&&value>=0)return value;
@@ -32,6 +33,7 @@ export function projectProgressEvent(state,event){
   }
   if(event.kind==='purchase'){
     const hero=namedHero(state,event)??(isOwn(state,event)?state.me.champion:null),item=clean(event.item);
+    if(state.game==='lol'&&!isCompletedItem({id:event.itemId,name:item}))return;
     addProgressEvent(state,JSON.stringify(['purchase',seconds,hero,item||event.itemId]),`${hero??'英雄未识别'}购买装备：${item||'装备名称未识别'}`,seconds,'equipment');
   }
   if(['augment_picked','augment_mutate','augment_picked_chat'].includes(event.kind)){
@@ -56,13 +58,16 @@ export function observeEquipment(state){
     for(const item of Array.isArray(player.items)?player.items:[]){
       const name=clean(typeof item==='string'?item:item?.name);if(!name)continue;
       const id=String(item?.id??name),count=Number.isFinite(item?.count)&&item.count>0?item.count:1;
-      const old=current.get(id);current.set(id,{name,count:count+(old?.count??0)});
+      const old=current.get(id);current.set(id,{name,count:count+(old?.count??0),completed:state.game!=='lol'||isCompletedItem(item)});
     }
     const previous=state.equipmentSnapshots.get(key);state.equipmentSnapshots.set(key,current);
     if(!previous)continue; // First observation is a baseline, never a fabricated purchase.
     const added=[],removed=[];
-    for(const [id,item] of current){const n=item.count-(previous.get(id)?.count??0);if(n>0)added.push(item.name+(n>1?' ×'+n:''));}
-    for(const [id,item] of previous){const n=item.count-(current.get(id)?.count??0);if(n>0)removed.push(item.name+(n>1?' ×'+n:''));}
+    for(const [id,item] of current){const n=item.count-(previous.get(id)?.count??0);if(n>0&&item.completed)added.push(item.name+(n>1?' ×'+n:''));}
+    for(const [id,item] of previous){const n=item.count-(current.get(id)?.count??0);if(n>0&&item.completed)removed.push(item.name+(n>1?' ×'+n:''));}
+    if(added.length&&state.enemies.includes(player)){
+      state.completedEquipmentEvents=[...(state.completedEquipmentEvents??[]),{at:state.at,time:state.gameSeconds,hero:player.champion,items:added}].slice(-12);
+    }
     if(added.length||removed.length)addProgressEvent(state,JSON.stringify(['inventory',key,state.at,added,removed]),`装备更新：${player.champion}`+(added.length?' · 新增 '+added.join('、'):'')+(removed.length?' · 移除 '+removed.join('、'):''),state.gameSeconds,'equipment');
   }
 }

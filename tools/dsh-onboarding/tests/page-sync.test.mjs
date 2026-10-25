@@ -15,7 +15,7 @@ test('purchase and augment stream events populate their pages without confusing 
   {kind:'augment_mutate',champion:'锐雯',who:'enemy',time:'01:07',augment:'双刀流'},
   {kind:'augment_picked',time:'01:08',name:'终极唤醒',source:'ocr-inferred',confidence:'low'}]});
  const v=overlayView(s);
- assert.match(v.equipment,/当前装备\n长剑\n/);assert.match(v.equipment,/装备动态.*\n01:05 安妮购买装备：残疫/);
+ assert.doesNotMatch(v.equipment,/当前装备\n长剑\n/);assert.match(v.equipment,/装备动态.*\n01:05 安妮购买装备：残疫/);
  assert.doesNotMatch(v.equipment,/敌方装备|无尽之刃/);
  assert.deepEqual(s.ownedAugments,['珠光护手']);assert.match(v.augments,/强化动态\n01:06.*珠光护手/);
  assert.match(v.augments,/锐雯 · 双刀流/);assert.match(v.augments,/疑似海克斯选择.*终极唤醒/);
@@ -44,11 +44,11 @@ test('live log changes refresh ranked Mayhem choices in battle and augment pages
  t.after(service.close);
  const until=async check=>{for(let i=0;i<250;i++){if(check())return;await new Promise(r=>setTimeout(r,10));}throw Error('page synchronization timeout');};
  await send({kind:'augment_offer',roll:1,options:['一号','二号','三号']});
- await until(()=>service.view().advice.includes('#1 · 二号'));
+ await until(()=>service.view().advice.includes('#1 · 二号')&&service.view().advice.includes('#2 · 三号'));
  let v=service.view();assert.ok(v.advice.indexOf('二号')<v.advice.indexOf('三号'));assert.ok(v.advice.indexOf('三号')<v.advice.indexOf('一号'));
  await send({kind:'augment_offer',roll:1,reroll:true,options:['新选项','二号','三号']});
  await until(()=>service.view().advice.includes('#1 · 新选项'));
- v=service.view();assert.doesNotMatch(v.advice,/一号/);assert.doesNotMatch(v.augments,/一号/);
+ v=service.view();assert.doesNotMatch(v.advice,/一号/);assert.doesNotMatch(v.augments.split('英雄 Top10')[0],/一号/);
  await send({kind:'augment_offer_closed',roll:1});
  await until(()=>!service.view().advice.includes('当前三选一'));
  await send({kind:'augment_mutate',augment:'新选项',who:'self',confidence:'high'});

@@ -35,6 +35,7 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
  const service=serviceUrl(serviceBaseUrl);const lifetime=new AbortController();let busy=false,settled=Promise.resolve(),finish=()=>{},wireRevision=0,wireKey='',wireValue;
  function transportContext(memory,request){
   const value=cloudContext(memory,request.game,request.match,{eventQuery:!!queryEvents,observationPlan:!!observationPlan,userMemory:!!memoryTools});
+  value.client_context.task={automatic:request.automatic===true,topic:['advice','equipment','chat'].includes(request.topic)?request.topic:'chat'};
   if(value.current_match_state.status==='unknown')delete value.current_match_state.captured_at_ms;
   const key=JSON.stringify(value);
   if(key!==wireKey){wireRevision=Math.max(Date.now(),wireRevision+1);value.current_match_state.source_revision=value.current_match_state.revision;value.current_match_state.revision=wireRevision;wireKey=key;wireValue=value;}
@@ -102,7 +103,7 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
      }
     }
     if(update.status==='completed'){terminal=true;if(typeof update.reply!=='string'||!update.reply.trim())throw fail(502,'Empty reply');return update.reply;}
-    if(['failed','cancelled'].includes(update.status)){terminal=true;throw fail(503,'Cloud Agent task failed');}
+    if(['failed','cancelled'].includes(update.status)){terminal=true;const error=fail(update.error==='model_quota_denied'?429:503,'Cloud Agent task failed');if(/^[a-z_0-9]{1,80}$/.test(update.error??''))error.code=update.error;throw error;}
     const latest=transportContext(await getContext(request.game,request.match),request);
     if(latest.current_match_state.revision>revision&&Date.now()>=nextContextAt){
      try{await call('/context',token,{session_id:session,context:latest},signal);revision=latest.current_match_state.revision;nextContextAt=Date.now()+2000;}

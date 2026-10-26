@@ -61,10 +61,17 @@ export function createAugmentObserver(names, emit) {
       misses=0;
       const next=[...current],changed=[];
       const stableFirstFrame=!current.some(Boolean)&&frame.cardLayout==='stacked-title-regions'&&recognized===3&&new Set(candidates).size===3;
+      // A single-slot reroll can be accepted immediately when two independent
+      // OCR passes (full frame and enlarged title crop) agree on its exact name,
+      // and both unchanged neighbours are still visible. Otherwise require the
+      // normal consecutive-frame confirmation.
+      const changedSlots=candidates.map((name,slot)=>name&&current[slot]&&name!==current[slot]?slot:null).filter(slot=>slot!==null);
+      const corroborated=frame.cardLayout==='stacked-title-regions'&&recognized===3&&new Set(candidates).size===3&&changedSlots.length===1&&current.every(Boolean)
+        ? changedSlots.filter(slot=>titles.some(title=>title.slot===slot&&title.name===candidates[slot]&&found.some(full=>full.source==='full'&&full.name===title.name&&Math.abs(full.x-title.x)<frame.width*.07&&Math.abs(full.y-title.y)<frame.height*.05))) : [];
       candidates.forEach((name,slot)=>{
         if(!name||name===current[slot]){pending[slot]=null;return;}
         pending[slot]=pending[slot]?.name===name?{name,count:pending[slot].count+1}:{name,count:1};
-        if(pending[slot].count>=(stableFirstFrame?1:2)&&slots[slot].length<2){next[slot]=name;changed.push(slot);}
+        if(pending[slot].count>=(stableFirstFrame||corroborated.includes(slot)?1:2)&&slots[slot].length<2){next[slot]=name;changed.push(slot);}
       });
       // Ambiguous or duplicate titles must not consume a slot's only reroll.
       const accepted=changed.filter(slot=>next.filter(name=>name===next[slot]).length===1);

@@ -322,7 +322,8 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
     try {
       const offered = offerNames(state.offers).slice(0,3);
       const base = async () => {
-        if(selecting||(!force&&cache.baseLoaded))return;
+        if(selecting||(!force&&(cache.baseLoaded||Date.now()<(cache.baseRetryAt??0))))return;
+        cache.baseRetryAt=Date.now()+knowledgeRetryMs;
         const results=await Promise.allSettled(game==='wzry'?[search({game,query:champion,limit:3})]:[
           search({game,query:champion,filter:{_type:'coreBuilds'},limit:3}),
           search({game,query:champion,filter:{_type:'augments'},limit:10}),
@@ -330,8 +331,12 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         ]);
         for(const r of results)if(r.status==='rejected')failed(r.reason);
         const fresh=results.flatMap(r=>r.status==='fulfilled'?(r.value.results??[]).map(item=>item.data):[]);
-        if(fresh.length||results.every(r=>r.status==='fulfilled'))cache.rows=fresh;
-        cache.baseLoaded=results.every(r=>r.status==='fulfilled');
+        // An empty successful response can be a transient service/cache miss.
+        // Keep useful rows and retry missing sections instead of marking the
+        // whole hero lookup complete forever.
+        const refreshedTypes=new Set(fresh.map(row=>row?._type));
+        cache.rows=[...fresh,...cache.rows.filter(row=>!refreshedTypes.has(row?._type))];
+        cache.baseLoaded=results.every(r=>r.status==='fulfilled'&&r.value.results?.length>0);
       };
       await Promise.all([base(),...rosterChampions(state).filter(name=>game==='lol'&&(force||!cache.heroes.has(name))).map(async name=>{
         try{
@@ -342,7 +347,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       }),...offered.filter(name=>game==='lol'&&(force||!cache.candidates.has(name))).map(async name=>{
         try{
         const result=await search({game,query:champion,filter:{_type:'augments',name},limit:1});
-        const rows=(result.results??[]).map(item=>item.data);cache.candidates.set(name,rows);
+        const rows=(result.results??[]).map(item=>item.data);if(rows.length)cache.candidates.set(name,rows);
         if(cache.candidates.size>100)cache.candidates.delete(cache.candidates.keys().next().value);
         if(stillCurrent()){
           knowledge={...knowledge,rows:[...offered.flatMap(option=>cache.candidates.get(option)??[]),...cache.rows,...[...cache.heroes.values()].flat()]};

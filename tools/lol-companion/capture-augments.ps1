@@ -4,12 +4,13 @@ $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 if($Worker){
  while($null -ne ($captureCommand=[Console]::In.ReadLine())){
   if($captureCommand -eq 'exit'){break}
-  if($captureCommand -eq 'capture'){$captureResult=if($ImagePath){& $PSCommandPath -ImagePath $ImagePath}else{& $PSCommandPath -StateDir $StateDir};[Console]::Out.WriteLine([string]$captureResult);[Console]::Out.Flush()}
+  if($captureCommand -eq 'capture'){$captureResult=if($ImagePath){& $PSCommandPath -ImagePath $ImagePath -StateDir $StateDir}else{& $PSCommandPath -StateDir $StateDir};[Console]::Out.WriteLine([string]$captureResult);[Console]::Out.Flush()}
  }
  exit 0
 }
 $engineReady=$false
 $capturedAt=$null
+$captureWatch=[Diagnostics.Stopwatch]::StartNew()
 try{
  if(-not('JinbaoAugmentCapture' -as [type])){Add-Type @'
 using System;
@@ -43,7 +44,7 @@ public static class JinbaoAugmentCapture {
  $handle=[JinbaoAugmentCapture]::GetForegroundWindow();$gamePid=[uint32]0
  [JinbaoAugmentCapture]::GetWindowThreadProcessId($handle,[ref]$gamePid) | Out-Null
  $process=Get-Process -Id $gamePid -ErrorAction SilentlyContinue
- if(!$process -or $process.ProcessName -ne 'League of Legends'){Write-Output '{"available":true,"foreground":false}';exit 0}
+ if(!$process -or $process.ProcessName -ne 'League of Legends'){Write-Output '{"available":true,"foreground":false,"reason":"game_not_foreground"}';exit 0}
  $rect=New-Object JinbaoAugmentCapture+Rect;$origin=New-Object JinbaoAugmentCapture+Point
  if(![JinbaoAugmentCapture]::GetClientRect($handle,[ref]$rect) -or ![JinbaoAugmentCapture]::ClientToScreen($handle,[ref]$origin)){throw 'Game bounds unavailable'}
  $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
@@ -63,8 +64,10 @@ public static class JinbaoAugmentCapture {
  }finally{if($scaled){$scaled.Dispose()};$memory.Dispose();$bitmap.Dispose()}
  }
  if(!$capturedAt){$capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+ $pixelMs=$captureWatch.ElapsedMilliseconds
  . (Join-Path $PSScriptRoot 'observe-ally-ultimates.ps1')
  $allyHud=Read-JinbaoAllyHud $bytes $StateDir
+ $hudMs=$captureWatch.ElapsedMilliseconds-$pixelMs
  if(!$engineReady){@{available=$true;ocrAvailable=$false;foreground=$true;capturedAt=$capturedAt;reason='chinese_language_unavailable';lines=@();allyHud=$allyHud} | ConvertTo-Json -Depth 6 -Compress;exit 0}
  $asTask=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {$_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1} | Select-Object -First 1
  function Await-Operation($operation,[Type]$type){$task=$asTask.MakeGenericMethod($type).Invoke($null,@($operation));$task.Wait();return $task.Result}
@@ -128,7 +131,7 @@ public static class JinbaoAugmentCapture {
    }finally{$stripBytes.Dispose()}
   }finally{$stripGraphics.Dispose();$strip.Dispose()}
  }finally{if($inputBitmap){$inputBitmap.Dispose()};$inputStream.Dispose()}
- @{available=$true;ocrAvailable=$true;foreground=$true;capturedAt=$capturedAt;allyHud=$allyHud;width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-strip';cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 6 -Compress
+ @{available=$true;ocrAvailable=$true;foreground=$true;capturedAt=$capturedAt;allyHud=$allyHud;timings=@{captureMs=$pixelMs;hudMs=$hudMs;ocrMs=$captureWatch.ElapsedMilliseconds-$pixelMs-$hudMs;totalMs=$captureWatch.ElapsedMilliseconds};width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-strip';cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 6 -Compress
 
 }catch{
  if($engineReady){Write-Output '{"available":true,"foreground":false,"reason":"capture_failed"}'}

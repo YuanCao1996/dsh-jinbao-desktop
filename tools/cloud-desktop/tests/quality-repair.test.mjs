@@ -7,6 +7,19 @@ import{createOverlayService,initialOverlayState,applyOverlayEvent,overlayView}fr
 import{createAugmentObserver}from'../../lol-companion/augment-observer.mjs';
 import{createItemCatalogue,isCompletedItem}from'../../lol-companion/item-policy.mjs';
 
+test('transient empty Top10 and candidate lookups recover without a manual refresh',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-empty-augment-'));await mkdir(join(dir,'logs'));let top=0,candidate=0;const at=Date.now();
+ await writeFile(join(dir,'logs/lol-empty.jsonl'),[{game:'lol',kind:'game_start',t:at,me:{champion:'安妮'},allies:[{champion:'安妮'}]},{game:'lol',kind:'augment_offer',t:at+1,roll:1,options:['珠光护手','甲','乙']}].map(JSON.stringify).join('\n')+'\n');
+ const service=await createOverlayService({stateDir:dir,pollMs:10,knowledgeRetryMs:30,search:async q=>{
+  if(q.dataset==='aram-ranking')return{results:[{data:{name:'安妮',winRate:53,tier:1}}]};
+  if(q.filter?._type==='augments'&&!q.filter.name)return{results:++top===1?[]:[{data:{_type:'augments',champion:'安妮',name:'常驻推荐',rank:2}}]};
+  if(q.filter?.name==='珠光护手')return{results:++candidate===1?[]:[{data:{_type:'augments',champion:'安妮',name:'珠光护手',rank:1}}]};
+  return{results:[{data:{_type:q.filter?._type??'augments',champion:'安妮',name:q.filter?.name??'其他数据',rank:5}}]};
+ }});t.after(async()=>{await service.close();await rm(dir,{recursive:true,force:true});});
+ for(let i=0;i<350&&(!service.view().augments.includes('#1 · 珠光护手')||!service.view().augments.includes('#2 · 常驻推荐'));i++)await new Promise(r=>setTimeout(r,10));
+ assert.match(service.view().augments,/#1 · 珠光护手/);assert.match(service.view().augments,/#2 · 常驻推荐/);assert.equal(top,2);assert.equal(candidate,2);
+});
+
 test('post-augment advice survives unrelated enemy components; selected augment changes still revoke it',()=>{
  const state={game:'lol',match:'one',me:{champion:'安妮',items:[{id:1026,name:'增幅典籍'}]},enemies:[{champion:'锐雯',items:[]}],ownedAugments:['珠光护手']};
  const validity=createAdviceValidity('postAugment',state,1000);state.enemies[0].items.push({id:1036,name:'长剑'});state.me.items.push({id:1026,name:'增幅典籍'});assert.equal(adviceIsValid(validity,state,2000),true);

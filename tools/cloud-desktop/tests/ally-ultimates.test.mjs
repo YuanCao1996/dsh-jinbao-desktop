@@ -39,8 +39,7 @@ test('HUD asset generations discard old match portraits and retain only local cu
  let release;const blocked=new Promise(r=>release=r),calls=[];
  const assets=createHudAssets({stateDir:dir,load:async(id,signal)=>{calls.push(id);assert.equal(signal.aborted,false);if(id===1)await blocked;return Buffer.from([137,80,78,71,13,10,26,10,id]);}});
  const request=(match,ids)=>({match,source:123,state:{sideSource:'activePlayer.team',me:{championAlias:'Self'},allies:ids.map(id=>({championAlias:'Hero'+id}))},champions:ids.map(id=>({id,alias:'Hero'+id}))});
- const old=assets.update(request('old',[1,2,3]));const oldKey=assets.key();assets.update(request('new',[4,5,6]));assert.notEqual(oldKey,assets.key());release();await old;
- for(let i=0;i<100;i++){const value=JSON.parse(await readFile(join(dir,'ally-hud-catalogue.json'),'utf8'));if(value.key===assets.key()&&value.portraits.length===3)break;await new Promise(r=>setTimeout(r,5));}
+ const old=assets.update(request('old',[1,2,3]));const oldKey=assets.key();const updated=assets.update(request('new',[4,5,6]));assert.notEqual(oldKey,assets.key());release();await old;await updated;
  const current=JSON.parse(await readFile(join(dir,'ally-hud-catalogue.json'),'utf8'));assert.deepEqual(current.portraits.map(p=>p.alias),['Hero4','Hero5','Hero6']);
  await assets.update(request('new',[4,5,6]));assert.equal(calls.length,6);await assets.close();
 });

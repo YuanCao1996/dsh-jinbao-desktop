@@ -6,6 +6,15 @@ import { join } from 'node:path';
 import { initialOverlayState,applyOverlayEvent,overlayView,createOverlayService } from '../overlay-state.mjs';
 import { createAugmentObserver } from '../../lol-companion/augment-observer.mjs';
 const row=(name,rank,extra={})=>({_type:'augments',champion:'黑暗之女 安妮',name,rank,tier:'T1',winRate:60,desc:'不能出现的效果详情',...extra});
+test('independent full-frame and title OCR speed a verified single-slot reroll without trusting stray tooltips',()=>{
+ const output=[],observer=createAugmentObserver(['甲','乙','丙','丁','戊','己'],e=>output.push(e));
+ const frame=(names,lines=[])=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',titleLines:names.map((text,slot)=>({text,slot,x:500+slot*370,y:430})),lines});
+ observer.observe(frame(['甲','乙','丙']));
+ observer.observe(frame(['丁','乙','丙'],[{text:'丁',x:501,y:431}]));assert.equal(output.length,2);assert.equal(output.at(-1).options[0].name,'丁');
+ observer.observe(frame(['丁','戊','丙'],[{text:'戊',x:100,y:100}]));assert.equal(output.length,2,'tooltip at another position does not corroborate a card');
+ observer.observe(frame(['丁','戊','丙']));assert.equal(output.length,3);
+ observer.observe(frame(['丁','戊','己'],[{text:'己',x:1241,y:431}]));assert.equal(output.length,4);assert.equal(output.at(-1).seen.length,6);
+});
 test('three exact title regions can publish first choices immediately, while rerolls still require confirmation',()=>{
  const output=[],observer=createAugmentObserver(['甲','乙','丙','丁'],e=>output.push(e));
  const frame=names=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',titleLines:names.map((text,slot)=>({text,slot,x:500+slot*370,y:430})),lines:[]});

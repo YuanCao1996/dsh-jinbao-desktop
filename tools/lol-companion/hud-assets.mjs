@@ -1,7 +1,12 @@
-import{writeFile,rename,mkdir}from'node:fs/promises';import{join}from'node:path';import{randomBytes}from'node:crypto';
+import{writeFile,rename,mkdir,unlink}from'node:fs/promises';import{join}from'node:path';import{randomBytes,randomUUID}from'node:crypto';import{setTimeout as sleep}from'node:timers/promises';
 export function createHudAssets({stateDir,load,now=Date.now}){
  let desired='',id='',generation=0,latest,task=null,closed=false,nextAttempt=0,complete=false;const cache=new Map(),stop=new AbortController();
- const write=async value=>{await mkdir(stateDir,{recursive:true});const file=join(stateDir,'ally-hud-catalogue.json');await writeFile(file+'.tmp',JSON.stringify(value),{mode:0o600});await rename(file+'.tmp',file);};
+ const write=async value=>{
+  await mkdir(stateDir,{recursive:true});const file=join(stateDir,'ally-hud-catalogue.json'),temporary=file+'.'+randomUUID()+'.tmp';
+  try{await writeFile(temporary,JSON.stringify(value),{mode:0o600});for(let attempt=0;;attempt++){
+   try{await rename(temporary,file);break;}catch(error){if(attempt>=7||!['EACCES','EPERM','EBUSY'].includes(error.code))throw error;await sleep(15*(attempt+1));}
+  }}finally{await unlink(temporary).catch(()=>{});}
+ };
  function update(request){
   if(closed)return Promise.resolve();latest=request;
   const me=request.state.sideSource==='activePlayer.team'?request.state.me?.championAlias:null;
@@ -10,7 +15,8 @@ export function createHudAssets({stateDir,load,now=Date.now}){
   }).filter(p=>/^[A-Za-z0-9_]{1,40}$/.test(p.alias)&&Number.isInteger(p.id)&&p.id>0&&p.id<1000000):[];
   const key=JSON.stringify([request.match,request.source,roster]);
   if(key!==desired){desired=key;id=randomBytes(16).toString('hex');generation++;nextAttempt=0;complete=false;}
-  if(task||complete||now()<nextAttempt)return task??Promise.resolve();
+  if(task)return task.then(()=>update(latest));
+  if(complete||now()<nextAttempt)return Promise.resolve();
   const epoch=generation,currentId=id;
   task=(async()=>{
    await write({key:currentId,portraits:[]});
@@ -20,7 +26,7 @@ export function createHudAssets({stateDir,load,now=Date.now}){
     return{alias:p.alias,png:bytes.toString('base64')};
    }));
    if(!closed&&epoch===generation){const valid=portraits.filter(Boolean);await write({key:currentId,portraits:valid});complete=valid.length===roster.length&&roster.length>=3;nextAttempt=now()+10000;}
-  })().catch(()=>{nextAttempt=now()+10000;}).finally(()=>{task=null;if(!closed&&epoch!==generation)void update(latest);});return task;
+  })().catch(()=>{if(epoch===generation)nextAttempt=now()+10000;}).finally(()=>{task=null;if(!closed&&epoch!==generation)void update(latest);});return task;
  }
  return{update,key:()=>id,reset(){desired='';id='';generation++;complete=false;},async close(){closed=true;stop.abort();await task;}};
 }

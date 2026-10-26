@@ -43,9 +43,15 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
    if(typeof answer!=='string'||!answer.trim())throw Error('Empty automatic reply');
    await publish({at:new Date(now()).toISOString(),source:v.match,game:v.game,match:v.match,kind:'cloud-advice',key:plan.stage,priority:['augment','death','purchase','enemyChange'].includes(plan.stage)?2:1,broadcast:answer,validity});
    await status(v,'published','',{stage:plan.stage});
-   nextStore.lastAt=now();nextStore.lastValidity=validity;nextStore.loadingKey=loadingKey;
+   nextStore.lastAt=now();nextStore.lastValidity=validity;
+   // A higher-priority task only acknowledges its own milestone. For example,
+   // showing new candidates must not swallow a concurrent confirmed selection.
+   if(plan.stage==='loading')nextStore.loadingKey=loadingKey;
    if(plan.stage==='enemyChange')nextStore.equipmentAt=Math.max(...(c.completedEquipmentEvents??[]).map(e=>e.at),0);
-   store=nextStore;offers=offerKey;owned=ownedKey;selection=selectionKey;
+   store=nextStore;
+   if(plan.stage==='augment')offers=offerKey;
+   if(plan.stage==='postAugment')owned=ownedKey;
+   if(plan.stage==='selection')selection=selectionKey;
   }catch(error){retryAt=now()+15000;await status(view(),'failed',error.status===429?'策略请求受限，稍后自动重试':error.status===401?'登录已失效，请在设置中重新登录':error.status===504?'策略分析超时，稍后自动重试':'策略生成失败，稍后自动重试；可在设置查看诊断',{code:typeof error.code==='string'&&/^[a-z_0-9]{1,80}$/.test(error.code)?error.code:'agent_request_failed',retryAt});}finally{busy=false;}
  },close(){closed=true;}};
 }

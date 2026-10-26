@@ -6,6 +6,6 @@ test('Windows standalone entry serves settings, protects credentials and exits w
   assert.equal(report.requiresDshDesktop,false);const link=await readFile(join(dir,'settings-link.txt'),'utf8'),url=new URL(link.trim());const html=await(await fetch(url.origin)).text();assert.match(html,/runtimeNotice/);
   const duplicate=await promisify(execFile)(process.execPath,[fileURLToPath(new URL('../main.mjs',import.meta.url)),'--headless','--state',dir],{windowsHide:true,timeout:10000});
   assert.equal(JSON.parse(duplicate.stdout).alreadyRunning,true);assert.equal(await readFile(join(dir,'settings-link.txt'),'utf8'),link);
-  assert.ok((await readFile(join(dir,'credentials.dpapi'),'utf8')).length>20);const exit=once(child,'exit');await writeFile(join(dir,'overlay-stopped'),'test');await exit;assert.equal(child.exitCode,0);
+  assert.ok((await readFile(join(dir,'credentials.dpapi'),'utf8')).length>20);const exit=once(child,'exit');await writeFile(join(dir,'overlay-stopped'),'test');await exit;assert.equal(child.exitCode,0);const shutdown=JSON.parse(await readFile(join(dir,'shutdown-state.json'),'utf8'));assert.equal(shutdown.state,'completed');assert.deepEqual(shutdown.failedSteps,[]);await assert.rejects(fetch(url.origin,{signal:AbortSignal.timeout(1000)}));
  }finally{if(child.exitCode===null)child.kill();await rm(dir,{recursive:true,force:true});}
 });

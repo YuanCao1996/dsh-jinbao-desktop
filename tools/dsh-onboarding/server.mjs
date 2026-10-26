@@ -24,14 +24,14 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  try{config={...config,...JSON.parse(await readFile(filename,'utf8'))};}catch(e){if(e.code!=='ENOENT')throw Error('Invalid Jinbao settings file');}
  let local=(await credentials.resolve(refs.local))?.value;
  if(!local){local=randomBytes(32).toString('hex');await credentials.set(refs.local,local);}
- let pairing=null,mutation=Promise.resolve();
+ let pairing=null,mutation=Promise.resolve(),accepting=true;
  let wechat={enabled:false,checkedAt:0};
  let email={enabled:false,checkedAt:0};
  let nextRenewAttempt=0;
  let nextSyncRenewAttempt=0;
  let pairingUpgrade=null,syncForgotten=false,nextPairUpgradeAttempt=0;
  try{syncForgotten=JSON.parse(await readFile(join(stateDir,'sync-forgotten.json'),'utf8')).forgotten===true;}catch{}
- const locked=fn=>{const next=mutation.then(fn);mutation=next.catch(()=>{});return next;};
+ const locked=fn=>{if(!accepting)return Promise.reject(error(409));const next=mutation.then(fn);mutation=next.catch(()=>{});return next;};
  const resolve=async key=>(await credentials.resolve(refs[key]))?.value;
  async function saveConfig(next){await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;}
  async function acceptCloud(result){
@@ -376,5 +376,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;
  await writeFile(join(stateDir,'settings-link.txt'),url,{mode:0o600});
- return {url,port:server.address().port,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{await phoneSync.close();await memories.close();await overlay.close();await new Promise(r=>{server.closeAllConnections();server.close(r);});}};
+ let httpClosing;
+ const stopAccepting=()=>{accepting=false;if(!httpClosing)httpClosing=new Promise(resolve=>{server.closeAllConnections();server.close(()=>resolve());});};
+ return {url,port:server.address().port,stopAccepting,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{stopAccepting();await mutation;await phoneSync.close();await memories.close();await overlay.close();await httpClosing;}};
 }

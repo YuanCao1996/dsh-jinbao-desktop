@@ -19,7 +19,7 @@ test('manual request arriving during runtime startup cancels unopened automatic 
 test('preempted native runtime finishes closing before another instance resumes its session',async()=>{
  let cancel,retire,created=0;const router=createRuntimeRouter({getMode:()=> 'cloud',factories:{cloud:()=>{created++;return{ask:async r=>r.topic==='advice'?new Promise((_r,reject)=>cancel=reject):'manual',close:async()=>{cancel?.(Error('preempted'));await new Promise(r=>retire=r);}};}}});
  const auto=router.ask({topic:'advice'}),aborted=assert.rejects(auto);while(!cancel)await new Promise(r=>setTimeout(r,1));const manual=router.ask({topic:'chat'});await new Promise(r=>setTimeout(r,20));assert.equal(created,1);retire();assert.equal(await manual,'manual');await aborted;
- const ending=router.close();while(!retire)await new Promise(r=>setTimeout(r,1));retire();await ending;
+ retire=null;const ending=router.close();while(!retire)await new Promise(r=>setTimeout(r,1));retire();await ending;
 });
 test('battle advice refreshes after expiry even without inventory changes and loading is not a finished match',async()=>{
  let time=10000,current={game:'lol',match:'one',phase:'InProgress',gameSeconds:180,me:{champion:'安妮',level:6,items:[]},enemies:[],offers:[],ownedAugments:[]};const entries=[];

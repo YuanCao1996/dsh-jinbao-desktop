@@ -13,6 +13,7 @@ import{access,rm,readFile,writeFile,appendFile}from'node:fs/promises';
 import{createExternalLogSource}from'./log-source.mjs';
 import{createUserMemory}from'./user-memory.mjs';
 import{createAgentActivity}from'../agent-activity/activity.mjs';
+import{createShutdown,notifyRestart}from'./shutdown.mjs';
 import{createSetupServer}from'../dsh-onboarding/server.mjs';import{createCredentials}from'./credentials.mjs';import{createCloudAgent}from'./cloud-agent.mjs';import{createGameMemory}from'../dsh-coach-server/lib/game-memory.js';
 import{createSupervisor}from'../jinbao-launcher/supervisor.mjs';import{createAgentStatus}from'../dsh-coach-server/lib/agent-status.js';
 import{resolve,join}from'node:path';import{homedir}from'node:os';import{fileURLToPath}from'node:url';import{execFile}from'node:child_process';
@@ -40,7 +41,8 @@ const agent=createRuntimeRouter({getMode:()=>setup?.config().mode??'cloud',isCur
  cloud:()=>createCloudAgent({getActivityEnabled:activity.isEnabled,apiPrefix:'/desktop/agent-preview',deviceId:stateDir,getToken:async()=>(await credentials.resolve('JINBAO_SERVICE_TOKEN'))?.value,getContext:context,queryEvents,isCurrent,capture,onProgress,memoryTools:userMemory.execute,observationPlan:args=>observation.plan(args)}),
  byok:()=>createLocalAgent({stateDir,getConfig:()=>setup.config(),getKey:async()=>(await credentials.resolve('JINBAO_USER_MODEL_API_KEY'))?.value,getContext:context,queryEvents,isCurrent,capture,onProgress,getActivityEnabled:activity.isEnabled,memoryTools:userMemory.execute,search:query=>setup.search(query),webSearch:createWebSearch(),observationPlan:args=>observation.plan(args)}),
 }});
-const updates=createStandaloneUpdates({root,stateDir,restart:process.connected?async()=>{process.send({action:'restart-update'});await writeFile(join(stateDir,'overlay-control.json'),JSON.stringify({action:'exit',at:Date.now()}));setTimeout(()=>void stop(),500);}:null});
+let restartRequested=false;
+const updates=createStandaloneUpdates({root,stateDir,restart:process.connected?async()=>{await writeFile(join(stateDir,'overlay-control.json'),JSON.stringify({action:'exit',at:Date.now()}));restartRequested=true;setTimeout(()=>void stop(),500);}:null});
 setup=await createSetupServer({credentials,stateDir,port,cloudAgent:agent,localAgent:agent,runtimeId:'standalone',activity,prepareModel:async config=>{if(config.mode==='byok')try{await locateNativeModules({stateDir,desktopPath:config.desktopPath});const validation=await createLocalAgent({stateDir,getConfig:()=>config,getKey:async()=>'',getContext:async()=>({})});await validation.close();}catch{throw Object.assign(Error('Local DSH unavailable'),{status:409,code:'local_dsh_unavailable'});}},onModelChange:()=>agent.reconfigure(),updateController:updates,observation,nativeInstaller,logSource,userMemory});
 const version=JSON.parse(await readFile(join(root,'package.json'),'utf8')).version+' (独立预览)';
 // Reuse the server's existing IP-based trial seats. A remembered login or an
@@ -61,8 +63,11 @@ if(!args.includes('--headless')){
 }
 console.log(JSON.stringify({standalone:true,requiresDshDesktop:false,stateDir,port:setup.port,collecting:!!supervisor}));
 if(process.connected)process.send({action:'ready'});
-let stopping=false;
-const stop=async()=>{if(stopping)return;stopping=true;if(interval)clearInterval(interval);if(coachTimer)clearInterval(coachTimer);clearInterval(stopTimer);clearInterval(heartbeat);clearInterval(updateTimer);clearInterval(observationTimer);coach?.close();await agent.close();await userMemory.close();await supervisor?.close();await updates.close();await observation.close();await logSource.close();await nativeInstaller.close();await loginTask;await setup.close();await activity.close();await instance.close();process.exit(0);};
+const stop=createShutdown({
+ quiesce:()=>{if(interval)clearInterval(interval);if(coachTimer)clearInterval(coachTimer);clearInterval(stopTimer);clearInterval(heartbeat);clearInterval(updateTimer);clearInterval(observationTimer);setup.stopAccepting();},
+ steps:[['coach',()=>coach?.close()],['agent',()=>agent.close()],['memory',()=>userMemory.close()],['collectors',()=>supervisor?.close()],['updates',()=>updates.close()],['observation',()=>observation.close()],['logs',()=>logSource.close()],['installer',()=>nativeInstaller.close()],['login',()=>loginTask],['settings',()=>setup.close()],['activity',()=>activity.close()],['instance',()=>instance.close()]],
+ complete:async({failed})=>{try{await writeFile(join(stateDir,'shutdown-state.json'),JSON.stringify({at:Date.now(),state:failed.length?'completed_with_errors':'completed',failedSteps:failed}),{mode:0o600});await notifyRestart({requested:restartRequested,failed,connected:process.connected,send:(...values)=>process.send(...values)});}finally{process.exit(failed.length?1:0);}}
+});
 const stopTimer=setInterval(()=>void access(join(stateDir,'overlay-stopped')).then(stop).catch(()=>{}),500);
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 if(process.connected){process.once('disconnect',stop);process.on('message',message=>{if(message?.action==='stop')void stop();});}

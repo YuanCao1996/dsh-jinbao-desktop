@@ -14,8 +14,8 @@ export async function runEntry({root,stateDir,args=[],spawnImpl=spawn,updater=cr
    });child.once('error',reject);child.once('exit',accept);
   }).catch(()=>-1).finally(()=>clearTimeout(timer));
   if(!ready&&candidate!==root&&!fallback){await current.reject();candidate=root;fallback=true;continue;}
-  if(restart&&ready){candidate=await updater.resolve();fallback=false;continue;}
-  return ready?code??0:1;
+  if(restart&&ready&&code===0){candidate=await updater.resolve();fallback=false;continue;}
+  return ready?code??1:1;
  }
 }
 if(resolve(process.argv[1]??'')===fileURLToPath(import.meta.url)){

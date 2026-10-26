@@ -1,6 +1,6 @@
 ﻿# Display-only trace. No arguments, credentials or private reasoning are rendered.
 foreach($name in @('AgentActivityPanel','AgentActivityScroll','AgentActivityRows','AgentActivityLatest')){$controls[$name]=$window.FindName($name)}
-$script:activityRevision=-1;$script:activityNodes=@{};$script:activityFollow=$true;$script:activityRendering=$false;$script:activityJob=$null
+$script:activityRevision=-1;$script:activityScope='';$script:activityNodes=@{};$script:activityFollow=$true;$script:activityRendering=$false;$script:activityJob=$null
 $controls.ActivityMenuItem=New-Object Windows.Controls.MenuItem
 $controls.ActivityMenuItem.Header='直播展示：智能体过程';$controls.ActivityMenuItem.IsCheckable=$true
 $controls.ActivityMenuItem.ToolTip='仅在大框战况页显示真实执行过程；网页设置中也可以开启。'
@@ -34,6 +34,8 @@ function Update-AgentActivity {
   if(!$result.ok){$controls.HintText.Text='设置保存失败，请在网页设置中重试。'}
  }
  $activity=$script:snapshot.agentActivity
+ $scope=([string]$activity.instanceId)+'|'+([string]$script:snapshot.game)+'|'+([string]$script:snapshot.match)
+ if($scope -ne $script:activityScope){$script:activityScope=$scope;$script:activityRevision=-1;$script:activityFollow=$true;$script:activityNodes=@{};$controls.AgentActivityRows.Children.Clear()}
  $controls.ActivityMenuItem.IsEnabled=($activity.supported -eq $true -and !$script:activityJob)
  if(!$script:activityJob){$controls.ActivityMenuItem.IsChecked=$activity.enabled -eq $true}
  $visible=$activity.enabled -eq $true -and $script:tab -eq 'advice' -and $script:displayMode -eq 'large' -and !$script:collapsed
@@ -79,6 +81,8 @@ function Test-AgentActivitySurface {
  $script:testResult.activityScrollHeld=$controls.AgentActivityScroll.VerticalOffset -lt 1 -and $controls.AgentActivityLatest.Visibility -eq 'Visible'
  $controls.AgentActivityLatest.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)));$window.UpdateLayout()
  $script:testResult.activityLatestWorks=$controls.AgentActivityScroll.ScrollableHeight-$controls.AgentActivityScroll.VerticalOffset -lt 2
+ $activity.instanceId='restarted-backend';$activity.rows=@();Update-AgentActivity
+ $script:testResult.activityRestartClears=$script:activityNodes.Count -eq 0 -and !$controls.AgentActivityRows.Children[0].Text.Contains('读取关键事件')
  Set-Tab 'chat';$script:testResult.activityHiddenChat=$controls.AgentActivityPanel.Visibility -eq 'Collapsed'
  Set-Tab 'advice';Set-DisplayMode 'narrow';$script:testResult.activityHiddenNarrow=$controls.AgentActivityPanel.Visibility -eq 'Collapsed'
  Set-DisplayMode 'large';$activity.enabled=$false;Update-AgentActivity

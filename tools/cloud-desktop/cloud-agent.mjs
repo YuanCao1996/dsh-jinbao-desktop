@@ -69,8 +69,8 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
    while(true){
     signal.throwIfAborted();if(!current())throw fail(409,'Match changed');
     let update;
-    try{update=await call('/tasks/'+task+'?after='+cursor,token,undefined,signal);pollFailures=0;}
-    catch(error){if(error.status===429){progress({event:'rate_limited'});await sleep(error.retryAfterMs,undefined,{signal});continue;}if(!signal.aborted&&(!error.status||[502,503,504].includes(error.status))&&pollFailures++<2){await sleep(250*pollFailures,undefined,{signal});continue;}throw error;}
+    try{update=await call('/tasks/'+task+'?after='+cursor,token,undefined,signal);if(pollFailures)progress({event:'connection_restored'});pollFailures=0;}
+    catch(error){if(error.status===429){progress({event:'rate_limited'});await sleep(error.retryAfterMs,undefined,{signal});continue;}if(!signal.aborted&&(!error.status||[502,503,504].includes(error.status))&&pollFailures++<2){progress({event:'connection_retry'});await sleep(250*pollFailures,undefined,{signal});continue;}throw error;}
     if(!Number.isSafeInteger(update.cursor)||update.cursor<cursor)throw fail(502,'Invalid cursor');cursor=update.cursor;
     const terminalUpdate=['completed','failed','cancelled'].includes(update.status);
     for(const event of (Array.isArray(update.activity)?update.activity:[]).slice(-8)){

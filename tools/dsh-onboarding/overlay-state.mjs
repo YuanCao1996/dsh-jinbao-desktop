@@ -18,6 +18,12 @@ import {isCompletedItem} from '../lol-companion/item-policy.mjs';
 
 const text = value => typeof value === 'string' ? value.slice(0, 4000) : '';
 const list = value => Array.isArray(value) ? value : [];
+// Older LoL recordings list the four teammates separately from the local hero.
+// Current live snapshots already include all five; keep their order untouched.
+const observedAllies=(players,me)=>{
+  const containsSelf=players.some(p=>['puuid','riotId','championAlias','championId','champion'].some(key=>me?.[key]!=null&&me[key]!==''&&p[key]===me[key]));
+  return players.length===4&&me?.champion&&!containsSelf?[me,...players]:players;
+};
 const keyEventLabels = {
   GameStart:'对局开始',GameEnd:'对局结束',Ace:'团灭',TurretKilled:'防御塔被摧毁',
   InhibKilled:'水晶被摧毁',InhibRespawningSoon:'水晶即将重生',InhibRespawned:'水晶已重生',
@@ -29,13 +35,13 @@ export function clock(seconds) {
   return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
 }
 export function initialOverlayState() {
-  return { game: null, mode: '', match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',
+  return { game: null, mode: '', match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',observedMatch:false,
     me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [], equipmentSnapshots:new Map(),
     ownedAugments: [], augmentRounds: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, augmentCaptureReason: '', equipment: '', equipmentStatus:'', equipmentAssumptions: [], augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
 }
 // Pure projection shared by live polling and log replay tests. Epoch time only orders
 // records; the displayed clock always comes from the game's elapsed seconds.
-export function applyOverlayEvent(state, event, file) {
+export function applyOverlayEvent(state, event, file, {continueStart=false}={}) {
   if (!event || typeof event !== 'object') return;
   const at = eventTimestamp(event);
   if (event.broadcast) {
@@ -50,11 +56,19 @@ export function applyOverlayEvent(state, event, file) {
   }
   if (!event.game || at < state.at) return;
   const match = event.match ?? file;
-  if (event.kind === 'game_start' || event.kind === 'match_start' || (event.kind === 'state' && state.match !== match)) {
+  if(!state.match){state.match=match;state.matchStartedAt=at;state.game=event.game;}
+  if (((event.kind === 'game_start' || event.kind === 'match_start')&&!continueStart) || (event.kind==='state' && state.match !== match)) {
     Object.assign(state, initialOverlayState(), { match, matchStartedAt:at, game: event.game });
   }
   state.at = at;
   state.game = event.game;
+  if(state.game==='lol'&&['load','loading_roster'].includes(event.kind)){
+    state.me={...state.me,...event.me};
+    if(Array.isArray(event.allies))state.allies=observedAllies(event.allies,state.me);
+    if(Array.isArray(event.enemies))state.enemies=event.enemies;
+    if(!(state.gameSeconds>0)&&!['InProgress','Reconnect'].includes(state.phase))state.phase='Loading';
+    observeEquipment(state);
+  }
   if(event.kind==='ally_ultimate'){
     const ally=state.allies.find(p=>p.championAlias===event.championAlias&&p.championAlias!==state.me.championAlias);
     if(!ally||event.source!=='hud-indicator'||!Number.isFinite(event.capturedAt)||Math.abs(at-event.capturedAt)>4000)return;
@@ -79,18 +93,21 @@ export function applyOverlayEvent(state, event, file) {
   }
   if (event.kind === 'phase') { state.phase = text(event.phase); if(event.phase==='EndOfGame')state.ended=true; }
   if (event.kind === 'game_start') {
-    state.gameSeconds = Number.isFinite(event.gameTime) ? event.gameTime : null;
-    state.me = event.me ?? {};
+    state.gameSeconds = Number.isFinite(event.gameTime) ? event.gameTime : state.gameSeconds;
+    state.me = {...state.me,...event.me};
     if(state.game==='generic'){state.me.genericState=event.genericState;state.phase='Observing';}
-    state.allies = list(event.allies); state.enemies = list(event.enemies);
+    if(Array.isArray(event.allies))state.allies=state.game==='lol'?observedAllies(event.allies,state.me):event.allies;
+    if(Array.isArray(event.enemies))state.enemies=event.enemies;
     observeEquipment(state);
   }
   if (event.kind === 'state') {
     const s = event.state ?? {};
     state.me = { ...state.me, ...event.me, ...s };
-    if (Number.isFinite(s.time)) state.gameSeconds = s.time;
-    state.allies = Array.isArray(event.allies) ? event.allies : state.allies;
-    state.enemies = Array.isArray(event.enemies) ? event.enemies : state.enemies;
+    if (Number.isFinite(s.time)) {state.gameSeconds = s.time;if(state.game==='lol'&&s.time>0&&!state.ended)state.phase='InProgress';}
+    const allies=Array.isArray(event.allies)?event.allies:state.game==='lol'&&Array.isArray(s.allyPlayers)?s.allyPlayers:null;
+    const enemies=Array.isArray(event.enemies)?event.enemies:state.game==='lol'&&Array.isArray(s.enemyPlayers)?s.enemyPlayers:null;
+    if(allies)state.allies=state.game==='lol'?observedAllies(allies,state.me):allies;
+    if(enemies)state.enemies=enemies;
     state.enemyItems = list(s.enemyItems);
     state.equipment = text(s.build) || state.equipment;
     state.teamfight = text(s.teamfight?.text) || state.teamfight;
@@ -168,13 +185,15 @@ export function createOverlayRouter(limit = 64) {
         if(states.size>=limit){const removable=[...states].find(([,candidate])=>candidate!==active);if(removable)states.delete(removable[0]);}
         states.set(key,state);
       }
-      applyOverlayEvent(state,{...event,match:identity.match},file);
+      const continueStart=event.game==='lol'&&event.kind==='game_start'&&!event.match&&!identity.boundary&&state.match===identity.match&&!state.ended;
+      applyOverlayEvent(state,{...event,match:identity.match},file,{continueStart});
       state.source=file;
-      const isMatch=event.kind==='state'||event.kind==='game_start'||event.kind==='match_start'||event.kind==='champ_select';
+      const isMatch=['state','game_start','match_start','champ_select','load','loading_roster'].includes(event.kind);
+      if(isMatch)state.observedMatch=true;
       if(isMatch&&(!active.match||active===state||active.ended||(active.game==='generic'&&['lol','wzry'].includes(event.game)&&at>=active.at)||
           (at>=active.at&&(event.game===active.game||at-active.at>=30000))))active=state;
       if(active.ended&&event.kind!=='champ_select_end'){
-        const next=[...states.values()].filter(candidate=>candidate!==active&&!candidate.ended&&candidate.match&&at-candidate.at<30000)
+        const next=[...states.values()].filter(candidate=>candidate!==active&&!candidate.ended&&candidate.observedMatch&&candidate.match&&at-candidate.at<30000)
           .sort((a,b)=>b.at-a.at)[0];
         if(next)active=next;
       }
@@ -306,9 +325,9 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   }
   async function performRefresh() {
     const selecting=state.phase==='ChampSelect';
-    const champion = state.me.champion||(selecting?rosterChampions(state)[0]:null);
+    const champion = state.me.champion;
     const game = state.game;
-    if (!champion) throw Object.assign(Error('请先进入对局'), { status: 409 });
+    if (!champion&&!rosterChampions(state).length) throw Object.assign(Error('请先进入对局'), { status: 409 });
     const key = contextKey();
     const baseKey = baseContextKey();
     const force = forceRefresh; forceRefresh = false;
@@ -322,7 +341,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
     try {
       const offered = offerNames(state.offers).slice(0,3);
       const base = async () => {
-        if(selecting||(!force&&(cache.baseLoaded||Date.now()<(cache.baseRetryAt??0))))return;
+        if(selecting||!champion||(!force&&(cache.baseLoaded||Date.now()<(cache.baseRetryAt??0))))return;
         cache.baseRetryAt=Date.now()+knowledgeRetryMs;
         const results=await Promise.allSettled(game==='wzry'?[search({game,query:champion,limit:3})]:[
           search({game,query:champion,filter:{_type:'coreBuilds'},limit:3}),
@@ -344,7 +363,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
           const found=(result.results??[]).map(item=>({...item.data,_viewKind:'hero'})).filter(row=>heroStatMatches(row,name));
           if(found.length)cache.heroes.set(name,found);
         }catch(e){failed(e);}
-      }),...offered.filter(name=>game==='lol'&&(force||!cache.candidates.has(name))).map(async name=>{
+      }),...offered.filter(name=>game==='lol'&&champion&&(force||!cache.candidates.has(name))).map(async name=>{
         try{
         const result=await search({game,query:champion,filter:{_type:'augments',name},limit:1});
         const rows=(result.results??[]).map(item=>item.data);if(rows.length)cache.candidates.set(name,rows);
@@ -362,7 +381,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       retryKnowledgeAt=Date.now()+(errors.includes(429)?Math.max(60000,knowledgeRetryMs):knowledgeRetryMs);
       updateAugmentRecommendations(state,knowledge.rows??[]);
       await flush();
-      if(!stillCurrent()&&state.me.champion&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
+      if(!stillCurrent()&&rosterChampions(state).length&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
     }
   }
   async function scan() {
@@ -416,9 +435,9 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       const key = contextKey();
       if(key!==knowledgeKey){
         knowledgeKey=key;knowledge=cached.key===baseContextKey()?{rows:knowledge.rows??[]}:{};
-        if((state.me.champion||(state.phase==='ChampSelect'&&rosterChampions(state).length))&&!state.ended&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
+        if(rosterChampions(state).length&&!state.ended&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
       }
-      else if(!refreshTask&&Date.now()>=retryKnowledgeAt&&state.me.champion&&!state.ended&&Date.now()-state.at<30000&&(!cached.baseLoaded||rosterChampions(state).some(name=>!cached.heroes.has(name))||offerNames(state.offers).some(name=>!cached.candidates.has(name)))){
+      else if(!refreshTask&&Date.now()>=retryKnowledgeAt&&rosterChampions(state).length&&!state.ended&&Date.now()-state.at<30000&&(!cached.baseLoaded||rosterChampions(state).some(name=>!cached.heroes.has(name))||offerNames(state.offers).some(name=>!cached.candidates.has(name)))){
         retryKnowledgeAt=Date.now()+knowledgeRetryMs;void refresh(false).catch(()=>{});
       }
       await flush();

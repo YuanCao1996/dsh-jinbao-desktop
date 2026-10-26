@@ -52,6 +52,6 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
    if(plan.stage==='augment')offers=offerKey;
    if(plan.stage==='postAugment')owned=ownedKey;
    if(plan.stage==='selection')selection=selectionKey;
-  }catch(error){retryAt=now()+15000;await status(view(),'failed',error.status===429?'策略请求受限，稍后自动重试':error.status===401?'登录已失效，请在设置中重新登录':error.status===504?'策略分析超时，稍后自动重试':'策略生成失败，稍后自动重试；可在设置查看诊断',{code:typeof error.code==='string'&&/^[a-z_0-9]{1,80}$/.test(error.code)?error.code:'agent_request_failed',retryAt});}finally{busy=false;}
+  }catch(error){const interrupted=error.code==='agent_preempted';retryAt=now()+(interrupted?1000:15000);await status(view(),interrupted?'interrupted':'failed',interrupted?'已优先处理手动请求，稍后继续生成策略':error.status===429?'策略请求受限，稍后自动重试':error.status===401?'登录已失效，请在设置中重新登录':error.status===504?'策略分析超时，稍后自动重试':'策略生成失败，稍后自动重试；可在设置查看诊断',{code:typeof error.code==='string'&&/^[a-z_0-9]{1,80}$/.test(error.code)?error.code:'agent_request_failed',retryAt});}finally{busy=false;}
  },close(){closed=true;}};
 }

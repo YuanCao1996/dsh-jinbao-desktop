@@ -54,7 +54,9 @@ export async function createAgentActivity({stateDir,getView=()=>null,now=Date.no
    }
    const type=event.event,id=task.id;
    if(type==='task_queued')row(id,task,'等待执行','queued');
+   else if(type==='task_waiting_handoff')row(id,task,'等待上一任务退出，随后处理','queued');
    else if(type==='task_started')row(id,task,'正在分析本局','running');
+   else if(type==='cancellation_wait')row(id,task,'正在停止旧任务，优先处理手动请求','queued');
    else if(type==='tool_start'){
     const index=Number.isSafeInteger(event.index)?event.index:++task.tools;task.lastTool=index;
     row(id+':tool:'+index,task,tools[event.name]??'执行游戏工具','running');

@@ -32,7 +32,7 @@ export function cloudContext(memory,game,match,{eventQuery=false,observationPlan
 export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgress=()=>{},capture,queryEvents,observationPlan,memoryTools,
  getActivityEnabled=()=>false,serviceBaseUrl='https://api.jinbaoai.top',apiPrefix='/desktop/agent',deviceId='default',fetchImpl=fetch,pollMs=800,timeoutMs=90000}){
  if(!['/desktop/agent','/desktop/agent-preview'].includes(apiPrefix))throw Error('Invalid Agent route');
- const service=serviceUrl(serviceBaseUrl);const lifetime=new AbortController();let busy=false,settled=Promise.resolve(),finish=()=>{},wireRevision=0,wireKey='',wireValue;
+ const service=serviceUrl(serviceBaseUrl);const lifetime=new AbortController(),teardown=new AbortController();let busy=false,settled=Promise.resolve(),finish=()=>{},wireRevision=0,wireKey='',wireValue,waitForCancellation=false;
  function transportContext(memory,request){
   const value=cloudContext(memory,request.game,request.match,{eventQuery:!!queryEvents,observationPlan:!!observationPlan,userMemory:!!memoryTools});
   if(getActivityEnabled())value.client_context.capabilities.agent_activity_v1=true;
@@ -117,8 +117,21 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
     await sleep(getActivityEnabled()?Math.min(pollMs,500):pollMs,undefined,{signal});
    }
   }catch(error){if(signal.aborted&&!lifetime.signal.aborted)throw fail(504,'Agent analysis timed out');throw error;}finally{
-   if(task&&!terminal&&token)await call('/tasks/'+task+'/cancel',token,{},AbortSignal.timeout(5000)).catch(()=>{});
+   if(task&&!terminal&&token){
+    try{
+     let receipt=await call('/tasks/'+task+'/cancel',token,{},AbortSignal.timeout(5000));
+     // A cancel acknowledgement only sets the server's cancellation flag. Keep
+     // the next manual turn behind the old task until its worker is terminal.
+     if(waitForCancellation&&['queued','running'].includes(receipt.status)){
+      progress({event:'cancellation_wait'});const cleanup=AbortSignal.any([teardown.signal,AbortSignal.timeout(45000)]);
+      while(['queued','running'].includes(receipt.status)){
+       receipt=await call('/tasks/'+task+'?after=0',token,undefined,cleanup);
+       if(['queued','running'].includes(receipt.status))await sleep(500,undefined,{signal:cleanup});
+      }
+     }
+    }catch{}
+   }
    busy=false;finish();
   }
- },busy:()=>busy,async close(){lifetime.abort();await settled;}};
+ },busy:()=>busy,abortRetirement(){teardown.abort();},async close({reason}={}){waitForCancellation=reason==='preempt';if(!waitForCancellation)teardown.abort();lifetime.abort();await settled;}};
 }

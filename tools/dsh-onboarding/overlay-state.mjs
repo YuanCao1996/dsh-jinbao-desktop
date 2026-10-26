@@ -286,7 +286,7 @@ export function overlayView(state, knowledge = {}) {
   };
 }
 
-export async function createOverlayService({ stateDir, agentChat, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000 }) {
+export async function createOverlayService({ stateDir, agentChat, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000,activity }) {
   search=createKnowledgeSearch(search);
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
@@ -301,9 +301,10 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   let retryKnowledgeAt=Infinity;
   const contextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+state.me.champion+':'+JSON.stringify([offerNames(state.offers).sort(),[...state.ownedAugments].sort(),rosterChampions(state).sort()]);
   const baseContextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+(state.phase==='ChampSelect'?'selection':state.me.champion);
+  const view=()=>({...overlayView(state,knowledge),agentActivity:activity?.snapshot(state)??{supported:false,enabled:false,revision:0,rows:[]}});
   async function save() {
     if (closed) return;
-    await writeFile(output + '.tmp', JSON.stringify(overlayView(state, knowledge)), { mode: 0o600 });
+    await writeFile(output + '.tmp', JSON.stringify(view()), { mode: 0o600 });
     await rename(output + '.tmp', output);
     await writeFile(join(stateDir,'overlay-chat.json'),JSON.stringify({game:state.game,match:state.match,matchStartedAt:state.matchStartedAt,chat:state.chat}),{mode:0o600});
     await memory.snapshot(state, knowledge.rows ?? []);
@@ -447,7 +448,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   await scan();
   const timer = setInterval(scan, pollMs); timer.unref();
   return {
-    view: () => overlayView(state, knowledge), refresh,
+    view, refresh,
     async confirm({id,name,dismiss=false,timeoutDefault=false}={}){
       const prompt=augmentConfirmation(state,knowledge.rows??[]);
       if(!prompt||id!==prompt.id||(!dismiss&&!prompt.options.some(o=>o.name===name)))throw Object.assign(Error('确认已过期或选项已变化'),{status:409});

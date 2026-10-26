@@ -6,6 +6,8 @@
 
 ## 独立桌面版预览（v0.2.3）
 
+开发中的 0.2.4 候选版新增[直播智能体过程展示](docs/AGENT_ACTIVITY_PREVIEW.md)，默认关闭；下面的公开下载暂未包含此功能。
+
 [下载独立版预览 ZIP](https://api.jinbaoai.top/downloads/jinbao/v0.2.3/jinbao-desktop-windows.zip)。完整解压后双击 `开始使用.cmd`，自动打开悬浮窗与设置页，等待进入游戏。
 
 - 默认使用金宝官方云端 DSH，**无需另装 DSH Desktop**。自动尝试已开放的免登录体验名额；名额不足或需要固定账号时使用邮箱登录。额度由服务器管理。

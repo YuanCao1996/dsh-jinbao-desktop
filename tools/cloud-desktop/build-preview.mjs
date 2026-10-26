@@ -33,7 +33,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
   'tools/jinbao-launcher/update-public.pem','tools/jinbao-launcher/extract-update.ps1',
   'tools/jinbao-launcher/install-host.ps1',
   'tools/game-observation/windows/worker.ps1','tools/game-observation/windows/WindowCapture.cs',
-  ...['start-overlay','strategy-overlay','confirmation-countdown','overlay-modes','overlay-ui','overlay-playback','capture-coordination'].map(n=>'tools/desktop-release/'+n+'.ps1'),
+  ...['start-overlay','strategy-overlay','confirmation-countdown','overlay-modes','overlay-ui','overlay-playback','capture-coordination','agent-activity'].map(n=>'tools/desktop-release/'+n+'.ps1'),
   'LICENSE','third-party/node-LICENSE.txt','tools/cloud-desktop/Launcher.cs'
  ])await include(name);
  await mkdir(out); // Deliberately refuses to overwrite an existing artifact.
@@ -42,7 +42,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
  await copyFile(runtime,join(out,'runtime/node.exe'));
  await copyFile(join(root,'third-party/node-LICENSE.txt'),join(out,'runtime/LICENSE'));
  await writeFile(join(out,'package.json'),JSON.stringify({name:'jinbao-cloud-preview',private:true,type:'module',version}));
- await writeFile(join(out,'tools/dsh-onboarding/release-notes.json'),JSON.stringify({version:version+' (独立预览)',notes:"独立桌面版修复更新：\n• 历史日志回放修复：加载结束进入对局；兼容旧阵容/装备字段，避免重复开局清空同局海克斯。\n• 暂未识别本人时也查询已知双方英雄胜率，不冒认玩家英雄。\n• 使用原生 jinbao.exe 启动，不再执行 VBS；保留旧更新器要求的纯注释占位文件。\n• 修复强化方案因无关散件变化被撤销、战况长期等待；三选一不再吞掉同时发生的已选强化任务。\n• 自动教练不再反复污染手动聊天历史；中文长会话继续使用 DSH 原生压缩和本局日志按需检索。\n• 胜率与英雄 Top10 基础查询独立于自主工具检索额度；英雄、Top10与候选空结果均可重试，海克斯查询优先。\n• 装备动态仅记录成装，敌方成装变化触发针对性建议；海克斯方案与装备建议联动战况。\n• 修复中文交互确认乱码、短暂关闭强化面板被误判为新轮次；独立OCR双重确认的单槽重掷立即更新。\n• 截图期间同时避让主窗、确认弹窗和设置菜单，拷贝像素后立即恢复。\n• 新增 Ctrl+Shift+F7/F8/F9/F10 备用快捷键及注册、输入诊断。\n• 新增实验性队友大招画面提醒：核对我方头像、连续识别就绪标记，过滤死亡队友；隐藏或未知时不猜冷却。\n• 保留用户记忆、邮箱登录、首次配对与独立签名更新。\n\n仍为预览版。原生入口未作代码签名，尚未通过用户所用杀毒软件复测；HUD 多布局及游戏前台输入仍需实战验收。"}));
+ await writeFile(join(out,'tools/dsh-onboarding/release-notes.json'),JSON.stringify({version:version+' (独立预览)',notes:"独立桌面版修复更新：\n• 新增直播展示开关：大框战况页实时显示真实工具调用、耗时及公开回答草稿，默认关闭；不展示原始推理，不回灌上下文。\n• 历史日志回放修复：加载结束进入对局；兼容旧阵容/装备字段，避免重复开局清空同局海克斯。\n• 暂未识别本人时也查询已知双方英雄胜率，不冒认玩家英雄。\n• 使用原生 jinbao.exe 启动，不再执行 VBS；保留旧更新器要求的纯注释占位文件。\n• 修复强化方案因无关散件变化被撤销、战况长期等待；三选一不再吞掉同时发生的已选强化任务。\n• 自动教练不再反复污染手动聊天历史；中文长会话继续使用 DSH 原生压缩和本局日志按需检索。\n• 胜率与英雄 Top10 基础查询独立于自主工具检索额度；英雄、Top10与候选空结果均可重试，海克斯查询优先。\n• 装备动态仅记录成装，敌方成装变化触发针对性建议；海克斯方案与装备建议联动战况。\n• 修复中文交互确认乱码、短暂关闭强化面板被误判为新轮次；独立OCR双重确认的单槽重掷立即更新。\n• 截图期间同时避让主窗、确认弹窗和设置菜单，拷贝像素后立即恢复。\n• 新增 Ctrl+Shift+F7/F8/F9/F10 备用快捷键及注册、输入诊断。\n• 新增实验性队友大招画面提醒：核对我方头像、连续识别就绪标记，过滤死亡队友；隐藏或未知时不猜冷却。\n• 保留用户记忆、邮箱登录、首次配对与独立签名更新。\n\n仍为预览版。原生入口未作代码签名，尚未通过用户所用杀毒软件复测；HUD 多布局及游戏前台输入仍需实战验收。"}));
  const compiler=join(process.env.SystemRoot??'C:/Windows','Microsoft.NET/Framework64/v4.0.30319/csc.exe');
  await promisify(execFile)(compiler,['/nologo','/target:winexe','/optimize+','/reference:System.Windows.Forms.dll','/out:'+join(out,'jinbao.exe'),join(root,'tools/cloud-desktop/Launcher.cs')],{windowsHide:true});
  // Old signed-update verifiers require this filename. Keep only an inert
@@ -57,6 +57,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
   '3. 官方服务默认自动尝试已开放的免登录体验名额；也可使用邮箱登录。进入游戏即可，无需安装 Node.js 或 DSH Desktop。',
   '4. 更新预览包时，确认退出旧窗口后，从新文件夹启动。登录保存在当前用户的 .jinbao-cloud-preview 目录中，同一 Windows 用户无需因换包重新登录（凭据有效时）。','',
   '## 悬浮窗操作','',
+  '- 设置 → 直播展示：可开启智能体过程，仅在大框战况页显示；默认关闭。',
   '- 设置 → 显示与播报：大框、窄条、字幕、横向滚动或静默小球。',
   '- Ctrl+Alt+↑：展开；Ctrl+Alt+↓：收起并吸附右侧。',
   '- Ctrl+Alt+← / →：上一页 / 下一页。',

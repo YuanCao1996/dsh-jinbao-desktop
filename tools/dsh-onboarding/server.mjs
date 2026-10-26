@@ -14,7 +14,7 @@ const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buff
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
 async function body(req,max=512*1024,onBytes){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){onBytes?.(declared);req.resume();throw error(413);}let size=0;const chunks=[];for await(const c of req){size+=c.length;onBytes?.(size);if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
-export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource,userMemory}) {
+export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource,userMemory,activity}) {
  if(!Number.isInteger(coachPort)||coachPort<1||coachPort>65535)throw Error('Invalid coach port');
  const coachOrigin='http://127.0.0.1:'+coachPort;
  const service=serviceUrl(serviceBaseUrl),nonce=randomBytes(32).toString('hex');
@@ -112,7 +112,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
    activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000,updateBlocked:!!snapshot.match&&!snapshot.ended&&(snapshot.gameTime!=='等待对局'||snapshot.phase==='ChampSelect')&&Date.now()-snapshot.updatedAt<30000};
  }
- const overlay=await createOverlayService({stateDir,
+ const overlay=await createOverlayService({stateDir,activity,
   agentChat:async request=>{
    if(config.mode==='demo')throw error(409);
    if(config.mode==='cloud'&&cloudAgent)return cloudAgent.ask(request);
@@ -174,6 +174,12 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    const memoryPage=/^\/api\/memory\/(lol|wzry|generic)$/.exec(req.url);
    if(memoryPage&&req.method==='GET'){send(res,200,{game:memoryPage[1],preferences:await memories.list(memoryPage[1])});return;}
    if(req.url==='/api/overlay'&&req.method==='GET'){send(res,200,overlay.view());return;}
+   if(req.url==='/api/agent-activity'&&req.method==='GET'){send(res,200,activity?.status()??{supported:false,enabled:false});return;}
+   if(req.url==='/api/agent-activity'&&req.method==='POST'){
+    if(!activity)throw error(409);if(!String(req.headers['content-type']).startsWith('application/json'))throw error(400);
+    const value=await body(req,1024);if(Object.keys(value).length!==1||typeof value.enabled!=='boolean')throw error(400);
+    send(res,200,await activity.setEnabled(value.enabled));return;
+   }
    if(req.url==='/api/observation/windows'&&req.method==='GET'&&observation){send(res,200,{windows:await observation.list()});return;}
    if(req.url==='/api/overlay/confirm'&&req.method==='POST'){send(res,200,await overlay.confirm(await body(req,4096)));return;}
    if(['/api/overlay/ask','/api/overlay/refresh'].includes(req.url)&&req.method==='POST'){
@@ -216,7 +222,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     let releaseNotes=null;try{const bundled=JSON.parse(await readFile(new URL('./release-notes.json',import.meta.url),'utf8'));if(bundled.version===version)releaseNotes=bundled.notes;}catch{}
     let maintenance=null;try{maintenance=JSON.parse(await readFile(join(stateDir,'maintenance-status.json'),'utf8'));}catch{}
     let emailDisplay=null;if(account?.loginMethod==='email')try{emailDisplay=JSON.parse(await readFile(join(stateDir,'email-account.json'),'utf8')).display;}catch{}
-    send(res,200,{...config,agentRuntime:runtimeId??(cloudAgent?'cloud-preview':'local-dsh'),observation:observation?.status(),logSource:logSource?.status(),nativeInstallation:nativeInstaller?.status(),version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    send(res,200,{...config,agentActivity:activity?.status()??{supported:false,enabled:false},agentRuntime:runtimeId??(cloudAgent?'cloud-preview':'local-dsh'),observation:observation?.status(),logSource:logSource?.status(),nativeInstallation:nativeInstaller?.status(),version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);

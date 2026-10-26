@@ -30,11 +30,12 @@ export function cloudContext(memory,game,match,{eventQuery=false,observationPlan
  return value;
 }
 export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgress=()=>{},capture,queryEvents,observationPlan,memoryTools,
- serviceBaseUrl='https://api.jinbaoai.top',apiPrefix='/desktop/agent',deviceId='default',fetchImpl=fetch,pollMs=800,timeoutMs=90000}){
+ getActivityEnabled=()=>false,serviceBaseUrl='https://api.jinbaoai.top',apiPrefix='/desktop/agent',deviceId='default',fetchImpl=fetch,pollMs=800,timeoutMs=90000}){
  if(!['/desktop/agent','/desktop/agent-preview'].includes(apiPrefix))throw Error('Invalid Agent route');
  const service=serviceUrl(serviceBaseUrl);const lifetime=new AbortController();let busy=false,settled=Promise.resolve(),finish=()=>{},wireRevision=0,wireKey='',wireValue;
  function transportContext(memory,request){
   const value=cloudContext(memory,request.game,request.match,{eventQuery:!!queryEvents,observationPlan:!!observationPlan,userMemory:!!memoryTools});
+  if(getActivityEnabled())value.client_context.capabilities.agent_activity_v1=true;
   value.client_context.task={automatic:request.automatic===true,topic:['advice','equipment','chat'].includes(request.topic)?request.topic:'chat'};
   if(value.current_match_state.status==='unknown')delete value.current_match_state.captured_at_ms;
   const key=JSON.stringify(value);
@@ -52,6 +53,7 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
   settled=new Promise(resolve=>{finish=resolve;});
   let task,token,terminal=false;const signal=AbortSignal.any([lifetime.signal,AbortSignal.timeout(timeoutMs)]);
   const current=()=>isCurrent(request.game,request.match);
+  const progress=event=>onProgress({...event,game:request.game,match:request.match,topic:request.topic,requestId:request.activityId});
   try{
    token=await getToken();if(!token)throw fail(401,'Login required');if(!current())throw fail(409,'Match changed');
    const session='desktop-'+createHash('sha256').update(JSON.stringify([deviceId,request.game,request.match])).digest('hex');
@@ -68,11 +70,14 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
     signal.throwIfAborted();if(!current())throw fail(409,'Match changed');
     let update;
     try{update=await call('/tasks/'+task+'?after='+cursor,token,undefined,signal);pollFailures=0;}
-    catch(error){if(error.status===429){onProgress({game:request.game,match:request.match,event:'rate_limited'});await sleep(error.retryAfterMs,undefined,{signal});continue;}if(!signal.aborted&&(!error.status||[502,503,504].includes(error.status))&&pollFailures++<2){await sleep(250*pollFailures,undefined,{signal});continue;}throw error;}
+    catch(error){if(error.status===429){progress({event:'rate_limited'});await sleep(error.retryAfterMs,undefined,{signal});continue;}if(!signal.aborted&&(!error.status||[502,503,504].includes(error.status))&&pollFailures++<2){await sleep(250*pollFailures,undefined,{signal});continue;}throw error;}
     if(!Number.isSafeInteger(update.cursor)||update.cursor<cursor)throw fail(502,'Invalid cursor');cursor=update.cursor;
     const terminalUpdate=['completed','failed','cancelled'].includes(update.status);
+    for(const event of (Array.isArray(update.activity)?update.activity:[]).slice(-8)){
+     if(event.event==='public_text'&&typeof event.text==='string'&&event.text.length<=1800&&Number.isSafeInteger(event.seq))progress({event:'public_text',text:event.text,reset:true,seq:event.seq,channel:'activity'});
+    }
     for(const event of update.events??[]){
-     onProgress({game:request.game,match:request.match,...event});
+     progress(event);
      if(!terminalUpdate&&event.event==='memory_requested'&&!handled.has(event.request_id)){
       if(!/^[a-f0-9]{32}$/.test(event.request_id??''))throw fail(502,'Invalid memory request');handled.add(event.request_id);
       let result={status:'unavailable',reason:'memory_unavailable'};
@@ -107,9 +112,9 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
     const latest=transportContext(await getContext(request.game,request.match),request);
     if(latest.current_match_state.revision>revision&&Date.now()>=nextContextAt){
      try{await call('/context',token,{session_id:session,context:latest},signal);revision=latest.current_match_state.revision;nextContextAt=Date.now()+2000;}
-     catch(error){if(error.status!==429)throw error;nextContextAt=Date.now()+error.retryAfterMs;onProgress({game:request.game,match:request.match,event:'rate_limited'});}
+     catch(error){if(error.status!==429)throw error;nextContextAt=Date.now()+error.retryAfterMs;progress({event:'rate_limited'});}
     }
-    await sleep(pollMs,undefined,{signal});
+    await sleep(getActivityEnabled()?Math.min(pollMs,500):pollMs,undefined,{signal});
    }
   }catch(error){if(signal.aborted&&!lifetime.signal.aborted)throw fail(504,'Agent analysis timed out');throw error;}finally{
    if(task&&!terminal&&token)await call('/tasks/'+task+'/cancel',token,{},AbortSignal.timeout(5000)).catch(()=>{});

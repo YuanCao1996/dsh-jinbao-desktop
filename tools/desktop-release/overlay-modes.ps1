@@ -52,6 +52,7 @@ function Set-DisplayMode([string]$mode){
  else{$controls.ResizeGrip.Visibility='Visible';$controls.ResizeGrip.Cursor='SizeNWSE';$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';$window.ResizeMode='CanResize';$script:unread=0;$controls.BubbleLabel.Text='金宝'}
  $window.Left=[Math]::Max($area.Left,[Math]::Min($window.Left,$area.Right-$window.Width))
  Save-DisplayMode
+ if(Get-Command Update-AgentActivity -ErrorAction SilentlyContinue){Update-AgentActivity}
 }
 function Set-HighlightedText($view,[string]$value){
  if($view.Tag -eq $value){return};$view.Tag=$value

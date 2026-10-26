@@ -2,6 +2,13 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {createLocalAgent} from '../local-agent.mjs';
 
+test('native BYOK really streams public text while keeping private reasoning internal',{skip:!process.env.JINBAO_TEST_DSH_MODULES,timeout:15000},async()=>{
+ const stateDir=await mkdtemp(join(tmpdir(),'jinbao-native-stream-'));let agent,feed,seenResolve;const events=[],seen=new Promise(r=>seenResolve=r);const encode=v=>new TextEncoder().encode('data: '+JSON.stringify(v)+'\n\n');
+ try{agent=await createLocalAgent({stateDir,moduleRoot:process.env.JINBAO_TEST_DSH_MODULES,getConfig:async()=>({baseUrl:'https://model.example/v1',model:'fixture'}),getKey:async()=> 'fixture',getContext:async()=>({}),getActivityEnabled:()=>true,onProgress:e=>{events.push(e);if(e.event==='public_text')seenResolve();},fetchImpl:async(_url,o)=>{assert.equal(JSON.parse(o.body).stream,true);return new Response(new ReadableStream({start(c){feed=c;c.enqueue(encode({choices:[{index:0,delta:{reasoning_content:'PRIVATE-REASONING',content:'先等队友控制。'}}]}));}}),{headers:{'content-type':'text/event-stream'}});}});
+ const answer=agent.ask({game:'lol',match:'one',activityId:'stream-task',topic:'chat',question:'怎么打'});await seen;assert.equal(agent.busy(),true);assert.ok(!JSON.stringify(events).includes('PRIVATE-REASONING'));assert.equal(events.find(e=>e.event==='public_text').requestId,'stream-task');feed.enqueue(encode({choices:[{index:0,delta:{},finish_reason:'stop'}]}));feed.close();assert.equal(await answer,'先等队友控制。');
+ }finally{await agent?.close();await rm(stateDir,{recursive:true,force:true});}
+});
+
 test('native BYOK authentication failures retain their status and switching matches interrupts an in-flight model',{skip:!process.env.JINBAO_TEST_DSH_MODULES,timeout:15000},async()=>{
  const stateDir=await mkdtemp(join(tmpdir(),'jinbao-native-failure-'));let match='one',mode='denied',started=false,aborted=false,agent;
  try{

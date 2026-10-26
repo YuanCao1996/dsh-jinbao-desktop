@@ -84,6 +84,13 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <WrapPanel x:Name="ConfirmationChoices"/>
     </StackPanel>
     <Button x:Name="LatestMessageButton" DockPanel.Dock="Bottom" Content="回到最新消息 ↓" FontSize="11" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,4"/>
+    <Border x:Name="AgentActivityPanel" DockPanel.Dock="Bottom" Visibility="Collapsed" BorderBrush="#34424F" BorderThickness="0,1,0,0" Margin="4,8,4,0" Padding="0,6,0,0">
+     <DockPanel MaxHeight="180">
+      <TextBlock DockPanel.Dock="Top" Text="智能体动态 · 实时" Foreground="#D6B278" FontSize="11" Margin="0,0,0,4"/>
+      <Button x:Name="AgentActivityLatest" DockPanel.Dock="Bottom" Content="回到最新过程 ↓" FontSize="10" Padding="6,2" HorizontalAlignment="Center" Visibility="Collapsed"/>
+      <ScrollViewer x:Name="AgentActivityScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False"><StackPanel x:Name="AgentActivityRows"/></ScrollViewer>
+     </DockPanel>
+    </Border>
     <ScrollViewer x:Name="PageScroll" Background="Transparent" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" CanContentScroll="False" PanningMode="VerticalOnly">
      <StackPanel>
      <StackPanel x:Name="RichContent" Visibility="Collapsed" Margin="2,2,8,0"/>
@@ -349,6 +356,7 @@ function Update-Page {
  }
  $controls.ChatPanel.Visibility=if($script:tab -eq 'chat'){'Visible'}else{'Collapsed'}
  Update-OverlaySurface
+ if(Get-Command Update-AgentActivity -ErrorAction SilentlyContinue){Update-AgentActivity}
  $scroll.UpdateLayout()
  if($script:tab -eq 'events' -or $followChat -or (!$samePage -and $script:tab -eq 'chat' -and !$script:scrollPositions.ContainsKey('chat'))){$scroll.ScrollToEnd()}
  elseif($samePage){$scroll.ScrollToVerticalOffset($offset)}
@@ -411,6 +419,7 @@ function Update-State {
   $controls.SummaryText.Text=[string]$next.summary
   if($next.status){$controls.HintText.Text=[string]$next.status}
   Update-OverlayComposer
+  Update-AgentActivity
   if($changed){Update-Page}
  }catch{}
  try{
@@ -534,7 +543,7 @@ function Update-Drag([double]$x,[double]$y,[bool]$pressed){
  }
 }
 function Test-PointerHotzone([Windows.Point]$screenPoint) {
- $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.LatestMessageButton,$controls.ChatPanel,$controls.ResizeGrip,$controls.ConfirmationPanel,$controls.NarrowPanel)}
+ $targets=if($script:collapsed){@($controls.Bubble)}else{@($controls.Header,$controls.ActionButton,$controls.Tabs,$controls.Footer,$controls.PageScroll,$controls.LatestMessageButton,$controls.ChatPanel,$controls.ResizeGrip,$controls.ConfirmationPanel,$controls.AgentActivityPanel,$controls.NarrowPanel)}
  foreach($target in $targets){
   if(!$target.IsVisible){continue}
   $local=$target.PointFromScreen($screenPoint)
@@ -626,6 +635,7 @@ $window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
 . (Join-Path $PSScriptRoot 'confirmation-countdown.ps1')
 . (Join-Path $PSScriptRoot 'overlay-modes.ps1')
 . (Join-Path $PSScriptRoot 'overlay-ui.ps1')
+. (Join-Path $PSScriptRoot 'agent-activity.ps1')
 Set-Tab $PreviewTab;Update-State
 try{
  if($PreviewPath){
@@ -784,6 +794,7 @@ try{
     [IO.File]::WriteAllText($stateFile,($selectionFixture|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false));Update-State
     $script:testResult.toolProgressVisible=$controls.ChatStatusText.Text -eq '已联网搜索，继续分析…' -and $controls.ChatStatusText.Visibility -eq 'Visible'
     $script:job=$null
+    Test-AgentActivitySurface
     $script:testExitChoice=$false;$controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.exitCancelKeepsWindow=!$script:closing -and !$script:exitApproved
     # Exercise the actual HWND hook, without sending keys to any other app.

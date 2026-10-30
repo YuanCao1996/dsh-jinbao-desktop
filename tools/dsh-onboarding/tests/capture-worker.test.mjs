@@ -21,3 +21,10 @@ test('OCR timeout restarts worker; aborted capture releases its process',async()
  const abortable=createAugmentCaptureWorker({spawnImpl:()=>child});const pending=abortable.capture(controller.signal);controller.abort();
  await assert.rejects(pending,/stopped/);assert.equal(child.killed,true);abortable.close();
 });
+
+test('title focus is a bounded command and invalid focus never starts a child',async()=>{
+ const commands=[];let starts=0;
+ const worker=createAugmentCaptureWorker({spawnImpl:()=>{starts++;const child=new EventEmitter();child.stdout=new PassThrough();child.kill=()=>{};child.stdin=new Writable({write(chunk,_encoding,done){commands.push(chunk.toString());child.stdout.write('{"available":true}\n');done();}});return child;}});
+ await assert.rejects(worker.capture(undefined,{focus:'invalid'}));assert.equal(starts,0);
+ await worker.capture(undefined,{focus:'titles'});await worker.capture();assert.deepEqual(commands,['capture:titles\n','capture\n']);worker.close();
+});

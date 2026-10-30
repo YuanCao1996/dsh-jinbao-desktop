@@ -118,9 +118,15 @@ namespace GenericGameCapture {
                     graphics.Clear(Color.Magenta);
                     IntPtr hdc = graphics.GetHdc();
                     bool ok;
-                    try { ok = PrintWindow(selected, hdc, 1); } finally { graphics.ReleaseHdc(hdc); }
+                    try { ok = PrintWindow(selected, hdc, 3); } finally { graphics.ReleaseHdc(hdc); }
                     if (!ok) throw new InvalidOperationException("window_render_unavailable");
                 }
+                int min=255,max=0;
+                for(int row=0;row<12;row++)for(int col=0;col<16;col++){
+                    Color c=full.GetPixel((2*col+1)*full.Width/32,(2*row+1)*full.Height/24);
+                    int value=(c.R+c.G+c.B)/3;min=Math.Min(min,value);max=Math.Max(max,value);
+                }
+                if(max-min<=4)throw new InvalidOperationException("window_render_empty");
                 var after = Describe(selected);
                 if (after == null || after.id != id || !after.foreground || before.width != after.width || before.height != after.height)
                     throw new InvalidOperationException("target_changed_during_capture");

@@ -6,17 +6,29 @@ import { join } from 'node:path';
 const exec = promisify(execFile);
 const normalize = value => String(value??'').replace(/[\s:：!！·•,，。.]/g,'').replaceAll('亻卜','仆');
 
-export function createAugmentObserver(names, emit) {
+export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4000,maxBlindGapMs=15000}={}) {
   const catalog = new Map(names.map(name=>[normalize(name),name]));
   let current=[null,null,null],history=[],round=0,misses=0,slots=[[],[],[]],anchors=null;
   let pending=[null,null,null],suspended=null;
+  let lastValidAt=null,lastCapturedAt=null;
   const clearPanel=()=>{current=[null,null,null];history=[];slots=[[],[],[]];anchors=null;pending=[null,null,null];misses=0;};
+  const suspendPanel=at=>{suspended={current:[...current],history:[...history],round,slots:slots.map(s=>[...s]),anchors,at};clearPanel();};
   let diagnostic={recognized:0,method:'none'};
   return {
     status(){return {...diagnostic};},
-    reset(){clearPanel();round=0;suspended=null;diagnostic={recognized:0,method:'none'};},
+    reset(){clearPanel();round=0;suspended=null;lastValidAt=null;lastCapturedAt=null;diagnostic={recognized:0,method:'none'};},
     observe(frame){
-      if(!frame?.foreground || !frame.available){pending=[null,null,null];diagnostic={recognized:0,method:frame?.method??'none'};return;}
+      if(!frame?.foreground || !frame.available || frame.panelOccluded===true){pending=[null,null,null];diagnostic={recognized:0,method:frame?.method??'none',...(frame?.panelOccluded?{reason:'scoreboard_visible'}:{})};return;}
+      const at=now();
+      if(frame.capturedAt!==undefined){
+        if(!Number.isFinite(frame.capturedAt)||at-frame.capturedAt>maxFrameAgeMs||frame.capturedAt>at+500){pending=[null,null,null];diagnostic={recognized:0,knownSlots:current.filter(Boolean).length,method:frame.method??'none',reason:'capture_stale'};return;}
+        if(lastCapturedAt!==null&&frame.capturedAt<=lastCapturedAt){diagnostic={...diagnostic,reason:'duplicate_capture'};return;}
+        lastCapturedAt=frame.capturedAt;
+      }
+      // Lost visibility is not a confirmed selection. Reacquire a fresh panel
+      // without letting an old round's exhausted rerolls freeze every new slot.
+      if(lastValidAt!==null&&at-lastValidAt>maxBlindGapMs&&current.some(Boolean))suspendPanel(at);
+      lastValidAt=at;
       const lines=[...(frame.titleLines??[]).map(line=>({...line,source:'title'})),...(frame.lines??[]).map(line=>({...line,source:'full'}))];
       const found=lines.map(line=>({...line,name:catalog.get(normalize(line.text))})).filter(line=>line.name);
       // Windows OCR can wrap a card title into two lines. Join only nearby
@@ -44,18 +56,23 @@ export function createAugmentObserver(names, emit) {
       const recognized=candidates.filter(Boolean).length;
       // An animation/overlay may hide the same panel briefly. Recover its slot
       // history instead of inventing a new selection round and fresh rerolls.
-      if(!current.some(Boolean)&&suspended&&Date.now()-suspended.at<90000&&candidates.filter((name,i)=>name&&name===suspended.current[i]).length>=2){
+      if(!current.some(Boolean)&&suspended&&at-suspended.at<90000&&candidates.filter((name,i)=>name&&name===suspended.current[i]).length>=2
+          && candidates.every((name,i)=>!name||name===suspended.current[i]||suspended.slots[i].length<2)){
         ({current,history,round,slots,anchors}=suspended);suspended=null;misses=0;
         emit({kind:'augment_offer',roll:round,reopened:true,options:current.map((name,slot)=>name?{name,slot,rerollsUsed:slots[slot].length-1}:null).filter(Boolean),seen:history});
       }
       diagnostic={recognized,method:frame.method??'full',knownSlots:current.filter(Boolean).length};
+      // A new, stable title in an exhausted slot cannot be another reroll of
+      // that old round. Require a second observation before reacquiring it.
+      const exhaustedChanges=candidates.map((name,i)=>name&&current[i]&&name!==current[i]&&slots[i].length>=2?i:null).filter(i=>i!==null);
+      if(recognized===3&&new Set(candidates).size===3&&exhaustedChanges.length&&exhaustedChanges.every(i=>pending[i]?.name===candidates[i]&&pending[i].count>=1))suspendPanel(at);
       // A single tooltip elsewhere in the game can contain an augment name.
       // Establish a panel from at least two distinct card slots, then track
       // each slot independently while the other cards are obscured.
       if(!current.some(Boolean)&&new Set(candidates.filter(Boolean)).size<2){pending=[null,null,null];return;}
       if(!recognized&&!titles.length){
         pending=[null,null,null];
-        if(++misses>=5&&current.some(Boolean)){emit({kind:'augment_offer_closed',roll:round});suspended={current:[...current],history:[...history],round,slots:slots.map(s=>[...s]),anchors,at:Date.now()};clearPanel();}
+        if(++misses>=5&&current.some(Boolean)){emit({kind:'augment_offer_closed',roll:round});suspendPanel(at);}
         return;
       }
       misses=0;

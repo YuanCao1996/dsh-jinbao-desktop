@@ -9,6 +9,13 @@ import {createGameMemory} from '../../dsh-coach-server/lib/game-memory.js';
 import {buildGameChatMessage} from '../../dsh-coach-server/lib/chat-bridge.js';
 const row=(name,rank)=>({_type:'augments',champion:'安妮',name,rank});
 
+test('background builds wait for shared output capacity without consuming their latest facts',async()=>{
+ const state=initialOverlayState();applyOverlayEvent(state,{game:'lol',kind:'game_start',t:10000,me:{champion:'安妮',items:[{name:'残疫'}]}},'fixture');
+ let allowed=false,calls=0;const coach=createEquipmentCoach({getState:()=>state,now:()=>10000,debounceMs:0,cooldownMs:0,canRequest:()=>allowed,save:async()=>{},agentChat:async()=>{calls++;return '下一件法穿。';}});
+ coach.tick();assert.equal(calls,0);assert.match(state.equipmentStatus,/低频/);
+ allowed=true;coach.tick();await new Promise(r=>setImmediate(r));assert.equal(calls,1);assert.equal(state.equipment,'下一件法穿。');coach.close();
+});
+
 test('build facts retain every owned augment and per-round best assumptions; rerolls and confirmed choices replace assumptions',()=>{
  const s=initialOverlayState();let at=1;
  const emit=e=>applyOverlayEvent(s,{game:'lol',t:++at,...e},'one');

@@ -8,7 +8,7 @@ import { projectProgressEvent,observeEquipment,addProgressEvent } from './progre
 import { createGameMemory } from '../dsh-coach-server/lib/game-memory.js';
 import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
 import {trackAugmentRound,updateAugmentRecommendations,createEquipmentCoach} from './equipment-context.mjs';
-import {augmentConfirmation} from './augment-confirmation.mjs';
+import {augmentConfirmation,acceptedTeamRound} from './augment-confirmation.mjs';
 import {teamStrength,TEAM_STRENGTH_NOTE,liveTeamEstimate,LIVE_ESTIMATE_NOTE} from './team-strength.mjs';
 import {chatFailureMessage} from './chat-errors.mjs';
 import {suggestOverlayQuestion} from './chat-suggestion.mjs';
@@ -35,7 +35,7 @@ export function clock(seconds) {
   return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
 }
 export function initialOverlayState() {
-  return { game: null, mode: '', match: null, at: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',observedMatch:false,
+  return { game: null, mode: '', match: null, at: 0, selfIdentityAt: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',observedMatch:false,
     me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [], equipmentSnapshots:new Map(),
     ownedAugments: [], augmentRounds: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, augmentCaptureReason: '', equipment: '', equipmentStatus:'', equipmentAssumptions: [], augmentAdvice: '', teamfight: '', broadcasts: [], chat: [] };
 }
@@ -62,6 +62,11 @@ export function applyOverlayEvent(state, event, file, {continueStart=false}={}) 
   }
   state.at = at;
   state.game = event.game;
+  // Unrelated events must not make a previously observed hero appear fresh.
+  if (state.game === 'lol' && ['game_start', 'state'].includes(event.kind)) {
+    const champion = event.kind === 'state' ? (event.state?.champion ?? event.me?.champion) : event.me?.champion;
+    if (typeof champion === 'string' && champion.trim()) state.selfIdentityAt = at;
+  }
   if(state.game==='lol'&&['load','loading_roster'].includes(event.kind)){
     state.me={...state.me,...event.me};
     if(Array.isArray(event.allies))state.allies=observedAllies(event.allies,state.me);
@@ -95,7 +100,7 @@ export function applyOverlayEvent(state, event, file, {continueStart=false}={}) 
   if (event.kind === 'game_start') {
     state.gameSeconds = Number.isFinite(event.gameTime) ? event.gameTime : state.gameSeconds;
     state.me = {...state.me,...event.me};
-    if(state.game==='generic'){state.me.genericState=event.genericState;state.phase='Observing';}
+    if(state.game==='generic'){state.me.genericState=event.genericState;state.phase=event.phase==='InProgress'?'InProgress':'Observing';}
     if(Array.isArray(event.allies))state.allies=state.game==='lol'?observedAllies(event.allies,state.me):event.allies;
     if(Array.isArray(event.enemies))state.enemies=event.enemies;
     observeEquipment(state);
@@ -103,6 +108,7 @@ export function applyOverlayEvent(state, event, file, {continueStart=false}={}) 
   if (event.kind === 'state') {
     const s = event.state ?? {};
     state.me = { ...state.me, ...event.me, ...s };
+    if(state.game==='generic'&&['Observing','InProgress'].includes(event.phase))state.phase=event.phase;
     if (Number.isFinite(s.time)) {state.gameSeconds = s.time;if(state.game==='lol'&&s.time>0&&!state.ended)state.phase='InProgress';}
     const allies=Array.isArray(event.allies)?event.allies:state.game==='lol'&&Array.isArray(s.allyPlayers)?s.allyPlayers:null;
     const enemies=Array.isArray(event.enemies)?event.enemies:state.game==='lol'&&Array.isArray(s.enemyPlayers)?s.enemyPlayers:null;
@@ -122,6 +128,14 @@ export function applyOverlayEvent(state, event, file, {continueStart=false}={}) 
   }
   if (event.kind === 'augment_offer_closed') state.offers=[];
   if (event.kind === 'augment_capture_status') { state.augmentCaptureAvailable=event.available===true; state.augmentCaptureReason=text(event.reason); }
+  if(event.kind==='augment_picked'&&event.source==='team-user-confirmed'&&Array.isArray(event.replaces)){
+    const round=state.augmentRounds.find(row=>row.id===event.roll),name=event.augment??event.name;
+    if(round?.confirmationSource==='countdown-default-confirmed'&&round.options.includes(name)){
+      const removed=round.confirmed.filter(value=>event.replaces.includes(value));
+      state.ownedAugments=state.ownedAugments.filter(value=>!removed.includes(value)||state.augmentRounds.some(other=>other!==round&&other.confirmed.includes(value)));
+      round.confirmed=round.confirmed.filter(value=>!removed.includes(value));
+    }
+  }
   const previousOwned=[...state.ownedAugments];
   projectProgressEvent(state,event);
   trackAugmentRound(state,event,previousOwned);
@@ -257,13 +271,16 @@ export function overlayView(state, knowledge = {}) {
     : state.augmentCaptureReason==='capture_failed'?'游戏画面暂未采集成功，正在自动重试；日志中的强化信息仍会同步。':'等待识别游戏内三选一面板';
   const heroStats = (state.game==='lol'?'大乱斗英雄样本胜率\n':'英雄样本胜率\n') + (hero ? `${hero.name??hero.champion} · ${hero.tier!=null?tierText(hero.tier):''} · ${percent(hero.winRate)}${hero.version ? ' · 版本 ' + hero.version : ''}` : knowledge.message || '等待英雄知识检索');
   return {
-    game: state.game, mode:state.mode, match: state.match, gameTime: state.game==='generic'?(state.phase==='CapturePaused'?'观察已停止':'观察中'):clock(state.gameSeconds), phase:state.phase, ended: state.ended,
+    game: state.game, mode:state.mode, match: state.match, matchStartedAt:state.matchStartedAt, gameTime: state.game==='generic'?(state.phase==='CapturePaused'?'观察已停止':'观察中'):clock(state.gameSeconds), phase:state.phase, ended: state.ended,
+    selfChampion: typeof me.champion==='string' ? me.champion : '',
+    selfIdentityAt: state.selfIdentityAt,
+    selfChampionAlias: typeof me.championAlias==='string' ? me.championAlias : '',
     playback:validBroadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0,expiresAt:r.expiresAt??r.validity?.expiresAt??null})),
     revokedPlayback:state.broadcasts.filter(r=>r.revoked).map(r=>String(r.at)+':'+r.text),
     keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
-    title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : '游戏教练'),
+    title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : me.genericState?.gameName??'游戏教练'),
     summary: state.game==='generic'?'所选窗口 · '+(me.genericState?.windowTitle??'等待观察'):[me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
-    advice: ['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:''].filter(Boolean).join(' · ')+'\n\n'+current+playbook+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
+    advice: (state.game==='generic'?[me.genericState?.gameName||'游戏身份待核实',me.genericState?.gameMode,me.genericState?.roundState==='between'?'等待下一局':'当前窗口观察中']:['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:'']).filter(Boolean).join(' · ')+'\n\n'+current+playbook+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):''),
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(!state.ended&&state.equipmentStatus?'\n'+state.equipmentStatus:'')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
       (offered.length?augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n':'')+'英雄 Top10 海克斯 · '+(me.champion||'等待英雄')+'\n'+(ranked.slice(0,10).map(augmentLine).join('\n')||knowledge.message||'正在查询英雄适配排名…')+'\n\n资料库推荐组合 · '+(me.champion||'等待英雄')+'\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
@@ -286,7 +303,7 @@ export function overlayView(state, knowledge = {}) {
   };
 }
 
-export async function createOverlayService({ stateDir, agentChat, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000,activity }) {
+export async function createOverlayService({ stateDir, agentChat, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000,activity,canAutoRequest }) {
   search=createKnowledgeSearch(search);
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
@@ -312,7 +329,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   // Serialize disk snapshots: model requests and polling may finish concurrently.
   let writes = Promise.resolve();
   const flush = () => (writes = writes.catch(() => {}).then(save));
-  const equipmentCoach=createEquipmentCoach({getState:()=>state,agentChat,save:flush,onAdvice:async(current,answer)=>{
+  const equipmentCoach=createEquipmentCoach({getState:()=>state,canRequest:canAutoRequest,agentChat,save:flush,onAdvice:async(current,answer)=>{
     const event={game:current.game,match:current.match,at:Date.now(),kind:'equipment-advice',broadcast:answer,priority:2,validity:createAdviceValidity('purchase',current)};
     router.apply(event,'coach_broadcasts.jsonl');await appendFile(join(logs,'coach_broadcasts.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
   },debounceMs:equipmentDebounceMs,cooldownMs:equipmentCooldownMs});
@@ -447,17 +464,25 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
   }
   await scan();
   const timer = setInterval(scan, pollMs); timer.unref();
+  async function applyConfirmation({id,name,dismiss=false,timeoutDefault=false,historical=false}={},team=false){
+    const accepted=team&&historical&&!dismiss&&!timeoutDefault?acceptedTeamRound(state,id,name):null;
+    if(accepted?.confirmed?.length&&accepted.confirmationSource!=='countdown-default-confirmed'&&!accepted.confirmed.includes(name))throw Object.assign(Error('本轮已有不同的真实选择'),{status:409});
+    if(accepted?.confirmed?.includes(name)&&accepted.confirmationSource!=='countdown-default-confirmed')return {confirmed:true};
+    const prompt=accepted?{id,round:accepted.id,options:accepted.options.map(name=>({name}))}:augmentConfirmation(state,knowledge.rows??[],Date.now(),{allowAssumed:team});
+    if(!prompt||id!==prompt.id||(!dismiss&&!prompt.options.some(o=>o.name===name)))throw Object.assign(Error('确认已过期或选项已变化'),{status:409});
+    if(timeoutDefault&&(team||dismiss||prompt.options[0]?.name!==name))throw Object.assign(Error('默认选项已变化'),{status:409});
+    const round=state.augmentRounds.find(row=>row.id===prompt.round);
+    const event={game:state.game,match:state.match,t:Date.now(),roll:prompt.round,confirmationId:prompt.id,...(dismiss?{kind:'augment_confirmation_dismissed'}:{kind:'augment_picked',who:'self',augment:name,
+      source:team?'team-user-confirmed':timeoutDefault?'countdown-default-confirmed':'user-confirmed',confidence:'high',time:state.gameSeconds,
+      ...(team&&round?.confirmationSource==='countdown-default-confirmed'?{replaces:[...round.confirmed]}:{})})};
+    await appendFile(join(logs,'lol-user-confirmations.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
+    router.apply(event,'lol-user-confirmations.jsonl');equipmentCoach.invalidate();await flush();equipmentCoach.tick();return {confirmed:!dismiss};
+  }
   return {
     view, refresh,
-    async confirm({id,name,dismiss=false,timeoutDefault=false}={}){
-      const prompt=augmentConfirmation(state,knowledge.rows??[]);
-      if(!prompt||id!==prompt.id||(!dismiss&&!prompt.options.some(o=>o.name===name)))throw Object.assign(Error('确认已过期或选项已变化'),{status:409});
-      if(timeoutDefault&&(dismiss||prompt.options[0]?.name!==name))throw Object.assign(Error('默认选项已变化'),{status:409});
-      const event={game:state.game,match:state.match,t:Date.now(),roll:prompt.round,...(dismiss?{kind:'augment_confirmation_dismissed'}:{kind:'augment_picked',who:'self',augment:name,source:timeoutDefault?'countdown-default-confirmed':'user-confirmed',confidence:'high',time:state.gameSeconds})};
-      await appendFile(join(logs,'lol-user-confirmations.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
-      router.apply(event,'lol-user-confirmations.jsonl');equipmentCoach.invalidate();await flush();equipmentCoach.tick();
-      return {confirmed:!dismiss};
-    },
+    async getTeamFacts(){return state.game&&state.match?{...(await memory.currentFacts(state.game,state.match)).current,confirmation:augmentConfirmation(state,knowledge.rows??[],Date.now(),{allowAssumed:true})}:null;},
+    confirm:input=>applyConfirmation(input),
+    confirmTeamSelection:input=>applyConfirmation(input,true),
     async ask(question, topic, metadata = {}) {
       if (busy) throw Object.assign(Error('教练正在回复'), { status: 409 });
       if (typeof question !== 'string' || !question.trim() || question.length > 1000) throw Object.assign(Error('问题格式不正确'), { status: 400 });

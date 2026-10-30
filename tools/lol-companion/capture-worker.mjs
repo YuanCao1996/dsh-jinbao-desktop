@@ -18,14 +18,15 @@ export function createAugmentCaptureWorker({spawnImpl=spawn,timeoutMs=8000}={}){
    try{const value=JSON.parse(line),request=pending;pending=null;clearTimeout(request.timer);request.signal?.removeEventListener('abort',request.abort);request.resolve(value);}catch{reset(Error('Invalid capture result'));}
   });
  }
- return {capture(signal){
+ return {capture(signal,{focus='full'}={}){
+  if(!['full','titles'].includes(focus))return Promise.reject(Error('Invalid capture focus'));
   if(closed||signal?.aborted)return Promise.reject(Error('Capture stopped'));
   if(pending)return Promise.reject(Error('Capture already in progress'));
   if(!child)start();
   return new Promise((resolve,reject)=>{
    const abort=()=>reset(Error('Capture stopped'));
    pending={resolve,reject,signal,abort,timer:setTimeout(()=>reset(Error('Capture timeout')),timeoutMs)};
-   signal?.addEventListener('abort',abort,{once:true});child.stdin.write('capture\n');
+   signal?.addEventListener('abort',abort,{once:true});child.stdin.write(focus==='titles'?'capture:titles\n':'capture\n');
   });
  },close(){closed=true;reset(Error('Capture stopped'));}};
 }

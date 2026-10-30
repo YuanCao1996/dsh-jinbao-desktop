@@ -12,6 +12,11 @@ for(const [name,preferences,expected] of [['fresh',null,0],['legacy-default',{sh
    if(preferences)await writeFile(join(state,'strategy-overlay-preferences.json'),JSON.stringify(preferences));
    const result=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',fileURLToPath(new URL('../../desktop-release/strategy-overlay.ps1',import.meta.url)),'-StateDir',state,'-SelfTest'],{encoding:'utf8',windowsHide:true,timeout:30000}).trim());
    assert.equal(result.initialCaptureAffinity,expected);assert.equal(result.captureVisible,true);assert.equal(result.captureHidden,true);assert.equal(result.captureVisibilitySaved,true);
+   assert.equal(result.captureLeaseNoFlicker,true);assert.equal(result.captureLeaseRestoresPreference,true);
+   assert.equal(result.captureLeasePartialFailureRecovers,true);
+   assert.equal(result.captureHeartbeatLockSurvived,true);assert.equal(result.captureHeartbeatRecovers,true);
+   assert.equal(result.captureReadyLockSurvived,true);assert.equal(result.captureReadyRecovers,true);
+   assert.equal(result.captureIoFaultsRecorded,true);
   }finally{await rm(state,{recursive:true,force:true});}
  });
 }

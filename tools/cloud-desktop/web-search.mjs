@@ -2,7 +2,7 @@ export function createWebSearch({fetchImpl=fetch,now=Date.now}={}){
  const cache=new Map();const clean=text=>String(text??'').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,'').replaceAll('&amp;','&').replaceAll('&lt;','<').replaceAll('&gt;','>');
  return async(query,state={})=>{
   if(typeof query!=='string'||!query.trim()||query.length>300)return{status:'unavailable',reason:'invalid_query'};
-  const scope=state.game==='lol'?(state.mode==='KIWI'?'英雄联盟 海克斯大乱斗 ARAM Mayhem':state.mode==='ARAM'?'英雄联盟 极地大乱斗 ARAM':'英雄联盟 '+(state.mode??'')):state.game==='wzry'?'王者荣耀':state.gameName??'';
+  const scope=state.game==='lol'?(state.mode==='KIWI'?'英雄联盟 海克斯大乱斗 ARAM Mayhem':state.mode==='ARAM'?'英雄联盟 极地大乱斗 ARAM':'英雄联盟 '+(state.mode??'')):state.game==='wzry'?'王者荣耀':[state.me?.genericState?.gameName??state.gameName,state.me?.genericState?.gameMode,state.me?.genericState?.gameVersion].filter(Boolean).join(' ');
   const q=scope+' '+query+' 当前版本',key=q.toLowerCase();const previous=cache.get(key);if(previous&&now()-previous.at<600000)return previous.result;
   try{
    const response=await fetchImpl('https://www.bing.com/search?format=rss&q='+encodeURIComponent(q),{redirect:'error',signal:AbortSignal.timeout(15000),headers:{Accept:'application/rss+xml'}});if(!response.ok)throw Error();

@@ -63,6 +63,10 @@ export async function createAgentActivity({stateDir,getView=()=>null,now=Date.no
    }else if(type==='tool_end'){
     const index=Number.isSafeInteger(event.index)?event.index:task.lastTool;
     if(index!=null)row(id+':tool:'+index,task,tools[event.name]??'执行游戏工具',event.success===false?'unavailable':'done',{elapsedMs:Number.isFinite(event.elapsed_ms)?Math.max(0,Math.min(300000,event.elapsed_ms)):null});
+   }else if(type==='web_search_result'){
+    const empty=['no_usable_results','rss_no_usable_results'].includes(event.reason);
+    const label=event.status==='ok'?'已找到匹配的游戏资料':empty?'未找到匹配模式的攻略':event.reason==='rate_limited'?'攻略搜索服务暂时限流':'攻略搜索暂时不可用';
+    row(id+':search-summary',task,label,event.status==='ok'?'done':'unavailable');
    }else if(type==='model_start')row(id+':model:'+Number(event.request_index??0),task,'模型正在分析','running');
    else if(type==='model_end')row(id+':model:'+Number(event.request_index??0),task,event.status>=400?'模型请求失败':'本步模型分析结束',event.status>=400?'failed':'done',{elapsedMs:Number.isFinite(event.elapsed_ms)?Math.max(0,Math.min(300000,event.elapsed_ms)):null});
    else if(type==='compaction')row(id+':compact',task,'整理本局上下文','running');

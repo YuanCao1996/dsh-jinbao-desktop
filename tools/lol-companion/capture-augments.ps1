@@ -1,10 +1,10 @@
-﻿param([switch]$CheckOnly,[string]$ImagePath,[switch]$Worker,[string]$StateDir=$env:JINBAO_STATE_DIR)
+﻿param([switch]$CheckOnly,[string]$ImagePath,[switch]$Worker,[string]$StateDir=$env:JINBAO_STATE_DIR,[ValidateSet('full','titles')][string]$Focus='full')
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 if($Worker){
  while($null -ne ($captureCommand=[Console]::In.ReadLine())){
   if($captureCommand -eq 'exit'){break}
-  if($captureCommand -eq 'capture'){$captureResult=if($ImagePath){& $PSCommandPath -ImagePath $ImagePath -StateDir $StateDir}else{& $PSCommandPath -StateDir $StateDir};[Console]::Out.WriteLine([string]$captureResult);[Console]::Out.Flush()}
+  if($captureCommand -in @('capture','capture:titles')){$nextFocus=if($captureCommand -eq 'capture:titles'){'titles'}else{'full'};$captureResult=if($ImagePath){& $PSCommandPath -ImagePath $ImagePath -StateDir $StateDir -Focus $nextFocus}else{& $PSCommandPath -StateDir $StateDir -Focus $nextFocus};[Console]::Out.WriteLine([string]$captureResult);[Console]::Out.Flush()}
  }
  exit 0
 }
@@ -23,6 +23,7 @@ public static class JinbaoAugmentCapture {
  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd,out Rect rect);
  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd,ref Point point);
  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+ [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
 }
 '@
  }
@@ -45,6 +46,9 @@ public static class JinbaoAugmentCapture {
  [JinbaoAugmentCapture]::GetWindowThreadProcessId($handle,[ref]$gamePid) | Out-Null
  $process=Get-Process -Id $gamePid -ErrorAction SilentlyContinue
  if(!$process -or $process.ProcessName -ne 'League of Legends'){Write-Output '{"available":true,"foreground":false,"reason":"game_not_foreground"}';exit 0}
+ if(([JinbaoAugmentCapture]::GetAsyncKeyState(9) -band 0x8000) -ne 0){
+  @{available=$true;ocrAvailable=$engineReady;foreground=$true;panelOccluded=$true;capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();focus=$Focus;method='scoreboard-occluded';reason='scoreboard_visible';lines=@();titleLines=@()}|ConvertTo-Json -Compress;exit 0
+ }
  $rect=New-Object JinbaoAugmentCapture+Rect;$origin=New-Object JinbaoAugmentCapture+Point
  if(![JinbaoAugmentCapture]::GetClientRect($handle,[ref]$rect) -or ![JinbaoAugmentCapture]::ClientToScreen($handle,[ref]$origin)){throw 'Game bounds unavailable'}
  $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
@@ -52,10 +56,9 @@ public static class JinbaoAugmentCapture {
  $left=$origin.X;$top=$origin.Y
  $width=$w;$height=$h
  $bitmap=[Drawing.Bitmap]::new($width,$height)
- $graphics=[Drawing.Graphics]::FromImage($bitmap)
- . (Join-Path $PSScriptRoot '../desktop-release/capture-coordination.ps1')
- $lease=$null
- try{$lease=Enter-JinbaoCapture $StateDir;$graphics.CopyFromScreen($left,$top,0,0,$bitmap.Size);$capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}finally{Exit-JinbaoCapture $lease;$graphics.Dispose()}
+ . (Join-Path $PSScriptRoot '../desktop-release/window-pixels.ps1')
+ $captureBackend=Copy-JinbaoGamePixels $handle $bitmap $left $top $StateDir
+ $capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
  $scaled=$null;$memory=[IO.MemoryStream]::new()
  try{
   if($width -gt 2000){$scaled=[Drawing.Bitmap]::new($bitmap,[Drawing.Size]::new(2000,[int]($height*2000/$width)));$width=$scaled.Width;$height=$scaled.Height;$scaled.Save($memory,[Drawing.Imaging.ImageFormat]::Png)}
@@ -66,7 +69,7 @@ public static class JinbaoAugmentCapture {
  if(!$capturedAt){$capturedAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
  $pixelMs=$captureWatch.ElapsedMilliseconds
  . (Join-Path $PSScriptRoot 'observe-ally-ultimates.ps1')
- $allyHud=Read-JinbaoAllyHud $bytes $StateDir
+ $allyHud=if($Focus -eq 'full'){Read-JinbaoAllyHud $bytes $StateDir}else{$null}
  $hudMs=$captureWatch.ElapsedMilliseconds-$pixelMs
  if(!$engineReady){@{available=$true;ocrAvailable=$false;foreground=$true;capturedAt=$capturedAt;reason='chinese_language_unavailable';lines=@();allyHud=$allyHud} | ConvertTo-Json -Depth 6 -Compress;exit 0}
  $asTask=[System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {$_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetGenericArguments().Count -eq 1 -and $_.GetParameters().Count -eq 1} | Select-Object -First 1
@@ -95,7 +98,7 @@ public static class JinbaoAugmentCapture {
   return @{width=$width;height=$height;lines=$lines}
  }finally{if($software){$software.Dispose()};$stream.Dispose()}
  }
- $frame=Read-OcrImage $bytes
+ $frame=if($Focus -eq 'full'){Read-OcrImage $bytes}else{$null}
  $titleLines=@()
  # Full-screen OCR can skip all three stylized titles even though OCR is available.
  # Independently enlarge each card's title region, preserving full-frame coordinates.
@@ -103,6 +106,7 @@ public static class JinbaoAugmentCapture {
  $inputBitmap=$null
  try{
   $inputBitmap=[Drawing.Bitmap]::new($inputStream)
+  if(!$frame){$frame=@{width=$inputBitmap.Width;height=$inputBitmap.Height;lines=@()}}
   $w=[int]($inputBitmap.Height*0.302);$h=[int]($inputBitmap.Height*0.11);$gutter=36;$stride=$h*3+$gutter
   $strip=[Drawing.Bitmap]::new($w*3,$stride*3);$stripGraphics=[Drawing.Graphics]::FromImage($strip)
   try{
@@ -131,7 +135,7 @@ public static class JinbaoAugmentCapture {
    }finally{$stripBytes.Dispose()}
   }finally{$stripGraphics.Dispose();$strip.Dispose()}
  }finally{if($inputBitmap){$inputBitmap.Dispose()};$inputStream.Dispose()}
- @{available=$true;ocrAvailable=$true;foreground=$true;capturedAt=$capturedAt;allyHud=$allyHud;timings=@{captureMs=$pixelMs;hudMs=$hudMs;ocrMs=$captureWatch.ElapsedMilliseconds-$pixelMs-$hudMs;totalMs=$captureWatch.ElapsedMilliseconds};width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method='full-and-card-strip';cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 6 -Compress
+ @{available=$true;ocrAvailable=$true;foreground=$true;capturedAt=$capturedAt;allyHud=$allyHud;focus=$Focus;captureBackend=$captureBackend;timings=@{captureMs=$pixelMs;hudMs=$hudMs;ocrMs=$captureWatch.ElapsedMilliseconds-$pixelMs-$hudMs;totalMs=$captureWatch.ElapsedMilliseconds};width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method=$(if($Focus -eq 'titles'){'card-strip-fast'}else{'full-and-card-strip'});cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 6 -Compress
 
 }catch{
  if($engineReady){Write-Output '{"available":true,"foreground":false,"reason":"capture_failed"}'}

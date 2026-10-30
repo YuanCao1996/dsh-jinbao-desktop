@@ -4,11 +4,11 @@
 
 [下载 Windows 版](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/latest/download/jinbao-desktop-windows.zip) · [金宝官网 / 手机 App](https://www.jinbaoai.top/#download) · [版本与更新记录](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases)
 
-## 独立桌面版预览（v0.2.3）
+## 独立桌面版预览（v0.2.4）
 
-开发中的 0.2.4 候选版新增[直播智能体过程展示](docs/AGENT_ACTIVITY_PREVIEW.md)，默认关闭；下面的公开下载暂未包含此功能。
+**GitHub 预发布下载：**[jinbao-desktop-windows.zip](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.2.4-standalone-preview.1/jinbao-desktop-windows.zip)。
 
-[下载独立版预览 ZIP](https://api.jinbaoai.top/downloads/jinbao/v0.2.3/jinbao-desktop-windows.zip)。完整解压后双击 `开始使用.cmd`，自动打开悬浮窗与设置页，等待进入游戏。
+完整解压后双击 `开始使用.cmd`，自动打开悬浮窗与设置页，等待进入游戏。本预发布包默认使用金宝官方云端服务，不要求另装 DSH Desktop，也不包含 ADB；群聊后端仍未部署，群聊入口保持关闭。
 
 - 默认使用金宝官方云端 DSH，**无需另装 DSH Desktop**。自动尝试已开放的免登录体验名额；名额不足或需要固定账号时使用邮箱登录。额度由服务器管理。
 - 自带 API Key 可在同一设置页切换。此模式复用已安装 DSH Desktop 的原生模块，**无需同时运行 DSH 窗口**。没有安装时可从设置页下载官方安装程序。

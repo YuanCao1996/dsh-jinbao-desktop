@@ -1,6 +1,8 @@
 ﻿# Display and input policies; the Agent/session implementation remains in DSH.
 foreach($name in @('NarrowPanel','NarrowCanvas','NarrowText','NarrowExpand','NarrowMenu','NarrowClose','BubbleLabel','PreviousSubtitle','OutgoingSubtitle')){$controls[$name]=$window.FindName($name)}
 $script:narrowWidth=360.0;
+$script:managedSpeech=$false
+try{$voiceStatus=[IO.File]::ReadAllText((Join-Path $StateDir 'speech-status.json'))|ConvertFrom-Json;$script:managedSpeech=$voiceStatus.supported -and ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$voiceStatus.at -lt 15000) -and $voiceStatus.state -ne 'stopped'}catch{}
 $script:displayMode='large';$script:subtitleMode=$true;$script:speakEnabled=$false;$script:unread=0
 $script:playbackMatch='';$script:seenPlayback=New-Object 'Collections.Generic.HashSet[string]'
 $script:seenPlaybackOrder=New-Object 'Collections.Generic.Queue[string]'
@@ -109,7 +111,7 @@ function Update-OverlayPlayback {
   if($script:displayMode -eq 'narrow'){
    Add-PlaybackMessage $message
   }
-  if($script:speakEnabled){try{if(!$script:synth){Add-Type -AssemblyName System.Speech;$script:synth=New-Object Speech.Synthesis.SpeechSynthesizer;$voice=$script:synth.GetInstalledVoices()|Where-Object {$_.VoiceInfo.Culture.Name -like 'zh*'}|Select-Object -First 1;if(!$voice){throw 'Chinese voice unavailable'};$script:synth.SelectVoice($voice.VoiceInfo.Name)};$script:synth.SpeakAsyncCancelAll();$script:synth.SpeakAsync([string]$message.text)|Out-Null}catch{if($script:synth){try{$script:synth.Dispose()}catch{};$script:synth=$null};$script:speakEnabled=$false;$controls.HintText.Text='本机中文语音不可用，已保留文字播报'}}
+  if($script:speakEnabled -and !$script:managedSpeech){try{if(!$script:synth){Add-Type -AssemblyName System.Speech;$script:synth=New-Object Speech.Synthesis.SpeechSynthesizer;$voice=$script:synth.GetInstalledVoices()|Where-Object {$_.VoiceInfo.Culture.Name -like 'zh*'}|Select-Object -First 1;if(!$voice){throw 'Chinese voice unavailable'};$script:synth.SelectVoice($voice.VoiceInfo.Name)};$script:synth.SpeakAsyncCancelAll();$script:synth.SpeakAsync([string]$message.text)|Out-Null}catch{if($script:synth){try{$script:synth.Dispose()}catch{};$script:synth=$null};$script:speakEnabled=$false;$controls.HintText.Text='本机中文语音不可用，已保留文字播报'}}
  }
  $script:playbackInitialized=$true
  $controls.BubbleLabel.Text=if($script:snapshot.confirmation){'金宝 !'}elseif($script:unread){'金宝 '+$script:unread}else{'金宝'}
@@ -123,7 +125,12 @@ $modeMenu=New-Object Windows.Controls.MenuItem;$modeMenu.Header='显示与播报
 foreach($entry in @(@('large','大框'),@('narrow','窄条'),@('silent','静默小球'))){$item=New-Object Windows.Controls.MenuItem;$item.Header=$entry[1];$item.Tag=$entry[0];$item.Add_Click({param($s,$e) Set-DisplayMode ([string]$s.Tag)});$modeMenu.Items.Add($item)|Out-Null}
 $subtitleItem=New-Object Windows.Controls.MenuItem;$subtitleItem.Header='字幕：两行向上推进';$subtitleItem.Add_Click({$script:subtitleMode=$true;Save-DisplayMode;Set-DisplayMode 'narrow'});$modeMenu.Items.Add($subtitleItem)|Out-Null
 $scrollItem=New-Object Windows.Controls.MenuItem;$scrollItem.Header='窄条：横向滚动';$scrollItem.Add_Click({$script:subtitleMode=$false;Save-DisplayMode;Set-DisplayMode 'narrow'});$modeMenu.Items.Add($scrollItem)|Out-Null
-$speechItem=New-Object Windows.Controls.MenuItem;$speechItem.Header='语音播报（本机中文语音）';$speechItem.IsCheckable=$true;$speechItem.Add_Click({$script:speakEnabled=$speechItem.IsChecked;if(!$script:speakEnabled -and $script:synth){$script:synth.SpeakAsyncCancelAll()};Save-DisplayMode});$modeMenu.Items.Add($speechItem)|Out-Null
+$speechItem=New-Object Windows.Controls.MenuItem
+if($script:managedSpeech){
+ $speechItem.Header='角色与语音（App 同款音色）'
+ $speechItem.Add_Click({try{$url=[IO.File]::ReadAllText((Join-Path $StateDir 'settings-link.txt')).Trim();if($url -notmatch '^http://127\.0\.0\.1:[0-9]+/#[a-f0-9]{64}$'){throw 'Invalid local URL'};Start-Process ($url.Replace('/#','/?page=voice#'))}catch{$controls.HintText.Text='请从设置网页打开“角色与语音”。'}})
+}else{$speechItem.Header='语音播报（本机中文语音）';$speechItem.IsCheckable=$true;$speechItem.Add_Click({$script:speakEnabled=$speechItem.IsChecked;if(!$script:speakEnabled -and $script:synth){$script:synth.SpeakAsyncCancelAll()};Save-DisplayMode})}
+$modeMenu.Items.Add($speechItem)|Out-Null
 $settingsMenu.Items.Add($modeMenu)|Out-Null
 $shortcutMenu=New-Object Windows.Controls.MenuItem;$shortcutMenu.Header='快捷键'
 $shortcutLabels=@(@(702,'展开：Ctrl+Alt+↑'),@(703,'收起：Ctrl+Alt+↓'),@(704,'上一页：Ctrl+Alt+←'),@(705,'下一页：Ctrl+Alt+→'),@(701,'交互/穿透：Ctrl+Alt+J'))

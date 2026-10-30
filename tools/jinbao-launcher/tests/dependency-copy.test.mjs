@@ -20,5 +20,5 @@ test('complete shared dependencies remain untouched; incomplete links fail witho
     await assert.rejects(access(join(shared, 'entry.js')));
     await copyDependency(source, regular);
     assert.equal(await readFile(join(regular, 'entry.js'), 'utf8'), 'bundled');
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await rm(root, { recursive: true, force: true, maxRetries:3, retryDelay:100 }); }
 });

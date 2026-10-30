@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,readFile,writeFile } from 'node:fs/promises';
+import { mkdtemp,readFile,writeFile,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSetupServer } from '../server.mjs';
@@ -45,4 +45,16 @@ test('setup guards secrets, pairs, routes BYOK directly and revokes cloud token'
  assert.equal((await request('/api/login/code',{activationCode:'bad'})).status,400);
  const activated=await(await request('/api/login/code',{activationCode:' jb-'+'a'.repeat(32)+' '})).json();assert.deepEqual(activated,{status:'approved'});assert.equal(values.get('JINBAO_SERVICE_TOKEN'),'jc_'+'1'.repeat(64));assert.ok(!JSON.stringify(activated).includes('jc_'));assert.equal(JSON.parse(calls.at(-1).opts.body).activationCode,'JB-'+'A'.repeat(32));
  await request('/api/logout',{});assert.equal(values.has('JINBAO_SERVICE_TOKEN'),false);
+});
+
+test('settings shutdown still drains HTTP and overlay resources when an owned memory disposer fails', async t => {
+ const stateDir=await mkdtemp(join(tmpdir(),'jinbao-setup-close-'));t.after(()=>rm(stateDir,{recursive:true,force:true,maxRetries:3}));
+ const values=new Map(),credentials={resolve:async k=>values.has(k)?{value:values.get(k)}:undefined,set:async(k,v)=>values.set(k,v)};
+ const setup=await createSetupServer({stateDir,port:0,credentials,teamCacheError:true,fetchImpl:async()=>Response.json({}),userMemory:{close:async()=>{throw Error('private-fixture-failure');}}});
+ const [base,nonce]=setup.url.split('/#');
+ const status=await(await fetch(base+'/api/status',{headers:{'X-Jinbao-Setup':nonce}})).json();
+ assert.deepEqual(status.teamCache,{supported:false,error:'cleanup_unavailable'});
+ const closed=assert.rejects(setup.close(),/setup_shutdown_failed/);await closed;
+ await assert.rejects(fetch(base));
+ await assert.rejects(setup.close(),/setup_shutdown_failed/);
 });

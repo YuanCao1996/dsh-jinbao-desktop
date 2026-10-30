@@ -1,11 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {initialOverlayState,applyOverlayEvent,createOverlayService} from '../overlay-state.mjs';
-import {augmentConfirmation} from '../augment-confirmation.mjs';
+import {augmentConfirmation,augmentConfirmationId} from '../augment-confirmation.mjs';
 const ranks=[{_type:'augments',champion:'安妮',name:'乙',rank:1},{_type:'augments',champion:'安妮',name:'甲',rank:3}];
+
+test('late team confirmation writes its original round once after a newer panel opens',async t=>{
+ const dir=await mkdtemp(join(tmpdir(),'team-late-round-'));let service;
+ t.after(async()=>{await service?.close();await rm(dir,{recursive:true,force:true,maxRetries:3});});
+ await mkdir(join(dir,'logs'));const now=Date.now();
+ const rows=[{kind:'game_start',me:{champion:'安妮'},t:now-180000},{kind:'augment_offer',roll:1,options:['甲','乙','丙'],t:now-179000},
+  {kind:'augment_offer_closed',roll:1,t:now-178000},{kind:'augment_picked',roll:1,who:'self',augment:'甲',source:'countdown-default-confirmed',t:now-177000},
+  {kind:'augment_offer',roll:2,options:['丁','戊','己'],t:now-100}].map(row=>({game:'lol',match:'one',...row}));
+ await writeFile(join(dir,'logs/live.jsonl'),rows.map(row=>JSON.stringify(row)).join('\n')+'\n');
+ service=await createOverlayService({stateDir:dir});await service.refresh();
+ let facts=await service.getTeamFacts();const round=facts.augmentRounds.find(row=>row.id===1),id=augmentConfirmationId(facts,round);
+ await service.confirmTeamSelection({id,name:'乙',historical:true});await service.confirmTeamSelection({id,name:'乙',historical:true});
+ facts=await service.getTeamFacts();assert.ok(facts.ownedAugments.includes('乙'));assert.equal(facts.ownedAugments.includes('甲'),false);assert.equal(facts.augmentRounds.find(row=>row.id===2).closed,false);
+ const events=(await readFile(join(dir,'logs/lol-user-confirmations.jsonl'),'utf8')).trim().split('\n').map(row=>JSON.parse(row));
+ assert.equal(events.length,1);assert.equal(events[0].roll,1);assert.equal(events[0].source,'team-user-confirmed');
+});
 test('confirmation appears only after closed-panel grace, sorts current choices by hero rank, and disappears after reliable confirmation',()=>{
  const s=initialOverlayState();let at=Date.now()-6000;
  const emit=e=>applyOverlayEvent(s,{game:'lol',match:'one',t:++at,...e},'one');

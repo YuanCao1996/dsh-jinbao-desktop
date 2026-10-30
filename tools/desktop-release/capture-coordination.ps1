@@ -1,11 +1,23 @@
-# Hide only Jinbao-owned surfaces during the pixel copy, never during OCR.
+# Coordinate only Jinbao-owned surfaces during pixel copy, never during OCR.
+function Test-JinbaoOverlayOwned([string]$stateDir){
+ $hash=[Security.Cryptography.SHA256]::Create()
+ try{$id=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($stateDir).ToLowerInvariant())))).Replace('-','').Substring(0,16)}finally{$hash.Dispose()}
+ $mutex=$null;$owned=$false
+ try{
+  try{$mutex=[Threading.Mutex]::OpenExisting('Local\JinbaoStrategyOverlay-'+$id)}catch [Threading.WaitHandleCannotBeOpenedException]{return $false}
+  try{$owned=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$owned=$true}
+  return !$owned
+ }finally{if($mutex){if($owned){$mutex.ReleaseMutex()};$mutex.Dispose()}}
+}
 function Enter-JinbaoCapture([string]$stateDir){
  if(!$stateDir){return $null}
- try{$hostState=[IO.File]::ReadAllText((Join-Path $stateDir 'overlay-capture-host.json'))|ConvertFrom-Json}catch{return $null}
+ try{$hostState=[IO.File]::ReadAllText((Join-Path $stateDir 'overlay-capture-host.json'))|ConvertFrom-Json}catch{
+  # A partially written/missing heartbeat is not proof that no overlay exists.
+  if(Test-JinbaoOverlayOwned $stateDir){throw 'capture_host_unavailable'};return $null
+ }
  $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
  if($now-[double]$hostState.at -gt 3000){
-  $hostProcess=Get-Process -Id ([int]$hostState.pid) -ErrorAction SilentlyContinue
-  if($hostProcess -and $hostProcess.ProcessName -eq 'powershell'){throw 'capture_host_unresponsive'}
+  if(Test-JinbaoOverlayOwned $stateDir){throw 'capture_host_unresponsive'}
   return $null
  }
  $hash=[Security.Cryptography.SHA256]::Create()

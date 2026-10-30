@@ -2,12 +2,15 @@ import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {serviceUrl,limitedJson} from '../dsh-game-services/client.mjs';
 import {equipmentContext} from '../dsh-onboarding/equipment-context.mjs';
+import {roleInstruction} from './roles.mjs';
 const fail=(status,message)=>Object.assign(Error(message),{status});
 export function agentQuestion(request){
  let message=request.question;
  if(request.topic==='equipment'&&typeof message==='string'&&message.includes('【装备决策事实 JSON】'))message=message.split('【装备决策事实 JSON】')[0].replace('只用 coach_reply 提交','直接提交')+'\n按需读取当前事实中的 equipment_decision；区分 confirmedAugments 与 assumedAugments，推测不当作已拥有。';
  if(typeof message!=='string'||!message.trim()||message.length>2000)throw fail(413,'Agent message exceeds the bounded task budget');
- return message;
+ const role=[roleInstruction(request.role,request.game,request.automatic===true),...(request.game==='generic'?['通用识别中，identityEvidence的tentative只是推测，corroborated只是多帧印证，source=user才是用户确认；分别核实游戏名、模式和版本。按需看图或检索日志，不从窗口标题猜规则。处于between阶段时不延续上一局操作建议；搜索使用当前gameName、gameMode及可用版本，资料不匹配则说明未知。']:[]),...(request.automatic===true?['低频短播报：只给当前最重要的一条结论，40—60字，最多两句；省略铺垫和重复信息，不为凑字数编造内容。']:[])].filter(Boolean).join('\n');
+ if(role&&message.length+role.length+1>2000)throw fail(413,'Agent message exceeds the bounded task budget');
+ return role?message+'\n'+role:message;
 }
 export function cloudContext(memory,game,match,{eventQuery=false,observationPlan=false,userMemory=false}={}){
  const c=memory.current;
@@ -29,7 +32,7 @@ export function cloudContext(memory,game,match,{eventQuery=false,observationPlan
  if(oversized())throw fail(413,'Current facts exceed the bounded context budget');
  return value;
 }
-export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgress=()=>{},capture,queryEvents,observationPlan,memoryTools,
+export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgress=()=>{},capture,queryEvents,observationPlan,memoryTools,onObservation,
  getActivityEnabled=()=>false,serviceBaseUrl='https://api.jinbaoai.top',apiPrefix='/desktop/agent',deviceId='default',fetchImpl=fetch,pollMs=800,timeoutMs=90000}){
  if(!['/desktop/agent','/desktop/agent-preview'].includes(apiPrefix))throw Error('Invalid Agent route');
  const service=serviceUrl(serviceBaseUrl);const lifetime=new AbortController(),teardown=new AbortController();let busy=false,settled=Promise.resolve(),finish=()=>{},wireRevision=0,wireKey='',wireValue,waitForCancellation=false;
@@ -78,6 +81,10 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
     }
     for(const event of update.events??[]){
      progress(event);
+     if(event.event==='generic_observation'&&request.game==='generic'&&onObservation&&current()){
+      try{await onObservation({...event,game:request.game,match:request.match});}catch{}
+      if(!current())throw fail(409,'Match changed');
+     }
      if(!terminalUpdate&&event.event==='memory_requested'&&!handled.has(event.request_id)){
       if(!/^[a-f0-9]{32}$/.test(event.request_id??''))throw fail(502,'Invalid memory request');handled.add(event.request_id);
       let result={status:'unavailable',reason:'memory_unavailable'};

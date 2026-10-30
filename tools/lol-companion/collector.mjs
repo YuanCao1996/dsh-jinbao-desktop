@@ -8,12 +8,14 @@ import { createChampionSelectionReader } from './champ-select.mjs';
 import { createChatObserver,createChatCatalogReader } from './chat-observer.mjs';
 import { createAugmentObserver,augmentNames } from './augment-observer.mjs';
 import {createAugmentCaptureWorker} from './capture-worker.mjs';
+import {createCaptureSchedule} from './capture-schedule.mjs';
 import {createItemCatalogue} from './item-policy.mjs';
 import {createHudAssets} from './hud-assets.mjs';
 import {createAllyUltimateObserver} from './ally-ultimates.mjs';
 import { homedir } from 'node:os';
 import { join,dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import {writeFile,rename} from 'node:fs/promises';
 const folder=process.env.JINBAO_LOG_DIR??join(homedir(),'.dsh','jinbao','logs');
 let log=createEventLog(folder,'client-'+Date.now()),phase=null,lastEvent=-1,gameTime=null;
 let nextMatch=true;
@@ -23,7 +25,15 @@ console.log('LoL collector started; waiting for client. Logs: '+folder);
 let running=true,lastLiveState=null,capturing=false,lastCaptureAvailable=null,nextCaptureAt=0,captureGeneration=0;
 const captureStop=new AbortController();
 const captureWorker=createAugmentCaptureWorker();
+const captureSchedule=createCaptureSchedule();
 const names=await augmentNames();
+let captureReportBusy=false,lastCaptureReport=0,captureSequence=0;
+const captureReport=async value=>{
+ if(captureReportBusy||Date.now()-lastCaptureReport<1000)return;
+ captureReportBusy=true;lastCaptureReport=Date.now();
+ const path=join(process.env.JINBAO_STATE_DIR??dirname(folder),'augment-diagnostics.json');
+ try{await writeFile(path+'.tmp',JSON.stringify({at:Date.now(),sequence:++captureSequence,...value}),{mode:0o600});await rename(path+'.tmp',path);}catch{}finally{captureReportBusy=false;}
+};
 const observer=createAugmentObserver(names,event=>{if(running)log.append(event);});
 const chatObserver=createChatObserver(names,event=>{if(running)log.append(event);});
 const readChatCatalog=createChatCatalogReader(lcuRequest);
@@ -43,18 +53,20 @@ const captureTimer=setInterval(async()=>{
  if(!running||capturing||Date.now()<nextCaptureAt||!lastLiveState||!['KIWI','ARAM'].includes(lastLiveState.mode))return;
  capturing=true;nextCaptureAt=Date.now()+500;
  const generation=captureGeneration;
+ const captureStarted=Date.now();
  try{
-  const frame=await captureWorker.capture(captureStop.signal);
+  const frame=await captureWorker.capture(captureStop.signal,{focus:captureSchedule.choose(observer.status().knownSlots??0)});
   if(running&&generation===captureGeneration&&lastLiveState){
    observer.observe(frame);
-   ultimateObserver.observe(frame,lastLiveState,hudAssets.key());
+   if(frame.focus!=='titles')ultimateObserver.observe(frame,lastLiveState,hudAssets.key());
    const diagnostic=observer.status();
-   const captureStatus=JSON.stringify([frame.available,frame.foreground===true,frame.reason??'',diagnostic.recognized,diagnostic.method]);
-   if(captureStatus!==lastCaptureAvailable){lastCaptureAvailable=captureStatus;log.append({kind:'augment_capture_status',available:frame.ocrAvailable??frame.available,foreground:frame.foreground===true,reason:frame.reason??'',...diagnostic});}
+   void captureReport({available:frame.available===true,foreground:frame.foreground===true,panelOccluded:frame.panelOccluded===true,focus:frame.focus,recognized:diagnostic.recognized,knownSlots:diagnostic.knownSlots,reason:diagnostic.reason??frame.reason,captureBackend:frame.captureBackend,elapsedMs:Date.now()-captureStarted,ageMs:Number.isFinite(frame.capturedAt)?Date.now()-frame.capturedAt:undefined});
+   const captureStatus=JSON.stringify([frame.available,frame.foreground===true,diagnostic.reason??frame.reason??'',diagnostic.recognized,diagnostic.method]);
+   if(captureStatus!==lastCaptureAvailable){lastCaptureAvailable=captureStatus;log.append({kind:'augment_capture_status',available:frame.ocrAvailable??frame.available,foreground:frame.foreground===true,reason:frame.reason??'',...diagnostic,captureBackend:frame.captureBackend,timings:frame.timings});}
    if(!frame.available)nextCaptureAt=Date.now()+60000;
-   chatObserver.observe(frame,lastLiveState);
+   if(frame.focus!=='titles'&&!frame.panelOccluded)chatObserver.observe(frame,lastLiveState);
   }
- }catch{if(running&&lastCaptureAvailable!=='capture-error'){lastCaptureAvailable='capture-error';log.append({kind:'augment_capture_status',available:true,reason:'capture_failed'});}}finally{capturing=false;}
+ }catch{if(running){void captureReport({available:false,reason:'capture_failed',elapsedMs:Date.now()-captureStarted});if(lastCaptureAvailable!=='capture-error'){lastCaptureAvailable='capture-error';log.append({kind:'augment_capture_status',available:true,reason:'capture_failed'});}}}finally{capturing=false;}
 },250);captureTimer.unref();
 while(running){
  try{
@@ -81,7 +93,7 @@ while(running){
    }
    const time=all.gameData.gameTime;
    if(nextMatch||gameTime===null||time<gameTime){
-    nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();chatObserver.reset();ultimateObserver.reset();hudAssets.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
+    nextMatch=false;log=createEventLog(folder,'live-'+Date.now());lastEvent=-1;observer.reset();chatObserver.reset();ultimateObserver.reset();hudAssets.reset();captureSchedule.reset();captureGeneration++;lastCaptureAvailable=null;nextCaptureAt=0;
     log.append({kind:'game_start',me:state.me??{},queue:state.mode,gameTime:state.gameTime,allies:state.allies,enemies:state.enemies});
    }
    gameTime=time;log.append(stateEvent(state));

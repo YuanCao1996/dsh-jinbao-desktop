@@ -38,7 +38,7 @@ export function projectProgressEvent(state,event){
   }
   if(['augment_picked','augment_mutate','augment_picked_chat'].includes(event.kind)){
     const augment=clean(event.augment??event.name);if(!augment)return;
-    const confirmed=event.confidence!=='low'&&event.source!=='ocr-inferred';
+    const confirmed=event.confidence!=='low'&&event.source!=='ocr-inferred'&&event.source!=='countdown-default-confirmed';
     const own=confirmed&&(isOwn(state,event)||(event.kind==='augment_picked'&&event.source==='scoreboard-icon'));
     const hero=namedHero(state,event),owner=own?'自己':hero??'归属未确认';
     addProgressEvent(state,JSON.stringify(['augment',event.kind,owner,augment,confirmed]),`${confirmed?'海克斯选择':'疑似海克斯选择'}：${owner} · ${augment}`,seconds,'augment-selection');

@@ -10,14 +10,24 @@ function New-OverlaySurfaceBrush([string]$hex){
 function Update-OverlayComposer {
  if(!$controls.ComposerPlaceholder){return}
  $controls.ComposerPlaceholder.Visibility=if($controls.QuestionBox.Text){'Collapsed'}else{'Visible'}
+ $teamMode=$script:snapshot.teamChatMode -eq 'team'
+ if($controls.TeamModeButton){
+  $controls.TeamModeButton.Visibility=if($script:snapshot.teamSupported){'Visible'}else{'Collapsed'}
+  $controls.TeamManageButton.Visibility=$controls.TeamModeButton.Visibility
+  $controls.TeamModeButton.Content=if($teamMode){'队伍'}else{'个人'}
+  $controls.ComposerPlaceholder.Text=if($teamMode){'队伍消息 · @金宝 提问'}else{'问问教练 · Enter 发送'}
+ }
  $controls.SendButton.Content=if($script:job){'思考中'}else{'发送'}
  $controls.SendButton.ToolTip=if($script:job){'教练正在回复，请稍候'}else{'Enter 发送；Shift+Enter 换行'}
  $suggestion=[string]$script:snapshot.suggestedQuestion
  $controls.SuggestButton.Visibility=if($suggestion){'Visible'}else{'Collapsed'}
  $controls.SuggestButton.ToolTip=if($suggestion){$suggestion}else{'当前没有可用建议问题'}
  $controls.ScreenButton.IsEnabled=!!($script:snapshot.match -and !$script:snapshot.ended)
+ $controls.ScreenButton.Visibility=if($teamMode){'Collapsed'}else{'Visible'}
+ if($teamMode){$controls.SuggestButton.Visibility='Collapsed'}
  $progress=if($script:job){if($script:snapshot.status){[string]$script:snapshot.status}else{'教练正在分析…'}}else{''}
  $controls.ChatStatusText.Text=$progress
+ if($teamMode){$progress=[string]$script:snapshot.teamChatStatus;$controls.ChatStatusText.Text=$progress}
  $controls.ChatStatusText.Visibility=if($progress){'Visible'}else{'Collapsed'}
 }
 function Show-OverlayModeMenu {
@@ -46,7 +56,7 @@ function Update-OverlaySurface([bool]$force=$false){
    foreach($row in $rows){
     $user=$row.role -eq 'user';$card=New-Object Windows.Controls.Border;$card.CornerRadius=10;$card.Padding='12,10';$card.Margin=if($user){'40,0,0,10'}else{'0,0,20,10'};$card.Background=New-OverlaySurfaceBrush $(if($user){'#3F6278'}else{'#293747'});$card.BorderBrush=if($user){'#354C58'}else{'#2B3642'};$card.BorderThickness=1
     $column=New-Object Windows.Controls.StackPanel
-    $speakerName=if($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
+    $speakerName=if($row.origin -eq 'team' -and $row.displayName){[string]$row.displayName}elseif($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
     $speaker=New-OverlayLabel $speakerName 11 $(if($row.failed){'#F5AD91'}elseif($user){'#ACBFCE'}else{'#E7BE79'});$speaker.Margin='0,0,0,5';$speaker.FontWeight='SemiBold';$column.Children.Add($speaker)|Out-Null
     $body=New-OverlayLabel ([string]$row.text) $font '#EBF0F5';Set-HighlightedText $body ([string]$row.text);$column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
     $copyMenu=New-Object Windows.Controls.ContextMenu;$copyMenu.Background='#19212A';$copyMenu.Foreground='#E8EEF5';$copyItem=New-Object Windows.Controls.MenuItem;$copyItem.Header='复制这条消息';$copyItem.Tag=[string]$row.text;$copyItem.Add_Click({param($sender,$eventArgs) try{[Windows.Clipboard]::SetText([string]$sender.Tag)}catch{}});$copyMenu.Items.Add($copyItem)|Out-Null;$card.ContextMenu=$copyMenu

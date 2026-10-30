@@ -23,6 +23,8 @@ internal static class JinbaoLauncher
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "--headless") start.Arguments += " --headless";
+                else if (args[i] == "--team-rooms") start.Arguments += " --team-rooms";
+                else if (args[i] == "--team-byok-host") start.Arguments += " --team-byok-host";
                 else if (args[i] == "--state" && i + 1 < args.Length)
                 {
                     string state = Path.GetFullPath(args[++i]);

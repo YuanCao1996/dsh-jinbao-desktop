@@ -34,10 +34,9 @@ public static class JinbaoGameFrame {
   if(![JinbaoGameFrame]::GetClientRect($handle,[ref]$rect) -or ![JinbaoGameFrame]::ClientToScreen($handle,[ref]$origin)){throw 'bounds'}
   $w=$rect.Right-$rect.Left;$h=$rect.Bottom-$rect.Top
   if($w -lt 320 -or $h -lt 200){throw 'bounds'}
-  $bitmap=[Drawing.Bitmap]::new($w,$h);$graphics=[Drawing.Graphics]::FromImage($bitmap)
-  . (Join-Path $PSScriptRoot '../desktop-release/capture-coordination.ps1')
-  $lease=$null
-  try{$lease=Enter-JinbaoCapture $StateDir;$graphics.CopyFromScreen($origin.X,$origin.Y,0,0,$bitmap.Size)}finally{Exit-JinbaoCapture $lease;$graphics.Dispose()}
+  $bitmap=[Drawing.Bitmap]::new($w,$h)
+  . (Join-Path $PSScriptRoot '../desktop-release/window-pixels.ps1')
+  $captureBackend=Copy-JinbaoGamePixels $handle $bitmap $origin.X $origin.Y $StateDir
  }
  try{
   if($Area -eq 'augments'){

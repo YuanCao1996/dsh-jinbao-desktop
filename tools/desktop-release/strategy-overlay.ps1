@@ -103,6 +103,8 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,4">
+      <Button x:Name="TeamModeButton" Content="个人" FontSize="11" Padding="8,3" ToolTip="切换个人与队伍聊天" Visibility="Collapsed"/>
+      <Button x:Name="TeamManageButton" Content="队伍管理" FontSize="11" Padding="8,3" Visibility="Collapsed"/>
       <Button x:Name="SuggestButton" Content="推荐追问" FontSize="11" Padding="8,3" ToolTip="根据本局状态填入一个可回答的问题" Visibility="Collapsed"/>
       <Button x:Name="ScreenButton" Content="看当前画面" FontSize="11" Padding="8,3" ToolTip="让教练调用画面查看工具后回答"/>
       <TextBlock x:Name="ChatStatusText" Foreground="#E7BE79" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="280" Margin="8,0,0,0" Visibility="Collapsed"/>
@@ -149,7 +151,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
-foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','SuggestButton','ScreenButton','ChatStatusText')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','SuggestButton','ScreenButton','ChatStatusText','TeamModeButton','TeamManageButton')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
@@ -233,7 +235,7 @@ function Set-CaptureVisibility([bool]$show){
  $script:showInCapture=$show
  if($controls.CaptureMenuItem){$controls.CaptureMenuItem.IsChecked=$show}
  if($script:windowHandle -eq [IntPtr]::Zero){return $true}
- $affinity=if($show){0}else{0x11}
+ $affinity=if($show -and !$script:captureLeaseId){0}else{0x11}
  $ok=[JinbaoOverlayNative]::SetWindowDisplayAffinity($script:windowHandle,$affinity)
  if(!$ok){$controls.HintText.Text='录制可见性设置失败，请检查直播软件的画面预览。'}
  return $ok
@@ -381,9 +383,26 @@ foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','�
  $controls.Tabs.Children.Add($button) | Out-Null
 }
 function Update-State {
+ if(!$SelfTest -and [IO.File]::Exists((Join-Path $StateDir 'overlay-stopped'))){
+  $script:exitApproved=$true;if($window.IsLoaded){$window.Close()};return
+ }
  try{
   if((Get-Item -LiteralPath $stateFile -ErrorAction Stop).Length -gt 1048576){return}
   $next=[IO.File]::ReadAllText($stateFile,[Text.Encoding]::UTF8) | ConvertFrom-Json
+  try{
+   $teamPath=Join-Path $StateDir 'team-room-overlay.json'
+   if((Get-Item -LiteralPath $teamPath -ErrorAction Stop).Length -le 1048576){
+    $team=[IO.File]::ReadAllText($teamPath,[Text.Encoding]::UTF8)|ConvertFrom-Json
+    if($team.supported -and [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-[double]$team.updatedAt -lt 15000){
+     $next|Add-Member -NotePropertyName teamSupported -NotePropertyValue $true -Force
+     $next|Add-Member -NotePropertyName teamChatMode -NotePropertyValue ([string]$team.mode) -Force
+     $next|Add-Member -NotePropertyName teamChatStatus -NotePropertyValue ([string]$team.status) -Force
+     if($team.mode -eq 'team'){
+      $next.chat=[string]$team.chat;$next.chatRows=@($team.chatRows)
+     }
+    }
+   }
+  }catch{}
   if($script:snapshot -and ([string]$next.game -ne [string]$script:snapshot.game -or [string]$next.match -ne [string]$script:snapshot.match)){
    $script:scrollPositions=@{};$script:renderedTab=$null
   }
@@ -463,7 +482,13 @@ function Start-Request([string]$route,[hashtable]$payload){
  try{
   $url=[IO.File]::ReadAllText((Join-Path $StateDir 'settings-link.txt')).Trim()
   if($url -notmatch '^http://127\.0\.0\.1:[0-9]+/#[a-f0-9]{64}$'){throw 'Invalid local URL'}
-  $uri=[Uri]$url;$endpoint=$uri.GetLeftPart([UriPartial]::Authority)+'/api/overlay/'+$route;$nonce=$uri.Fragment.Substring(1)
+  $uri=[Uri]$url;$nonce=$uri.Fragment.Substring(1)
+  if($route -eq 'team'){$endpoint=$uri.GetLeftPart([UriPartial]::Authority)+'/api/team/command'}
+  else{$endpoint=$uri.GetLeftPart([UriPartial]::Authority)+'/api/overlay/'+$route}
+  if($route -eq 'ask' -and $script:snapshot.teamChatMode -eq 'team'){
+   $endpoint=$uri.GetLeftPart([UriPartial]::Authority)+'/api/team/command'
+   $payload=@{action='send';data=@{text=[string]$payload.question;clientMessageId=[guid]::NewGuid().ToString()}}
+  }
   $body=$payload | ConvertTo-Json -Compress
   $script:job=Start-Job -ArgumentList $endpoint,$nonce,$body -ScriptBlock {
    param($endpoint,$nonce,$body)
@@ -488,6 +513,17 @@ function Send-Question {
  if($script:job){$script:pendingQuestion=$question;$controls.QuestionBox.Text=''}
 }
 $controls.SendButton.Add_Click({Send-Question})
+$controls.TeamModeButton.Add_Click({
+ $mode=if($script:snapshot.teamChatMode -eq 'team'){'personal'}else{'team'}
+ Start-Request 'team' @{action='mode';data=@{mode=$mode}}
+})
+$controls.TeamManageButton.Add_Click({
+ try{
+  $url=[IO.File]::ReadAllText((Join-Path $StateDir 'settings-link.txt')).Trim()
+  if($url -notmatch '^http://127\.0\.0\.1:[0-9]+/#[a-f0-9]{64}$'){return}
+  $uri=[Uri]$url;Start-Process ($uri.GetLeftPart([UriPartial]::Authority)+'/team-room'+$uri.Fragment)
+ }catch{}
+})
 $controls.QuestionBox.Add_PreviewKeyDown({param($sender,$eventArgs)
  if($eventArgs.Key -eq [Windows.Input.Key]::Return -and ([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -eq 0){Send-Question;$eventArgs.Handled=$true}
 })
@@ -558,25 +594,49 @@ function Pointer-Tick {
  Update-Drag $p.X $p.Y (([JinbaoOverlayNative]::GetAsyncKeyState(1) -band 0x8000) -ne 0)
  Set-PointerMode (Test-PointerHotzone (New-Object Windows.Point($p.X,$p.Y)))
 }
+function Set-CaptureLeaseAffinity([uint32]$affinity){
+ $handles=@($script:windowHandle)
+ foreach($surface in @($quickConfirm.Child,$settingsMenu)){
+  if($surface -and $surface.IsVisible){
+   $source=[Windows.PresentationSource]::FromVisual($surface)
+   if($source -is [Windows.Interop.HwndSource]){$handles+= $source.Handle}
+  }
+ }
+ $ok=$true
+ foreach($handle in @($handles | Select-Object -Unique)){
+  if($handle -ne [IntPtr]::Zero){
+   if(![JinbaoOverlayNative]::SetWindowDisplayAffinity($handle,$affinity)){$ok=$false}
+  }
+ }
+ return $ok
+}
+function Write-CaptureReceipt([string]$path,[string]$json){
+ try{[IO.File]::WriteAllText($path,$json,[Text.UTF8Encoding]::new($false));return $true}
+ catch [IO.IOException]{$script:captureIoFailures=[int]$script:captureIoFailures+1;$script:lastCaptureIoFailureAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();return $false}
+ catch [UnauthorizedAccessException]{$script:captureIoFailures=[int]$script:captureIoFailures+1;$script:lastCaptureIoFailureAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();return $false}
+}
 function Update-CaptureLease {
  $now=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
  if(!$script:lastCaptureHeartbeat -or $now-$script:lastCaptureHeartbeat -gt 500){
-  [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-capture-host.json'),(@{pid=$PID;at=$now}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false));$script:lastCaptureHeartbeat=$now
+  if(Write-CaptureReceipt (Join-Path $StateDir 'overlay-capture-host.json') (@{pid=$PID;at=$now;ioFailures=[int]$script:captureIoFailures;lastIoFailureAt=$script:lastCaptureIoFailureAt;displayMode=[string]$script:displayMode;page=[string]$script:tab;collapsed=[bool]$script:collapsed;subtitle=[bool]$script:subtitleMode;visible=[bool]$window.IsVisible;width=[double]$window.ActualWidth;height=[double]$window.ActualHeight;opacity=[double]$window.Opacity;queueSize=[int]$script:playbackQueue.Count;playbackActive=[bool]$script:activePlayback;playbackPhase=[string]$script:playbackPhase}|ConvertTo-Json -Compress)){$script:lastCaptureHeartbeat=$now}
  }
  $id='';try{$request=[IO.File]::ReadAllText((Join-Path $StateDir 'overlay-capture-request.json'))|ConvertFrom-Json;if($request.id -match '^[a-f0-9]{32}$' -and $request.expiresAt -gt $now -and $request.expiresAt -le $now+1100){$id=[string]$request.id}}catch{}
- if($id -and $script:captureLeaseId -ne $id){
-  $script:captureLeaseId=$id;$window.Opacity=0
-  if($quickConfirm.Child){$quickConfirm.Child.Opacity=0};$settingsMenu.Opacity=0
-  $window.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
-  [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-capture-ready.json'),(@{id=$id;at=$now}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+ if($id -and ($script:captureLeaseId -ne $id -or $script:captureReadyId -ne $id)){
+  # Exclude our surfaces from pixel capture without hiding them on the user's screen.
+  # Never acknowledge a failed exclusion: the collector must skip contaminated pixels.
+  # Track partial failures too, so any successfully excluded surface is restored.
+  $script:captureLeaseId=$id
+  if(Set-CaptureLeaseAffinity 0x11){
+   if(Write-CaptureReceipt (Join-Path $StateDir 'overlay-capture-ready.json') (@{id=$id;at=$now}|ConvertTo-Json -Compress)){$script:captureReadyId=$id}
+  }
  }elseif(!$id -and $script:captureLeaseId){
-  $script:captureLeaseId='';$window.Opacity=1;if($quickConfirm.Child){$quickConfirm.Child.Opacity=1};$settingsMenu.Opacity=1
-  $window.Dispatcher.Invoke([Action]{},[Windows.Threading.DispatcherPriority]::Render)
+  $affinity=if($script:showInCapture){0}else{0x11}
+  if(Set-CaptureLeaseAffinity $affinity){$script:captureLeaseId='';$script:captureReadyId=''}
  }
 }
 function Save-ShortcutDiagnostics {
  if($SelfTest){return}
- [IO.File]::WriteAllText((Join-Path $StateDir 'overlay-hotkeys.json'),(@{pid=$PID;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();bindings=@($script:shortcutResults);lastReceived=$script:lastShortcutReceived}|ConvertTo-Json -Depth 5 -Compress),[Text.UTF8Encoding]::new($false))
+ Write-CaptureReceipt (Join-Path $StateDir 'overlay-hotkeys.json') (@{pid=$PID;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();bindings=@($script:shortcutResults);lastReceived=$script:lastShortcutReceived}|ConvertTo-Json -Depth 5 -Compress) | Out-Null
 }
 function Invoke-OverlayShortcut([int]$id){
  if($id -ge 712 -and $id -le 715){$id-=10}
@@ -630,6 +690,7 @@ $window.Add_Closing({param($sender,$eventArgs)
   $confirmed=if($SelfTest){$script:testExitChoice}else{[Windows.MessageBox]::Show($window,'确定退出金宝吗？退出后将停止采集和策略建议。','退出金宝',[Windows.MessageBoxButton]::YesNo,[Windows.MessageBoxImage]::Question,[Windows.MessageBoxResult]::No) -eq [Windows.MessageBoxResult]::Yes}
   if(!$confirmed){$eventArgs.Cancel=$true;return};$script:exitApproved=$true
  }
+ if(!$SelfTest){[IO.File]::WriteAllText((Join-Path $StateDir 'overlay-stopped'),'closed',[Text.UTF8Encoding]::new($false))}
 })
 $window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
 . (Join-Path $PSScriptRoot 'confirmation-countdown.ps1')
@@ -659,6 +720,43 @@ try{
     Save-Preferences
     $savedCapture=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
     $script:testResult.captureVisibilitySaved=$savedCapture.showInCapture -eq $true -and $savedCapture.capturePreferenceVersion -eq 2
+    $window.Opacity=0.37
+    $leaseRequest=Join-Path $StateDir 'overlay-capture-request.json'
+    $leaseTestId=[Guid]::NewGuid().ToString('N')
+    [IO.File]::WriteAllText($leaseRequest,(@{id=$leaseTestId;expiresAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+1000}|ConvertTo-Json -Compress))
+    Update-CaptureLease
+    $leaseAck=[IO.File]::ReadAllText((Join-Path $StateDir 'overlay-capture-ready.json'))|ConvertFrom-Json
+    $script:testResult.captureLeaseNoFlicker=$leaseAck.id -eq $leaseTestId -and $window.Opacity -eq 0.37 -and [JinbaoOverlayNative]::GetWindowDisplayAffinity($script:windowHandle,[ref]$captureAffinity) -and $captureAffinity -eq 0x11
+    [IO.File]::Delete($leaseRequest);Update-CaptureLease
+    $script:testResult.captureLeaseRestoresPreference=$window.Opacity -eq 0.37 -and $script:showInCapture -and [JinbaoOverlayNative]::GetWindowDisplayAffinity($script:windowHandle,[ref]$captureAffinity) -and $captureAffinity -eq 0
+    $affinityImplementation=${function:Set-CaptureLeaseAffinity}
+    $leaseTestId=[Guid]::NewGuid().ToString('N')
+    [IO.File]::WriteAllText($leaseRequest,(@{id=$leaseTestId;expiresAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+1000}|ConvertTo-Json -Compress))
+    try{
+     function Set-CaptureLeaseAffinity([uint32]$affinity){[JinbaoOverlayNative]::SetWindowDisplayAffinity($script:windowHandle,$affinity)|Out-Null;return $false}
+     Update-CaptureLease
+     $deniedAck=[IO.File]::ReadAllText((Join-Path $StateDir 'overlay-capture-ready.json'))|ConvertFrom-Json
+    }finally{${function:Set-CaptureLeaseAffinity}=$affinityImplementation;[IO.File]::Delete($leaseRequest)}
+    Update-CaptureLease
+    $script:testResult.captureLeasePartialFailureRecovers=$deniedAck.id -ne $leaseTestId -and !$script:captureLeaseId -and $window.Opacity -eq 0.37 -and [JinbaoOverlayNative]::GetWindowDisplayAffinity($script:windowHandle,[ref]$captureAffinity) -and $captureAffinity -eq 0
+    $hostReceipt=Join-Path $StateDir 'overlay-capture-host.json'
+    $reader=[IO.File]::Open($hostReceipt,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try{$script:lastCaptureHeartbeat=0;Update-CaptureLease;$script:testResult.captureHeartbeatLockSurvived=$script:lastCaptureHeartbeat -eq 0}finally{$reader.Dispose()}
+    Update-CaptureLease
+    $restoredHost=[IO.File]::ReadAllText($hostReceipt)|ConvertFrom-Json
+    $script:testResult.captureHeartbeatRecovers=$restoredHost.pid -eq $PID -and [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$restoredHost.at -lt 1000
+    $readyReceipt=Join-Path $StateDir 'overlay-capture-ready.json';$leaseTestId=[Guid]::NewGuid().ToString('N')
+    [IO.File]::WriteAllText($leaseRequest,(@{id=$leaseTestId;expiresAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+1000}|ConvertTo-Json -Compress))
+    $reader=[IO.File]::Open($readyReceipt,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try{Update-CaptureLease;$script:testResult.captureReadyLockSurvived=$script:captureReadyId -ne $leaseTestId}finally{$reader.Dispose()}
+    Update-CaptureLease
+    $restoredReady=[IO.File]::ReadAllText($readyReceipt)|ConvertFrom-Json
+    $script:testResult.captureReadyRecovers=$restoredReady.id -eq $leaseTestId
+    [IO.File]::Delete($leaseRequest);Update-CaptureLease
+    $script:lastCaptureHeartbeat=0;Update-CaptureLease
+    $ioState=[IO.File]::ReadAllText($hostReceipt)|ConvertFrom-Json
+    $script:testResult.captureIoFaultsRecorded=$ioState.ioFailures -ge 2
+    $window.Opacity=0
     $captureHidden=Set-CaptureVisibility $false
     $script:testResult.captureHidden=$captureHidden -and [JinbaoOverlayNative]::GetWindowDisplayAffinity($script:windowHandle,[ref]$captureAffinity) -and $captureAffinity -eq 0x11
     Save-Preferences

@@ -5,10 +5,10 @@ import vm from 'node:vm';
 test('settings visibly switches from binding form to signed-in card and back on logout',async()=>{
  const html=await readFile(new URL('../settings.html',import.meta.url),'utf8');
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(([,id])=>[id,{hidden:false,value:'',textContent:'',className:'',classes:new Set(),classList:{toggle(name,on){if(on)elements.get(id).classes.add(name);else elements.get(id).classes.delete(name);}},scrollIntoView(){},focus(){}}]));
- let method='ip-pilot';
+ let method='ip-pilot',teamCache,teamUsage;
  const context=vm.createContext({URL,Date,console,location:{hash:'#test',pathname:'/'},history:{replaceState(){}},document:{hidden:false,getElementById:id=>elements.get(id)},setInterval(){},setTimeout(){},clearTimeout(){},window:{open(){}},fetch:async(url,options={})=>{
   const route=url.replace('/api/','');
-  if(route==='status')return Response.json({mode:'cloud',emailEnabled:true,account:method?{loginMethod:method,features:{model:true,retrieval:true}}:null,phoneSync:{linked:true,enabled:true},mobileUrl:'https://api.jinbaoai.top/desktop/mobile',emailDisplay:'a***@example.com'});
+  if(route==='status')return Response.json({mode:'cloud',teamCache,teamUsage,emailEnabled:true,account:method?{loginMethod:method,features:{model:true,retrieval:true}}:null,phoneSync:{linked:true,enabled:true},mobileUrl:'https://api.jinbaoai.top/desktop/mobile',emailDisplay:'a***@example.com'});
   if(route==='login/email/send')return Response.json({challengeId:'a'.repeat(48),retryAfter:60});
   if(route==='login/email/verify')method='email';
   if(route==='logout')method=null;
@@ -36,4 +36,13 @@ test('settings visibly switches from binding form to signed-in card and back on 
  assert.match(elements.get('quotaDetail').textContent,/每周额度/);assert.match(elements.get('quotaDetail').textContent,/下次补充/);assert.match(elements.get('quotaDetail').textContent,/北京时间/);
  await vm.runInContext("renderQuota({cloudConfigured:true,accountError:503})",context);assert.equal(elements.get('quotaProgress').hidden,true);assert.match(elements.get('quotaText').textContent,/暂不可用/);
  await vm.runInContext('renderQuota({})',context);assert.equal(elements.get('quota').hidden,true);
+ teamCache={supported:true,active:2,pending:1,localDeleted:3,reportReceived:2,reportPending:1,reports:{state:'unbound'}};await vm.runInContext('refresh(true)',context);
+ assert.equal(elements.get('teamCacheStatus').hidden,false);assert.match(elements.get('teamCacheStatus').textContent,/待清理 1/);
+ assert.match(elements.get('teamCacheStatus').textContent,/回执已送达 2 · 待补传 1/);
+ assert.match(elements.get('teamCacheStatus').textContent,/部分旧记录缺少补传授权/);
+ teamCache={supported:false,error:'cleanup_unavailable'};await vm.runInContext('refresh(true)',context);
+ assert.equal(elements.get('teamCacheStatus').hidden,false);assert.match(elements.get('teamCacheStatus').textContent,/群主机已暂停/);
+ teamUsage={supported:true,pending:2,received:3,held:1};await vm.runInContext('refresh(true)',context);assert.match(elements.get('teamUsageStatus').textContent,/待同步 2 · 已送达 3 · 待核对 1/);
+ teamUsage={supported:false,error:'usage_unavailable'};await vm.runInContext('refresh(true)',context);assert.match(elements.get('teamUsageStatus').textContent,/群主机已暂停/);
+ teamCache=undefined;await vm.runInContext('refresh(true)',context);assert.equal(elements.get('teamCacheStatus').hidden,true);
 });

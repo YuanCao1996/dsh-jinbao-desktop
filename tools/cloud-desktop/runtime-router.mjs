@@ -4,7 +4,7 @@ export function createRuntimeRouter({getMode,factories,isCurrent=()=>true,maxQue
  let active=null,instance=null,opening=null,mode='',generation=0,closed=false,draining=false,retiring=false,retirement=Promise.resolve();const queue=[],retiringInstances=new Set();
  const failure=(message,code)=>Object.assign(Error(message),{status:409,...(code?{code}:{})});
  const manual=request=>request.priority==='manual'||request.topic==='chat';
- const emit=(task,event)=>{try{onEvent({game:task.request.game,match:task.request.match,topic:task.request.topic,requestId:task.request.activityId,event});}catch{}};
+ const emit=(task,event,extra={})=>{try{onEvent({game:task.request.game,match:task.request.match,topic:task.request.topic,requestId:task.request.activityId,event,...extra});}catch{}};
  function retire(previous,reason){
   if(!previous)return Promise.resolve();
   retiring=true;retiringInstances.add(previous);
@@ -40,7 +40,7 @@ export function createRuntimeRouter({getMode,factories,isCurrent=()=>true,maxQue
     if(epoch!==generation||closed||!instance)throw failure('调用方式已切换');
     const result=await instance.ask(task.request);
     if(epoch!==generation||!isCurrent(task.request.game,task.request.match))throw failure('调用方式或对局已切换');emit(task,'task_completed');task.resolve(result);
-   }catch(error){emit(task,epoch!==generation||task.interrupted?'task_cancelled':!isCurrent(task.request.game,task.request.match)?'task_stale':'task_failed');task.reject(task.interrupted?failure('已优先处理手动请求','agent_preempted'):error);}finally{active=null;}
+   }catch(error){emit(task,epoch!==generation||task.interrupted?'task_cancelled':!isCurrent(task.request.game,task.request.match)?'task_stale':'task_failed',{code:task.interrupted?'agent_preempted':error.code,httpStatus:error.status});task.reject(task.interrupted?failure('已优先处理手动请求','agent_preempted'):error);}finally{active=null;}
   }}finally{draining=false;}
  }
  return{busy:()=>!!active||draining,async reconfigure(){await reset();},

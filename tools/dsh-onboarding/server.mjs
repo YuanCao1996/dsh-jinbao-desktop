@@ -9,12 +9,17 @@ import { createOverlayService } from './overlay-state.mjs';
 import { createPhoneSync } from './phone-sync.mjs';
 import {chatFailureMessage} from './chat-errors.mjs';
 import {createUserMemory} from '../cloud-desktop/user-memory.mjs';
-const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY',sync:'JINBAO_SYNC_TOKEN'};
+import { createTeamBridge } from '../team-room/bridge.mjs';
+import { createTeamLocalRoutes, serveTeamPage } from '../team-room/local-routes.mjs';
+import { createDesktopExploration } from './exploration.mjs';
+import { currentHeroSuggestion, currentModeSuggestion } from './exploration-evidence.mjs';
+import { createShutdown } from '../cloud-desktop/shutdown.mjs';
+const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY',speech:'JINBAO_USER_SPEECH_API_KEY',sync:'JINBAO_SYNC_TOKEN'};
 const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
 async function body(req,max=512*1024,onBytes){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){onBytes?.(declared);req.resume();throw error(413);}let size=0;const chunks=[];for await(const c of req){size+=c.length;onBytes?.(size);if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
-export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource,userMemory,activity}) {
+export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource,userMemory,activity,diagnostics,speech,canAutoRequest,teamRooms=false,teamHostPreview=false,teamCacheStore,teamCacheReports,teamUsageOutbox,teamUsageError=false,teamCacheError=false}) {
  if(!Number.isInteger(coachPort)||coachPort<1||coachPort>65535)throw Error('Invalid coach port');
  const coachOrigin='http://127.0.0.1:'+coachPort;
  const service=serviceUrl(serviceBaseUrl),nonce=randomBytes(32).toString('hex');
@@ -33,6 +38,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  try{syncForgotten=JSON.parse(await readFile(join(stateDir,'sync-forgotten.json'),'utf8')).forgotten===true;}catch{}
  const locked=fn=>{if(!accepting)return Promise.reject(error(409));const next=mutation.then(fn);mutation=next.catch(()=>{});return next;};
  const resolve=async key=>(await credentials.resolve(refs[key]))?.value;
+ const exploration=createDesktopExploration({stateDir,serviceBaseUrl:service,getToken:()=>resolve('cloud'),fetchImpl});
  async function saveConfig(next){await writeFile(filename+'.tmp',JSON.stringify(next),{mode:0o600});await rename(filename+'.tmp',filename);config=next;}
  async function acceptCloud(result){
   if(typeof result.sessionToken!=='string'||!/^j[cdw]_[a-f0-9]{64}$/.test(result.sessionToken))throw error(502);
@@ -112,7 +118,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
    activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000,updateBlocked:!!snapshot.match&&!snapshot.ended&&(snapshot.gameTime!=='等待对局'||snapshot.phase==='ChampSelect')&&Date.now()-snapshot.updatedAt<30000};
  }
- const overlay=await createOverlayService({stateDir,activity,
+ const overlay=await createOverlayService({stateDir,activity,canAutoRequest,
   agentChat:async request=>{
    if(config.mode==='demo')throw error(409);
    if(config.mode==='cloud'&&cloudAgent)return cloudAgent.ask(request);
@@ -129,6 +135,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  });
  const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl});
  const memories=userMemory??createUserMemory({stateDir});
+ const team=teamRooms?await createTeamBridge({stateDir,serviceBaseUrl:service,getToken:()=>resolve('cloud'),getFacts:()=>overlay.getTeamFacts(),fetchImpl,
+  localHost:teamHostPreview&&runtimeId==='standalone'?{credentials,getConfig:async()=>({...config}),getKey:()=>resolve('byok'),cacheStore:teamCacheStore,cacheReports:teamCacheReports,usageOutbox:teamUsageOutbox}:undefined,
+  applyConfirmation:input=>input.dismiss||input.timeoutDefault?overlay.confirm(input):overlay.confirmTeamSelection(input)}):null;
+ const teamRoutes=team?createTeamLocalRoutes(team):null;
  const server=http.createServer(async(req,res)=>{
   const expectedHost='127.0.0.1:'+server.address().port;
   if(req.headers.host!==expectedHost){send(res,403,{error:'invalid_host'});return;}
@@ -165,12 +175,53 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     }finally{clearTimeout(timer);}
     return;
    }
-   if(req.method==='GET'&&req.url==='/'){
+   if(team&&await serveTeamPage(req,res))return;
+   if(req.method==='GET'&&req.url==='/exploration'){
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src https://game.gtimg.cn; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
+    res.end(await readFile(new URL('./exploration.html',import.meta.url)));return;
+   }
+   if(req.method==='GET'&&(req.url==='/'||req.url==='/?page=voice')){
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
     res.end(await readFile(new URL('./settings.html',import.meta.url)));return;
    }
    if(!same(req.headers['x-jinbao-setup'],nonce))throw error(403);
    if(req.headers.origin&&req.headers.origin!=='http://'+expectedHost)throw error(403);
+   if(teamRoutes&&await teamRoutes(req,res))return;
+   if(req.url==='/api/exploration/suggestion'&&req.method==='GET'){const view=overlay.view();send(res,200,{suggestion:currentHeroSuggestion(view),modeSuggestion:currentModeSuggestion(view)});return;}
+   if(req.url.startsWith('/api/exploration')){
+    try{
+     const url=new URL(req.url,'http://127.0.0.1');
+     if(url.pathname!=='/api/exploration')throw error(404);
+     if(req.method==='GET'){
+      const game=url.searchParams.get('game')??'lol_pc',season=url.searchParams.get('season')??'',category=url.searchParams.get('category')??'英雄';
+      send(res,200,await exploration.view(game,season,category));return;
+     }
+     if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(400);
+     const value=await body(req,4096);let result;
+     if(value.action==='mark'&&Object.keys(value).sort().join(',')==='action,category,entity,explored,game,season')result=await exploration.mark(value.game,value.season,value.category,value.entity,value.explored);
+     else if(value.action==='markSuggestion'&&Object.keys(value).sort().join(',')==='action,alias,category,entity,game,matchKey,observedEntity,season'){
+      const view=overlay.view(),current=value.category==='模式'?currentModeSuggestion(view):value.category==='英雄'?currentHeroSuggestion(view):null;
+      if(!current||!value.matchKey||current.matchKey!==value.matchKey||current.entity!==value.observedEntity||current.alias!==value.alias||current.game!==value.game||current.season!==value.season||current.category!==value.category)throw error(409);
+      result=await exploration.mark(value.game,value.season,value.category,value.entity,true);
+     }
+     else if(value.action==='participation'&&Object.keys(value).sort().join(',')==='action,enabled')result=await exploration.participation(value.enabled);
+     else if(value.action==='sync'&&Object.keys(value).length===1)result=await exploration.sync();
+     else if(value.action==='conflict'&&Object.keys(value).length===1)result=await exploration.conflict();
+     else if(value.action==='resolve'&&Object.keys(value).sort().join(',')==='action,operationId,revision')result=await exploration.resolve(value.operationId,value.revision);
+     else throw error(400);
+     send(res,200,result);return;
+    }catch(problem){
+     const status=[400,401,403,404,409,413,429,502,503].includes(problem.status)?problem.status:503;
+     const safe=/^(请先登录已验证的账号|登录账号已变化|服务器地址不可用|响应过大|服务响应异常|账号身份无法确认|探索服务暂不可用|其他设备的数据已变化，需要检查差异|已退出探索榜|该图鉴暂未开放|探索记录无效|当前图鉴中没有该条目|本机探索记录过大|本机探索记录异常|账号身份已变化|待同步记录过多，请先同步|参与状态无效|请先参与探索榜|同步结果无法核验|当前没有可检查的冲突|冲突信息无效|数据再次变化，请重新检查差异)$/.test(problem.message)?problem.message:'探索服务暂不可用，请稍后重试';
+     send(res,status,{error:safe});return;
+    }
+   }
+   if(req.url==='/api/speech'&&req.method==='GET'){send(res,200,speech?{...speech.status(),keyConfigured:!!await resolve('speech')}:{supported:false});return;}
+   if(req.url==='/api/speech'&&req.method==='POST'&&speech){await locked(async()=>{const value=await body(req,2048),key=value.apiKey;delete value.apiKey;if(key!==undefined&&(typeof key!=='string'||key.length>512||/[\r\n]/.test(key)))throw error(400);const result=await speech.configure(value);if(key!==undefined){if(key.trim())await credentials.set(refs.speech,key.trim());else await credentials.unset(refs.speech);}send(res,200,{...result,keyConfigured:!!await resolve('speech')});});return;}
+   if(req.url==='/api/speech/preview'&&req.method==='POST'&&speech){await body(req,1024);send(res,200,speech.preview());return;}
+   if(req.url==='/api/diagnostics'&&req.method==='GET'){send(res,200,diagnostics?.status()??{recording:false,supported:false});return;}
+   if(req.url==='/api/diagnostics/mark'&&req.method==='POST'&&diagnostics){const value=await body(req,1024);send(res,200,diagnostics.mark(value.kind));return;}
+   if(req.url==='/api/diagnostics/export'&&req.method==='GET'&&diagnostics){res.setHeader('Content-Disposition','attachment; filename="jinbao-diagnostics.json"');send(res,200,await diagnostics.export());return;}
    const memoryPage=/^\/api\/memory\/(lol|wzry|generic)$/.exec(req.url);
    if(memoryPage&&req.method==='GET'){send(res,200,{game:memoryPage[1],preferences:await memories.list(memoryPage[1])});return;}
    if(req.url==='/api/overlay'&&req.method==='GET'){send(res,200,overlay.view());return;}
@@ -181,7 +232,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     send(res,200,await activity.setEnabled(value.enabled));return;
    }
    if(req.url==='/api/observation/windows'&&req.method==='GET'&&observation){send(res,200,{windows:await observation.list()});return;}
-   if(req.url==='/api/overlay/confirm'&&req.method==='POST'){send(res,200,await overlay.confirm(await body(req,4096)));return;}
+    if(req.url==='/api/overlay/confirm'&&req.method==='POST'){const input=await body(req,4096);send(res,200,team&&!input.timeoutDefault&&team.canConfirmLocal(input.id)?await team.command('local-confirmation',input):await overlay.confirm(input));return;}
    if(['/api/overlay/ask','/api/overlay/refresh'].includes(req.url)&&req.method==='POST'){
     if(!String(req.headers['content-type']).startsWith('application/json'))throw error(400);
     const b=await body(req,8192);
@@ -222,7 +273,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     let releaseNotes=null;try{const bundled=JSON.parse(await readFile(new URL('./release-notes.json',import.meta.url),'utf8'));if(bundled.version===version)releaseNotes=bundled.notes;}catch{}
     let maintenance=null;try{maintenance=JSON.parse(await readFile(join(stateDir,'maintenance-status.json'),'utf8'));}catch{}
     let emailDisplay=null;if(account?.loginMethod==='email')try{emailDisplay=JSON.parse(await readFile(join(stateDir,'email-account.json'),'utf8')).display;}catch{}
-    send(res,200,{...config,agentActivity:activity?.status()??{supported:false,enabled:false},agentRuntime:runtimeId??(cloudAgent?'cloud-preview':'local-dsh'),observation:observation?.status(),logSource:logSource?.status(),nativeInstallation:nativeInstaller?.status(),version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,phoneSync:phoneSync.status(),...await diagnostic()});return;
+    send(res,200,{...config,agentActivity:activity?.status()??{supported:false,enabled:false},agentRuntime:runtimeId??(cloudAgent?'cloud-preview':'local-dsh'),observation:observation?.status(),logSource:logSource?.status(),nativeInstallation:nativeInstaller?.status(),version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,teamSupported:!!team,teamCache:teamCacheStore?{...teamCacheStore.status(),reports:teamCacheReports?.status()}:{supported:false,...(teamCacheError?{error:'cleanup_unavailable'}:{})},teamUsage:teamUsageOutbox?teamUsageOutbox.status():{supported:false,...(teamUsageError?{error:'usage_unavailable'}:{})},phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
@@ -308,10 +359,12 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
       if(!await resolve('byok'))throw error(401);
      }
      if(b.mode==='cloud'&&!await resolve('cloud'))throw error(401);
-     await prepareModel?.(next);await saveConfig(next);await onModelChange?.(next);return {saved:true};
+     await prepareModel?.(next);await saveConfig(next);await team?.reconfigureHost();await onModelChange?.(next);return {saved:true};
     }
     if(req.url==='/api/observation/start'&&observation){const result=await observation.start(b);await logSource?.stop();return result;}
     if(req.url==='/api/observation/stop'&&observation)return observation.stop();
+    if(req.url==='/api/observation/confirm'&&observation)return observation.confirm(b);
+    if(req.url==='/api/observation/new-round'&&observation){if(b.confirmed!==true)throw error(400);return observation.newRound();}
     if(req.url==='/api/log-source/start'&&logSource){const result=await logSource.start(b);await observation?.stop();return result;}
     if(req.url==='/api/log-source/stop'&&logSource)return logSource.stop();
     if(req.url==='/api/login/ip'){
@@ -377,6 +430,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;
  await writeFile(join(stateDir,'settings-link.txt'),url,{mode:0o600});
  let httpClosing;
- const stopAccepting=()=>{accepting=false;if(!httpClosing)httpClosing=new Promise(resolve=>{server.closeAllConnections();server.close(()=>resolve());});};
- return {url,port:server.address().port,stopAccepting,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{stopAccepting();await mutation;await phoneSync.close();await memories.close();await overlay.close();await httpClosing;}};
+ const stopAccepting=()=>{accepting=false;team?.stopAccepting();if(!httpClosing){httpClosing=new Promise(resolve=>server.close(()=>resolve()));server.closeAllConnections();}};
+ const stopSetup=createShutdown({quiesce:stopAccepting,steps:[['commands',()=>mutation],['phone',()=>phoneSync.close()],['team',()=>team?.close()],['memories',()=>memories.close()],['overlay',()=>overlay.close()],['http',()=>httpClosing]]});
+ return {url,port:server.address().port,stopAccepting,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{if((await stopSetup()).failed.length)throw Error('setup_shutdown_failed');}};
 }

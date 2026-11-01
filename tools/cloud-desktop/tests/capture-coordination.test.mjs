@@ -8,7 +8,10 @@ import {fileURLToPath} from 'node:url';
 test('screen capture never bypasses a live overlay when heartbeat is corrupt or stale',{skip:process.platform!=='win32'},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'jinbao-capture-lease-'));
  try{
-  const value=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-File',fileURLToPath(new URL('../../desktop-release/tests/capture-coordination.test.ps1',import.meta.url)),'-StateDir',dir],{windowsHide:true,encoding:'utf8',timeout:15000}).trim());
+  // Every other PowerShell-backed test launches its script with -ExecutionPolicy Bypass;
+  // without it this one fails on machines whose policy is Restricted or AllSigned, even
+  // though the script under test is correct.
+  const value=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',fileURLToPath(new URL('../../desktop-release/tests/capture-coordination.test.ps1',import.meta.url)),'-StateDir',dir],{windowsHide:true,encoding:'utf8',timeout:15000}).trim());
   for(const key of ['corruptHeartbeatBlocked','staleActiveBlocked','stalePidIgnored','leaseReleased'])assert.equal(value[key],true);
  }finally{assert.equal(dirname(resolve(dir)),resolve(tmpdir()));await rm(dir,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
 });

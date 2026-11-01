@@ -27,3 +27,29 @@ test('model context overflow keeps a standard safe error code so native DSH can 
  const setup=await createSetupServer({port:0,stateDir:await mkdtemp(join(tmpdir(),'jinbao-context-error-')),credentials:{resolve:async key=>values.has(key)?{value:values.get(key)}:undefined,set:async(k,v)=>values.set(k,v)},fetchImpl:async()=>Response.json({error:{code:'context_length_exceeded',message:'maximum context length exceeded secret-provider-detail'}},{status:400})});t.after(setup.close);
  const r=await fetch(new URL(setup.url).origin+'/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+values.get('JINBAO_LOCAL_ACCESS_KEY'),'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:'测试'}]})});assert.equal(r.status,400);const b=await r.json();assert.equal(b.error.code,'context_length_exceeded');assert.doesNotMatch(JSON.stringify(b),/secret-provider-detail/);
 });
+
+async function rateLimitedProxy(t,headers){
+ const values=new Map([['JINBAO_SERVICE_TOKEN','jc_'+'a'.repeat(64)]]);
+ const setup=await createSetupServer({port:0,stateDir:await mkdtemp(join(tmpdir(),'jinbao-rate-limit-')),credentials:{resolve:async key=>values.has(key)?{value:values.get(key)}:undefined,set:async(k,v)=>values.set(k,v)},fetchImpl:async()=>Response.json({error:'rate_limited'},{status:429,...(headers?{headers}:{})})});
+ t.after(setup.close);
+ return fetch(new URL(setup.url).origin+'/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+values.get('JINBAO_LOCAL_ACCESS_KEY'),'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:'测试'}]})});
+}
+
+test('the model proxy forwards the gateway backoff hint so callers can pace themselves',async t=>{
+ // 2993 upstream 429s in three days: the hint is the only pacing signal available.
+ const r=await rateLimitedProxy(t,{'Retry-After':'42'});
+ assert.equal(r.status,429);
+ assert.equal(r.headers.get('retry-after'),'42');
+});
+
+test('a 429 without a backoff hint does not invent one',async t=>{
+ const r=await rateLimitedProxy(t,null);
+ assert.equal(r.status,429);
+ assert.equal(r.headers.get('retry-after'),null);
+});
+
+test('a malformed backoff hint is dropped rather than forwarded',async t=>{
+ const r=await rateLimitedProxy(t,{'Retry-After':'-5; drop table'});
+ assert.equal(r.status,429);
+ assert.equal(r.headers.get('retry-after'),null);
+});

@@ -3,6 +3,7 @@ import { guardCoachRequest } from './local-http-auth.js';
 import {turnContext} from './turn-context.js';
 import {createTurnHealth,recoverySessionId,canRetryContext} from './turn-health.js';
 import { configureGameAgent } from './agent-profile.js';
+import { boundJsonStringify, boundPrompt } from './context-budget.js';
 // dsh-coach-server
 // ----------
 // 金宝游戏教练的 DSH 后端插件。App 通过 HTTP 调用,DSH 提供"大脑":
@@ -223,7 +224,11 @@ async function logstreamReply(ctx, cfg, body, matchId) {
 //#region 深路径(agent 会话)
 function buildCoachMessage(body, adapter) {
   const systemPrompt = typeof body.system_prompt === "string" ? body.system_prompt : "";
-  const prompt = typeof body.prompt === "string" ? body.prompt : "";
+  // Adapters build `prompt` themselves; keep a hard ceiling here so a single turn can
+  // never exceed the declared context window again (see context-budget.js).
+  const bounded = boundPrompt(typeof body.prompt === "string" ? body.prompt : "");
+  const prompt = bounded.text;
+  if (bounded.trimmed) console.warn(`[coach-server] coach prompt trimmed ${bounded.originalBytes}->${bounded.bytes} bytes`);
   const persona = adapter?.persona ?? WZRY_ADAPTER.persona;
   const maxReplyTokens = persona.maxReplyTokens ?? 50;
   return [
@@ -1953,7 +1958,7 @@ export function createMonitor(ctx, cfg, resolveGame) {
       job.body._adviceValidity = createAdviceValidity(plan.stage, context.current);
     }
     const msg = job.body?.chat ? buildGameChatMessage(job.body.question, context, job.body.game)
-      : buildCoachMessage({ ...body, mode:context.current?.mode ?? body.mode, prompt: String(body.prompt ?? '') + '\n【共享对局与历史数据 JSON】\n' + JSON.stringify(context) }, resolveGame(job.body?.game));
+      : buildCoachMessage({ ...body, mode:context.current?.mode ?? body.mode, prompt: String(body.prompt ?? '') + '\n【共享对局与历史数据 JSON】\n' + boundJsonStringify(context).text }, resolveGame(job.body?.game));
     // 修复 #6:mark/trace 原定义在 drainQueue() 作用域,这里引用不到 → 定时器每跳
     //   必抛未捕获 ReferenceError 杀死宿主(桌面版打不开)。本函数补一套相同埋点三件套。
     const t0 = Date.now();

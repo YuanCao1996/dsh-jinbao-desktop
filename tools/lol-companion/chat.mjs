@@ -3,11 +3,15 @@
 
 const TS_RE = /^\s*(\d{1,2}):(\d{2})\s*/;
 
-const MUTATE_RE = /已质变\s*[:：]?\s*(.*)$/;
+// Windows OCR frequently renders 已质变/已选择了 as 已经质变/已经选择了, and the same
+// extra 经 appears in kill announcements. Tolerate it everywhere the verb is matched.
+export const AUGMENT_VERB_RE = /已(?:经)?质变|已(?:经)?选择了/;
 
-const PICKED_RE = /已选择了\s*(.*)$/;
+const MUTATE_RE = /已(?:经)?质变\s*[:：]?\s*(.*)$/;
 
-const KILL_RE = /(?:击杀了|已终结了)/;
+const PICKED_RE = /已(?:经)?选择了\s*(.*)$/;
+
+const KILL_RE = /(?:击杀了|已(?:经)?终结了)/;
 
 const BUY_RE = /购买了\s*(.+)$/;
 
@@ -133,10 +137,10 @@ export function parseChat(lines, opts = {}) {
     if (mu) {
       const inline = augmentsIn(mu[1] ?? "", opts);
       const augs = inline.length ? inline : augmentsIn(tail, opts);
-      const src = head.includes("已质变") ? head : probe;
+      const src = /已(?:经)?质变/.test(head) ? head : probe;
       const norm = src.replace(/（/g, "(").replace(/）/g, ")");
       const afterParen = norm.includes(")") ? norm.slice(norm.lastIndexOf(")") + 1) : norm;
-      const beforeMut = (/^(.*?)已质变/.exec(afterParen) ?? [])[1] ?? null;
+      const beforeMut = (/^(.*?)已(?:经)?质变/.exec(afterParen) ?? [])[1] ?? null;
       const cands = beforeMut && typeof opts.championsInText === "function" ? opts.championsInText(beforeMut) : [];
       let champ = cands.length ? cands[cands.length - 1] : null;
       if (!champ && beforeMut) {

@@ -1,4 +1,4 @@
-﻿param([switch]$CheckOnly,[string]$ImagePath,[switch]$Worker,[string]$StateDir=$env:JINBAO_STATE_DIR,[ValidateSet('full','titles')][string]$Focus='full')
+param([switch]$CheckOnly,[string]$ImagePath,[switch]$Worker,[string]$StateDir=$env:JINBAO_STATE_DIR,[ValidateSet('full','titles')][string]$Focus='full')
 $ErrorActionPreference='Stop'
 $OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 if($Worker){
@@ -28,6 +28,49 @@ public static class JinbaoAugmentCapture {
 '@
  }
  Add-Type -AssemblyName System.Runtime.WindowsRuntime,System.Drawing
+ # Exact pixel compare for the chat region, kept entirely on the native side: passing a
+ # 1.3MB byte[] across the PowerShell boundary every frame costs ~40ms, a single bool
+ # costs nothing. Returns true only when the pixels actually differ from last time.
+ if(-not('JinbaoChatSignature' -as [type])){
+  Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+public static class JinbaoChatSignature {
+ static byte[] last; static int lastW, lastH;
+ static byte[] Grab(Bitmap bmp, int x, int y, int w, int h) {
+  BitmapData d = bmp.LockBits(new Rectangle(x, y, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+  try { int len = Math.Abs(d.Stride) * h; byte[] buf = new byte[len]; Marshal.Copy(d.Scan0, buf, 0, len); return buf; }
+  finally { bmp.UnlockBits(d); }
+ }
+ public static bool Changed(Bitmap bmp, int x, int y, int w, int h) {
+  byte[] buf = Grab(bmp, x, y, w, h);
+  if (last != null && lastW == w && lastH == h && buf.Length == last.Length) {
+   bool same = true;
+   for (int i = 0; i < buf.Length; i++) { if (buf[i] != last[i]) { same = false; break; } }
+   if (same) { return false; }
+  }
+  last = buf; lastW = w; lastH = h;
+  return true;
+ }
+ public static void Reset() { last = null; lastW = 0; lastH = 0; }
+ // Independent second channel (card-title strip) so both detectors keep their own state.
+ static byte[] last2; static int last2W, last2H;
+ public static bool Changed2(Bitmap bmp, int x, int y, int w, int h) {
+  byte[] buf = Grab(bmp, x, y, w, h);
+  if (last2 != null && last2W == w && last2H == h && buf.Length == last2.Length) {
+   bool same = true;
+   for (int i = 0; i < buf.Length; i++) { if (buf[i] != last2[i]) { same = false; break; } }
+   if (same) { return false; }
+  }
+  last2 = buf; last2W = w; last2H = h;
+  return true;
+ }
+ public static void Reset2() { last2 = null; last2W = 0; last2H = 0; }
+}
+'@
+ }
  $null=[Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime]
  $null=[Windows.Globalization.Language,Windows.Globalization,ContentType=WindowsRuntime]
  $null=[Windows.Storage.Streams.InMemoryRandomAccessStream,Windows.Storage.Streams,ContentType=WindowsRuntime]
@@ -100,6 +143,8 @@ public static class JinbaoAugmentCapture {
  }
  $frame=if($Focus -eq 'full'){Read-OcrImage $bytes}else{$null}
  $titleLines=@()
+ $titleReuse=$false
+ $titleSigMs=0
  # Full-screen OCR can skip all three stylized titles even though OCR is available.
  # Independently enlarge each card's title region, preserving full-frame coordinates.
  $inputStream=[IO.MemoryStream]::new($bytes,$false)
@@ -124,18 +169,135 @@ public static class JinbaoAugmentCapture {
   }
    $stripBytes=[IO.MemoryStream]::new()
    try{
-    $strip.Save($stripBytes,[Drawing.Imaging.ImageFormat]::Png);$local=Read-OcrImage $stripBytes.ToArray()
-    foreach($line in $local.lines){
-     $slot=[int][Math]::Floor($line.y/$stride)
-     if($slot -ge 0 -and $slot -lt 3 -and ($line.y-$slot*$stride) -lt $h*3){
-      $x=[int]($inputBitmap.Width/2+$inputBitmap.Height*(-0.4713+0.3413*$slot));$y=[int]($inputBitmap.Height*0.35)
-      $titleLines+=@{text=$line.text;x=($x+$line.x/3);y=($y+($line.y-$slot*$stride)/3);slot=$slot}
+    # The three card titles stay pixel-identical while the panel is simply displayed,
+    # so compare the already-rendered strip and skip its OCR when nothing moved.
+    $titleChanged=$true
+    $titleSigStart=$captureWatch.ElapsedMilliseconds
+    $titleSig="$($inputBitmap.Width)x$($inputBitmap.Height)x$stride"
+    $titleSigBmp=$null
+    try{
+     $titleSigBmp=[Drawing.Bitmap]::new(180,18)
+     $titleSigG=[Drawing.Graphics]::FromImage($titleSigBmp)
+     try{
+      $titleSigG.InterpolationMode=[Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+      $titleSigG.DrawImage($strip,[Drawing.Rectangle]::new(0,0,180,18),[Drawing.Rectangle]::new(0,0,$strip.Width,$strip.Height),[Drawing.GraphicsUnit]::Pixel)
+     }finally{$titleSigG.Dispose()}
+     $titleChanged=[JinbaoChatSignature]::Changed2($titleSigBmp,0,0,180,18)
+    }catch{$titleChanged=$true}finally{if($titleSigBmp){$titleSigBmp.Dispose()}}
+    $titleSigMs=$captureWatch.ElapsedMilliseconds-$titleSigStart
+    $titleCached=$global:JinbaoTitleCache
+    if((-not $titleChanged) -and $titleCached -and $titleCached.sig -eq $titleSig){
+     $titleLines=$titleCached.lines
+     $titleReuse=$true
+    } else {
+     $strip.Save($stripBytes,[Drawing.Imaging.ImageFormat]::Bmp);$local=Read-OcrImage $stripBytes.ToArray()
+     foreach($line in $local.lines){
+      $slot=[int][Math]::Floor($line.y/$stride)
+      if($slot -ge 0 -and $slot -lt 3 -and ($line.y-$slot*$stride) -lt $h*3){
+       $x=[int]($inputBitmap.Width/2+$inputBitmap.Height*(-0.4713+0.3413*$slot));$y=[int]($inputBitmap.Height*0.35)
+       $titleLines+=@{text=$line.text;x=($x+$line.x/3);y=($y+($line.y-$slot*$stride)/3);slot=$slot}
+      }
      }
+     $global:JinbaoTitleCache=@{sig=$titleSig;lines=$titleLines}
     }
    }finally{$stripBytes.Dispose()}
   }finally{$stripGraphics.Dispose();$strip.Dispose()}
+  # Chat text is small and low contrast, and whole-frame OCR mangles CJK there
+  # ("已终结了" -> "已 终 了", "无人能挡" -> "无人能了"). Crop the chat box and
+  # enlarge it exactly like the card titles, then map the boxes back so the
+  # parser still sees one full-frame coordinate space.
+  $chatLines=@()
+  $chatError=''
+  $chatReuse=$false
+  $chatStart=$captureWatch.ElapsedMilliseconds
+  if($Focus -eq 'full'){
+   $csx=$inputBitmap.Width/1920.0;$csy=$inputBitmap.Height/1080.0;$k=3
+   $ccx=0;$ccy=[int][Math]::Floor(600*$csy);$ccw=[int][Math]::Ceiling(840*$csx);$cch=[int][Math]::Ceiling(400*$csy)
+   if($ccx+$ccw -gt $inputBitmap.Width){$ccw=$inputBitmap.Width-$ccx}
+   if($ccy+$cch -gt $inputBitmap.Height){$cch=$inputBitmap.Height-$ccy}
+   if($ccw -gt 0 -and $cch -gt 0){
+    # Skip the upscale+OCR when the chat pixels are byte-identical to the last frame we
+    # recognised. Chat is idle most of the time, and reusing the previous lines keeps
+    # the parser input identical to what a fresh OCR of the same pixels would produce.
+    $chatReuse=$false
+    $chatChanged=$true
+    $chatT0=$captureWatch.ElapsedMilliseconds
+    # Compare a downscaled copy rather than the raw 1.3MB region (LockBits+copy on the
+    # full rect costs 30-44ms). The Graphics must be disposed before LockBits runs:
+    # locking a bitmap that still has an open Graphics fails and silently forces a
+    # re-OCR every frame.
+    $sigBmp=$null
+    try{
+     $sigBmp=[Drawing.Bitmap]::new(105,50)
+     $sigG=[Drawing.Graphics]::FromImage($sigBmp)
+     try{
+      $sigG.InterpolationMode=[Drawing.Drawing2D.InterpolationMode]::HighQualityBilinear
+      $sigG.DrawImage($inputBitmap,[Drawing.Rectangle]::new(0,0,105,50),[Drawing.Rectangle]::new($ccx,$ccy,$ccw,$cch),[Drawing.GraphicsUnit]::Pixel)
+     }finally{$sigG.Dispose()}
+     $chatChanged=[JinbaoChatSignature]::Changed($sigBmp,0,0,105,50)
+    }catch{$chatChanged=$true}finally{if($sigBmp){$sigBmp.Dispose()}}
+    $chatSigMs=$captureWatch.ElapsedMilliseconds-$chatT0
+    $chatCached=$global:JinbaoChatCache
+    if((-not $chatChanged) -and $chatCached -and $chatCached.w -eq $ccw -and $chatCached.h -eq $cch -and $chatCached.k -eq $k){
+     $chatLines=$chatCached.lines
+     $chatReuse=$true
+     $chatDebug="reuse $($ccw)x$($cch) lines=$(@($chatLines).Count)"
+    } else {
+    $bigChat=$null;$chatStream=[IO.MemoryStream]::new()
+    try{
+     # Draw straight from the frame through a source rect: no intermediate clone.
+     # BMP encodes roughly five times faster than PNG and feeds the OCR engine the
+     # exact same pixels (verified byte-identical recognition output).
+     $bigChat=[Drawing.Bitmap]::new($ccw*$k,$cch*$k)
+     $chatGraphics=[Drawing.Graphics]::FromImage($bigChat)
+     try{
+      $chatGraphics.InterpolationMode=[Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $chatGraphics.PixelOffsetMode=[Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+      $chatGraphics.DrawImage($inputBitmap,[Drawing.Rectangle]::new(0,0,$ccw*$k,$cch*$k),[Drawing.Rectangle]::new($ccx,$ccy,$ccw,$cch),[Drawing.GraphicsUnit]::Pixel)
+     }finally{$chatGraphics.Dispose()}
+     $bigChat.Save($chatStream,[Drawing.Imaging.ImageFormat]::Bmp)
+     $localChat=Read-OcrImage $chatStream.ToArray()
+     $chatDebug="crop=${ccw}x${cch} big=$($bigChat.Width)x$($bigChat.Height) ocr=$($localChat.width)x$($localChat.height) lines=$(@($localChat.lines).Count)"
+     foreach($line in $localChat.lines){
+      $b=$line.box
+      $ax=$ccx+([double]$b[0][0]/$k);$ay=$ccy+([double]$b[0][1]/$k)
+      $bx=$ccx+([double]$b[1][0]/$k);$by=$ccy+([double]$b[1][1]/$k)
+      $cx2=$ccx+([double]$b[2][0]/$k);$cy2=$ccy+([double]$b[2][1]/$k)
+      $dx=$ccx+([double]$b[3][0]/$k);$dy=$ccy+([double]$b[3][1]/$k)
+      $chatLines+=@{text=$line.text;x=($ccx+([double]$line.x/$k));y=($ccy+([double]$line.y/$k));box=@(@($ax,$ay),@($bx,$by),@($cx2,$cy2),@($dx,$dy))}
+     }
+    }catch{$chatError=$_.Exception.Message}finally{if($bigChat){$bigChat.Dispose()};$chatStream.Dispose()}
+    # Cache only a completed run; a failed OCR forces the next frame to retry.
+    if(-not $chatError){$global:JinbaoChatCache=@{w=$ccw;h=$cch;k=$k;lines=$chatLines}}else{try{[JinbaoChatSignature]::Reset()}catch{}}
+    }
+    $wholeLines=$frame.lines
+    $mergeT0=$captureWatch.ElapsedMilliseconds
+    # Plain arithmetic loop: Measure-Object/ForEach-Object per line cost ~30ms for a
+    # full-frame result, which dwarfed the pixel compare on the reuse path.
+    $kept=New-Object System.Collections.ArrayList
+    $zzLo=$ccy;$zzHi=$ccy+$cch;$zzRight=$ccx+$ccw
+    foreach($line in $wholeLines){
+     $bb=$line.box
+     if(!$bb){[void]$kept.Add($line);continue}
+     $minY=[double]::MaxValue;$maxY=[double]::MinValue;$minX=[double]::MaxValue
+     foreach($pp in $bb){
+      $py=[double]$pp[1];$px=[double]$pp[0]
+      if($py -lt $minY){$minY=$py}
+      if($py -gt $maxY){$maxY=$py}
+      if($px -lt $minX){$minX=$px}
+     }
+     $midY=($minY+$maxY)/2.0
+     if(!($midY -ge $zzLo -and $midY -le $zzHi -and $minX -lt $zzRight)){[void]$kept.Add($line)}
+    }
+    # Fail open: if the enlarged crop OCR yields nothing, keep the whole-frame lines
+    # instead of silently deleting the chat region.
+    if(@($chatLines).Count -gt 0){$frame.lines=@($kept)+@($chatLines)}else{$frame.lines=$wholeLines}
+    $chatMergeMs=$captureWatch.ElapsedMilliseconds-$mergeT0
+   }
+  }
+  $chatMs=$captureWatch.ElapsedMilliseconds-$chatStart
  }finally{if($inputBitmap){$inputBitmap.Dispose()};$inputStream.Dispose()}
- @{available=$true;ocrAvailable=$true;foreground=$true;capturedAt=$capturedAt;allyHud=$allyHud;focus=$Focus;captureBackend=$captureBackend;timings=@{captureMs=$pixelMs;hudMs=$hudMs;ocrMs=$captureWatch.ElapsedMilliseconds-$pixelMs-$hudMs;totalMs=$captureWatch.ElapsedMilliseconds};width=$frame.width;height=$frame.height;lines=$frame.lines;titleLines=$titleLines;method=$(if($Focus -eq 'titles'){'card-strip-fast'}else{'full-and-card-strip'});cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 6 -Compress
+ @{available=$true;ocrAvailable=$true;foreground=$true;capturedAt=$capturedAt;allyHud=$allyHud;focus=$Focus;captureBackend=$captureBackend;timings=@{captureMs=$pixelMs;hudMs=$hudMs;ocrMs=$captureWatch.ElapsedMilliseconds-$pixelMs-$hudMs;chatMs=$chatMs;totalMs=$captureWatch.ElapsedMilliseconds};width=$frame.width;height=$frame.height;lines=$frame.lines;chatLineCount=@($chatLines).Count;chatError=$chatError;chatDebug=$chatDebug;chatReuse=$chatReuse;chatSigMs=$chatSigMs;chatMergeMs=$chatMergeMs;titleReuse=$titleReuse;titleSigMs=$titleSigMs;titleLines=$titleLines;method=$(if($Focus -eq 'titles'){'card-strip-fast'}else{'full-and-card-strip+chat'});cardLayout='stacked-title-regions'} | ConvertTo-Json -Depth 6 -Compress
 
 }catch{
  if($engineReady){Write-Output '{"available":true,"foreground":false,"reason":"capture_failed"}'}

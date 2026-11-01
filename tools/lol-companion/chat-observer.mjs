@@ -1,4 +1,4 @@
-import {parseChat} from './chat.mjs';
+import {parseChat,AUGMENT_VERB_RE} from './chat.mjs';
 const normalized=value=>String(value??'').replace(/[\s:：!！·•,，。.]/g,'').toLowerCase();
 function lookup(map,value){
   if(value.startsWith('~fix~'))return null;
@@ -36,13 +36,19 @@ export function createChatObserver(augmentNames,emit){
       });
       for(const message of messages){
         if(!['purchase','augment_mutate','augment_picked_chat'].includes(message.kind))continue;
-        const body=String(message.text??'').replace(/^.*[)）]/,'');
-        const subjectText=body.split(/已质变|已选择了/)[0];
-        const explicit=championsInText(subjectText).at(-1);
-        const champion=message.kind==='purchase'?message.champion??null:explicit??null;
+        // Chat attribution must read the raw line. The in-game format is
+        // "玩家名（英雄）已质变了…", so stripping the bracketed prefix before looking
+        // for the champion loses the owner, and when the augment itself is bracketed
+        // the greedy strip also swallows the verb, forcing every line to low confidence.
+        const raw=String(message.text??'');
+        const verbAt=raw.search(AUGMENT_VERB_RE);
+        const beforeVerb=verbAt>=0?raw.slice(0,verbAt):raw;
+        const explicit=championsInText(beforeVerb).at(-1);
+        const champion=explicit??message.champion??null;
         const ownName=aliases.get(normalized(state.me?.championAlias))??aliases.get(normalized(state.me?.champion))??state.me?.champion;
         const time=message.time??null;
         const names=message.kind==='purchase'?[message.item??null]:message.augments??[message.augment];
+        const told=AUGMENT_VERB_RE.test(raw);
         for(const name of names){
           if(message.kind!=='purchase'&&!augments.has(normalized(name)))continue;
           const key=JSON.stringify([message.kind,time,champion,name]);if(seen.has(key))continue;seen.add(key);
@@ -50,7 +56,7 @@ export function createChatObserver(augmentNames,emit){
           if(message.kind==='purchase')emit({kind:'chat_events',gameTime:state.gameTime,events:[{kind:'purchase',champion,time,item:name,itemId:message.itemId??null,itemUnresolved:!name}]});
           else emit({kind:'augment_mutate',augment:augments.get(normalized(name)).name,champion,
             who:champion?(champion===ownName?'self':'other'):'unknown',
-            confidence:/已质变|已选择了/.test(body)?'high':'low',time,gameTime:state.gameTime});
+            source:'log-confirmed',confidence:told?'high':'low',time,gameTime:state.gameTime});
         }
       }
     },

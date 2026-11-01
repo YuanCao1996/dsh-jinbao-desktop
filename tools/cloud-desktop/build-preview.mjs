@@ -29,6 +29,8 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
   'tools/cloud-desktop/protect.ps1','tools/cloud-desktop/instance.ps1','tools/cloud-desktop/audio-player.ps1','tools/cloud-desktop/synthesize-speech.ps1','tools/dsh-onboarding/settings.html',
   'tools/team-room/page.html','tools/team-room/page.css','tools/team-room/page.mjs',
   'tools/dsh-coach-server/capture-game.ps1','tools/lol-companion/capture-augments.ps1','tools/lol-companion/augment-names.json',
+  // Data read at runtime rather than imported, so the module walk above cannot see it.
+  'tools/lol-companion/hextech-partners.json',
   'tools/lol-companion/AllyUltimateVision.cs','tools/lol-companion/observe-ally-ultimates.ps1',
   'tools/jinbao-launcher/platform.ps1','tools/jinbao-launcher/legacy-overlay.ps1','tools/jinbao-launcher/legacy-window.ps1',
   'tools/jinbao-launcher/update-public.pem','tools/jinbao-launcher/extract-update.ps1',

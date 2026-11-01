@@ -40,7 +40,7 @@ export function createRuntimeRouter({getMode,factories,isCurrent=()=>true,maxQue
     if(epoch!==generation||closed||!instance)throw failure('调用方式已切换');
     const result=await instance.ask(task.request);
     if(epoch!==generation||!isCurrent(task.request.game,task.request.match))throw failure('调用方式或对局已切换');emit(task,'task_completed');task.resolve(result);
-   }catch(error){emit(task,epoch!==generation||task.interrupted?'task_cancelled':!isCurrent(task.request.game,task.request.match)?'task_stale':'task_failed',{code:task.interrupted?'agent_preempted':error.code,httpStatus:error.status});task.reject(task.interrupted?failure('已优先处理手动请求','agent_preempted'):error);}finally{active=null;}
+   }catch(error){emit(task,epoch!==generation||task.interrupted?'task_cancelled':!isCurrent(task.request.game,task.request.match)?'task_stale':'task_failed',{code:task.interrupted?'agent_preempted':error.code,httpStatus:error.status,retryAfterMs:Number.isFinite(error.retryAfterMs)?error.retryAfterMs:undefined});task.reject(task.interrupted?failure('已优先处理手动请求','agent_preempted'):error);}finally{active=null;}
   }}finally{draining=false;}
  }
  return{busy:()=>!!active||draining,async reconfigure(){await reset();},

@@ -18,7 +18,7 @@ const strings={
  focus:new Set(['full','titles']),captureBackend:new Set(['window-client','screen-fallback','print-window','screen']),
  displayMode:new Set(['large','narrow','silent']),page:new Set(['advice','equipment','augments','players','events','chat']),playbackPhase:new Set(['idle','playing','fade','linger']),
 };
-const numbers=new Set(['elapsedMs','ageMs','ioFailures','recognized','knownSlots','sequence','captureMs','ocrMs','totalMs','gameSeconds','adviceCount','chatCount','offerCount','ownedCount','retryAt','httpStatus','width','height','opacity','queueSize','shortcutId','registeredCount','failedCount','segments','confirmedCount','candidateCount']);
+const numbers=new Set(['elapsedMs','ageMs','ioFailures','recognized','knownSlots','sequence','captureMs','ocrMs','totalMs','gameSeconds','adviceCount','chatCount','offerCount','ownedCount','retryAt','httpStatus','retryAfterMs','width','height','opacity','queueSize','shortcutId','registeredCount','failedCount','segments','confirmedCount','candidateCount']);
 const booleans=new Set(['available','foreground','panelOccluded','ended','success','fresh','healthy','collapsed','subtitle','visible','playbackActive']);
 const runName=/^\d{4}-\d{2}-\d{2}T[\dTZ-]+-[a-f0-9]{8}$/;
 function fields(value={}) {

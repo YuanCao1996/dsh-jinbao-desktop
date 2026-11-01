@@ -48,7 +48,7 @@ export function createCloudAgent({getToken,getContext,isCurrent=()=>true,onProgr
  async function call(path,token,data,signal,key){
   const response=await fetchImpl(new URL(apiPrefix+path,service),{method:data===undefined?'GET':'POST',redirect:'error',signal,
    headers:{Authorization:'Bearer '+token,...(data===undefined?{}:{'Content-Type':'application/json'}),...(key?{'Idempotency-Key':key}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
-  if(!response.ok){const retryAfterMs=Math.min(30000,Math.max(1000,Number(response.headers.get('retry-after'))*1000||5000));await response.body?.cancel();throw Object.assign(fail(response.status,'Cloud Agent request failed'),{retryAfterMs});}
+  if(!response.ok){const retryAfterMs=Math.min(30000,Math.max(1000,Number(response.headers.get('retry-after'))*1000||5000));await response.body?.cancel();throw Object.assign(fail(response.status,'Cloud Agent request failed'),{retryAfterMs,...(response.status===429?{code:'rate_limited'}:{})});}
   return limitedJson(response,256*1024);
  }
  return {async ask(request){

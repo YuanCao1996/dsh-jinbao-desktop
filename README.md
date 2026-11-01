@@ -4,9 +4,13 @@
 
 [下载 Windows 版](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/latest/download/jinbao-desktop-windows.zip) · [金宝官网 / 手机 App](https://www.jinbaoai.top/#download) · [版本与更新记录](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases)
 
-## 独立桌面版预览（v0.2.5）
+## 独立桌面版预览（v0.2.6）
 
-**GitHub 预发布下载：**[jinbao-desktop-windows.zip](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.2.5-standalone-preview.1/jinbao-desktop-windows.zip)。
+**GitHub 预发布下载：**[jinbao-desktop-windows.zip](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.2.6-standalone-preview.1/jinbao-desktop-windows.zip)。
+
+> 如果该链接提示不存在，说明 0.2.6 预览包尚未上传，请先使用 [上一个预览版](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.2.5-standalone-preview.1/jinbao-desktop-windows.zip)。
+
+本版新增：选人阶段在战况页显示已选英雄的最佳拍档（海克斯大乱斗）；本人双杀到五杀即时夸奖、队友四杀五杀也会夸；四位导师语气在官方服务与自有 Key 两条路径上统一。修复海克斯"本局已选"误判与聊天文字漏读。详见 [v0.2.6 预览说明](docs/RELEASE_STANDALONE_0_2_6_PREVIEW.md)。
 
 完整解压后双击 `开始使用.cmd`，自动打开悬浮窗与设置页，等待进入游戏。本预发布包默认使用金宝官方云端服务，不要求另装 DSH Desktop，也不包含 ADB；群聊后端仍未部署，群聊入口保持关闭。
 

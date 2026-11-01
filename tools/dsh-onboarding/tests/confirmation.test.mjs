@@ -60,3 +60,32 @@ test('countdown default accepts only current first choice and logs its real sour
  assert.equal(event.source,'countdown-default-confirmed');assert.equal(event.augment,'乙');
  await assert.rejects(service.confirm({id:prompt.id,name:'乙',timeoutDefault:true}),e=>e.status===409);
 });
+
+test('rerolled-away candidates never reach the prompt, so a manual click can only record a card still on the panel',()=>{
+ const s=initialOverlayState();let at=Date.now()-6000;
+ const emit=e=>applyOverlayEvent(s,{game:'lol',match:'one',t:++at,...e},'one');
+ emit({kind:'game_start',me:{champion:'安妮'}});
+ emit({kind:'augment_offer',roll:1,options:['甲','乙','丙']});
+ emit({kind:'augment_offer',roll:1,reroll:true,options:['甲','乙','丁']});
+ emit({kind:'augment_offer_closed',roll:1});
+ const prompt=augmentConfirmation(s,[],at+4000);
+ assert.ok(prompt);
+ assert.deepEqual(prompt.options.map(o=>o.name),['甲','乙','丁'],'current panel only, in panel order');
+ assert.equal(prompt.options.some(o=>o.name==='丙'),false,'a rerolled-away card must not be selectable');
+ assert.equal(prompt.missing,0);
+});
+
+test('an incompletely recognised panel lists only what is on screen and reports the gaps instead of backfilling',()=>{
+ const s=initialOverlayState();let at=Date.now()-6000;
+ const emit=e=>applyOverlayEvent(s,{game:'lol',match:'one',t:++at,...e},'one');
+ emit({kind:'game_start',me:{champion:'安妮'}});
+ emit({kind:'augment_offer',roll:1,options:['甲','乙','丙']});
+ // slot 3 rerolled, slot 1 rerolled: emitted options shrink to the two known slots
+ emit({kind:'augment_offer',roll:1,reroll:true,options:['丁','乙'],missingSlots:[2]});
+ emit({kind:'augment_offer_closed',roll:1});
+ const prompt=augmentConfirmation(s,[],at+4000);
+ assert.ok(prompt);
+ assert.deepEqual(prompt.options.map(o=>o.name),['丁','乙']);
+ assert.equal(prompt.missing,1,'the unrecognised slot is reported, not filled with 丙 or 甲');
+ assert.match(prompt.hint,/1 个卡位未识别/);
+});

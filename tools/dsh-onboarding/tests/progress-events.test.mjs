@@ -50,3 +50,46 @@ test('native chat catalogs come from local client data and cache successful read
  const accepted=[];await read({port:1},c=>accepted.push(c));await read({port:1},c=>accepted.push(c));
  assert.equal(calls,2);assert.equal(accepted.length,1);
 });
+
+test('in-game augment chat resolves the owner inside the bracketed prefix and counts as an explicit log record',()=>{
+ const events=[];const names=['火上浇油','沃格勒特的巫师帽','防护面纱'];
+ const observer=createChatObserver(names,event=>events.push(event));
+ observer.setCatalog({champions:[{name:'狂厄蔷薇'},{name:'北地之怒'}],items:[]});
+ const state={gameTime:300,me:{champion:'狂厄蔷薇',championAlias:'狂厄蔷薇'},allies:[{champion:'北地之怒',championAlias:'北地之怒'}],enemies:[]};
+ const frame=text=>({available:true,foreground:true,width:1920,height:1080,lines:[{text,box:[[60,700],[700,700],[700,720],[60,720]],y:700,x:60}]});
+ // The live client prints "玩家名（英雄）已质变了…", so the owner sits inside the
+ // bracketed prefix. The augment itself may also be bracketed, which used to make a
+ // greedy prefix strip swallow the verb and force every line to low confidence.
+ observer.observe(frame('玩家甲（狂厄蔷薇）已质变了【火上浇油】'),state);
+ observer.observe(frame('玩家甲（狂厄蔷薇）已质变了（沃格勒特的巫师帽）'),state);
+ observer.observe(frame('玩家丙（北地之怒）已质变了【防护面纱】'),state);
+ assert.equal(events.length,3);
+ assert.equal(events[0].who,'self');assert.equal(events[0].champion,'狂厄蔷薇');
+ assert.equal(events[0].confidence,'high');assert.equal(events[0].source,'log-confirmed');
+ assert.equal(events[1].who,'self','bracketed augment name must not lose the owner or the verb');
+ assert.equal(events[1].confidence,'high');
+ assert.equal(events[2].who,'other');
+ const s=initialOverlayState();let at=1;
+ const emit=e=>applyOverlayEvent(s,{game:'lol',t:++at,...e},'game');
+ emit({kind:'game_start',me:{champion:'狂厄蔷薇'}});
+ for(const event of events)emit(event);
+ assert.deepEqual(s.ownedAugments,['火上浇油','沃格勒特的巫师帽'],'only explicit self records are owned');
+});
+
+test('OCR inserting an extra 经 into the verb still classifies and attributes the record',()=>{
+ const events=[];const observer=createChatObserver(['火上浇油','珠光护手'],event=>events.push(event));
+ observer.setCatalog({champions:[{name:'狂厄蔷薇'}],items:[]});
+ const state={gameTime:300,me:{champion:'狂厄蔷薇',championAlias:'狂厄蔷薇'},allies:[],enemies:[]};
+ const frame=text=>({available:true,foreground:true,width:1920,height:1080,lines:[{text,box:[[60,700],[700,700],[700,720],[60,720]],y:700,x:60}]});
+ // Windows OCR tends to render "已质变了" as "已经质变了"; the verb must still match.
+ observer.observe(frame('玩家甲（狂厄蔷薇）已经质变了【火上浇油】'),state);
+ observer.observe(frame('玩家甲（狂厄蔷薇）已经选择了【珠光护手】'),state);
+ assert.equal(events.length,2);
+ for(const e of events){assert.equal(e.who,'self');assert.equal(e.confidence,'high');assert.equal(e.source,'log-confirmed');}
+ assert.deepEqual(events.map(e=>e.augment).sort(),['珠光护手','火上浇油'].sort());
+ const s=initialOverlayState();let at=1;
+ const emit=e=>applyOverlayEvent(s,{game:'lol',t:++at,...e},'game');
+ emit({kind:'game_start',me:{champion:'狂厄蔷薇'}});
+ for(const event of events)emit(event);
+ assert.equal(s.ownedAugments.length,2,'已经质变/已经选择了 still counts as an explicit record');
+});

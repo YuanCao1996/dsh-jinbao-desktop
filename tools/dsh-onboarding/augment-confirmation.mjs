@@ -12,10 +12,16 @@ export function augmentConfirmation(state,rows=[],now=Date.now(),{allowAssumed=f
  const round=[...state.augmentRounds].reverse().find(r=>r.closed&&(!r.confirmed.length&&!r.assumed||allowAssumed&&r.confirmationSource==='countdown-default-confirmed')&&!r.dismissed&&r.closedAt&&now-r.closedAt>=3000&&now-r.closedAt<120000);
  if(!round||!round.options.length)return null;
  const ranked=rankedAugments(rows,state.me.champion);
+ // Only the cards currently on the panel can be confirmed. Rerolled-away names stay
+ // in round.options for the "seen N/6" counter, but offering them here would let one
+ // click record an augment this player never owned.
  const current=round.currentOptions??round.options;
- const names=[...ranked.filter(r=>current.includes(r.name)).map(r=>r.name),...current.filter(n=>!ranked.some(r=>r.name===n)),
-  ...ranked.filter(r=>round.options.includes(r.name)&&!current.includes(r.name)).map(r=>r.name),...round.options.filter(n=>!current.includes(n)&&!ranked.some(r=>r.name===n))];
+ const names=[...ranked.filter(r=>current.includes(r.name)).map(r=>r.name),...current.filter(n=>!ranked.some(r=>r.name===n))];
+ if(!names.length)return null;
+ const missing=Math.max(0,3-current.length);
  return {id:augmentConfirmationId(state,round),
-  round:round.id,title:'刚才选了哪个海克斯？',hint:'按英雄适配排名排列，点击实际选择；未确认前仅作推测。',
+  round:round.id,title:'刚才选了哪个海克斯？',
+  hint:missing?`按英雄适配排名排列，只列出当前面板上的候选；还有 ${missing} 个卡位未识别，未列出的不计入已选。`:'按英雄适配排名排列，只列出当前面板上的候选；未确认前仅作推测。',
+  missing,
   options:names.map((name,i)=>({name,label:(i===0&&ranked.some(r=>r.name===name)?'优先推荐 · ':'')+name}))};
 }

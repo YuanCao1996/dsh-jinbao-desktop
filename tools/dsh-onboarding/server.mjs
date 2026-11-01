@@ -356,7 +356,18 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     await writeFile(join(stateDir,'updates/apply-cancel.json'),JSON.stringify({id:current.id,at:Date.now()}));send(res,202,{message:'已请求取消自动安装，确认后可从原入口重新打开金宝。'});return;
    }
    if(req.url==='/api/update/apply'){
-    if(updateController){const result=await updateController.apply(overlay.view());send(res,202,result);return;}
+    if(updateController){
+     // The controller refuses for several distinct reasons (busy, a live match, nothing
+     // downloaded, a launch mode that cannot relaunch). Reporting them all through the
+     // generic 409 mapping told users to configure a model, which was never the problem.
+     try{const result=await updateController.apply(overlay.view());send(res,202,result);}
+     catch(problem){
+      const status=[400,401,403,404,409,413,429,502,503].includes(problem.status)?problem.status:503;
+      const message={update_busy:'正在处理上一次更新请求，请稍候再试。',update_game_active:'正在选英雄或对局中，请结束后再安装；后台下载不受影响。',update_missing:'暂无可安装的新版本，请先检查更新。',update_restart_unavailable:'当前启动方式无法自动重启，请退出金宝后重新打开以完成安装。'}[problem.code]??'更新暂不可用，请稍后重试。';
+      send(res,status,{error:message});
+     }
+     return;
+    }
     if(cloudAgent){send(res,409,{error:'云端预览包暂不接收正式版更新。'});return;}
     const view=overlay.view();if(view.match&&!view.ended&&(view.gameTime!=='等待对局'||view.phase==='ChampSelect')&&Date.now()-view.updatedAt<30000){send(res,409,{error:'正在选英雄或对局，请结束后再安装。后台下载不会影响游戏。'});return;}
     await locked(async()=>{

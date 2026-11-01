@@ -17,6 +17,22 @@ test('standalone signed channel rejects legacy packages, stages the right runtim
   const controller=createStandaloneUpdates({root,stateDir,updater,restart:async()=>{urls.push('restarted');},now:()=>1000});await assert.rejects(controller.apply({match:'one',ended:false,gameTime:'01:00',updatedAt:1000}),e=>e.status===409);assert.ok(!urls.includes('restarted'));await controller.apply({ended:true});assert.ok(urls.includes('restarted'));await controller.close();
  }finally{await rm(dir,{recursive:true,force:true});}
 });
+test('update refusals carry a reason so the settings page never blames the model config',async()=>{
+ // Nothing downloaded yet.
+ const none=createStandaloneUpdates({root:'/x',stateDir:'/y',updater:{prepared:async()=>null},restart:async()=>{},now:()=>1});
+ await assert.rejects(none.apply({ended:true}),e=>e.status===409&&e.code==='update_missing');
+ await none.close();
+ // Downloaded, but this launch mode has no supervisor channel to relaunch through.
+ const prepared={root:'/z',release:{version:'0.2.6'}};
+ const orphan=createStandaloneUpdates({root:'/x',stateDir:'/y',updater:{prepared:async()=>prepared},restart:null,now:()=>1});
+ await assert.rejects(orphan.apply({ended:true}),e=>e.status===409&&e.code==='update_restart_unavailable');
+ await orphan.close();
+ // A live match is refused before the download is even considered.
+ const busy=createStandaloneUpdates({root:'/x',stateDir:'/y',updater:{prepared:async()=>prepared},restart:async()=>{},now:()=>1000});
+ await assert.rejects(busy.apply({match:'m',ended:false,gameTime:'01:00',updatedAt:1000}),e=>e.status===409&&e.code==='update_game_active');
+ await busy.close();
+});
+
 test('standalone entry falls back after an executable startup error before ready',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'jinbao-entry-fallback-')),root=join(dir,'old'),candidate=join(dir,'new'),stateDir=join(dir,'state'),starts=[];
  try{await mkdir(root);await mkdir(candidate);await mkdir(stateDir);await writeFile(join(candidate,'manifest.json'),JSON.stringify({version:'0.2.1'}));

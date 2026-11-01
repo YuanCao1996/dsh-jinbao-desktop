@@ -34,10 +34,10 @@ export function cloudSpeech({getToken,fetchImpl=fetch,serviceBaseUrl='https://ap
  };
 }
 
-export async function createSpeech({stateDir,view=()=>({}),synthesize,play=playNative,now=Date.now,trace=()=>{},minIntervalMs=45000,pause=(ms,signal)=>sleep(ms,undefined,{signal})}){
+export async function createSpeech({stateDir,view=()=>({}),synthesize,play=playNative,now=Date.now,trace=()=>{},minIntervalMs=45000,praiseQuietMs=15000,pause=(ms,signal)=>sleep(ms,undefined,{signal})}){
  const path=join(stateDir,'speech-settings.json');await mkdir(stateDir,{recursive:true});
  let config={enabled:false,chat:true,role:'jinbao',source:'official'},closed=false,scope='',generation=0,queue=[],active=null,pumping=null,writes=Promise.resolve(),lastCode='',phase='idle',cooldownUntil=0;
- const seen=new Map(),recent=new Map();let nextSpeechAt=-Infinity;
+ const seen=new Map(),recent=new Map();let nextSpeechAt=-Infinity,lastPraiseAt=-Infinity;
  try{const saved=JSON.parse(await readFile(path,'utf8'));if(typeof saved.enabled==='boolean')config.enabled=saved.enabled;if(typeof saved.chat==='boolean')config.chat=saved.chat;if(roles.some(r=>r.id===saved.role))config.role=saved.role;if(['official','byok'].includes(saved.source))config.source=saved.source;}catch(error){if(error.code==='ENOENT')try{config.enabled=JSON.parse(await readFile(join(stateDir,'overlay-display.json'),'utf8')).speech===true;}catch{}}
  const currentKey=()=>{const v=view();return (v.game||'lol')+':'+(v.match||'waiting');};
  const emit=(action,value={})=>{try{trace({action,role:config.role,...value});}catch{}};
@@ -52,7 +52,7 @@ export async function createSpeech({stateDir,view=()=>({}),synthesize,play=playN
   pumping=(async()=>{
    while(queue.length&&!closed){
     prune();if(!queue.length)break;
-    if(!queue[0].preview&&now()<nextSpeechAt)break;
+    if(!queue[0].preview&&queue[0].topic!=='praise'&&now()<nextSpeechAt)break;
     const item=queue.shift();if(stale(item)){emit('speech_discarded');continue;}
     const epoch=generation,controller=new AbortController();let played=false;active={...item,controller};
     try{
@@ -68,7 +68,7 @@ export async function createSpeech({stateDir,view=()=>({}),synthesize,play=playN
     }catch(error){
      if(controller.signal.aborted){emit('speech_cancelled');}
      else{lastCode=['speech_login_required','speech_key_required','speech_rate_limited','speech_audio_invalid','speech_playback_failed'].includes(error.code)?error.code:'speech_provider_unavailable';phase='unavailable';cooldownUntil=now()+15000;queue=[];emit('speech_failed',{code:lastCode});}
-    }finally{if(played)nextSpeechAt=now()+minIntervalMs;active=null;if(phase!=='unavailable')phase='idle';publish();}
+    }finally{if(played)nextSpeechAt=now()+(item.topic==='praise'?praiseQuietMs:minIntervalMs);active=null;if(phase!=='unavailable')phase='idle';publish();}
    }
   })().finally(()=>{pumping=null;});
  }
@@ -81,6 +81,9 @@ export async function createSpeech({stateDir,view=()=>({}),synthesize,play=playN
   const normalized=item.text.replace(/\s+/g,'').slice(0,6000),signature=createHash('sha256').update(item.scope+normalized).digest('hex');
   const prior=recent.get(signature);if(!item.preview&&prior!==undefined&&now()-prior<(item.priority>=2?15000:60000))return false;
   if(!item.preview&&now()<cooldownUntil)return false;
+  // Praise is allowed past the 45s quiet window because the moment would otherwise be
+  // gone, but two chains still cannot talk back to back.
+  if(item.topic==='praise'){if(now()-lastPraiseAt<8000){emit('speech_discarded',{reason:'praise_throttled'});return false;}lastPraiseAt=now();}
   recent.set(signature,now());if(recent.size>128)recent.delete(recent.keys().next().value);
   if(queue.length)emit('speech_queue_trimmed');
   queue=[item]; // At most one pending manual answer; newest replaces older.
@@ -106,7 +109,7 @@ export async function createSpeech({stateDir,view=()=>({}),synthesize,play=playN
     if(!item||typeof item.id!=='string'||seen.has(item.id))continue;
     seen.set(item.id,now());if(seen.size>256)seen.delete(seen.keys().next().value);
     if(!Number.isFinite(item.at)||now()-item.at>30000||item.at>now()+500)continue;
-    enqueue({...item,topic:'advice',scope:key,expiresAt:Math.min(item.expiresAt??now()+45000,item.at+90000)});
+    enqueue({...item,topic:item.topic==='praise'?'praise':'advice',scope:key,expiresAt:Math.min(item.expiresAt??now()+45000,item.at+90000)});
    }
    publish();pump();
   },

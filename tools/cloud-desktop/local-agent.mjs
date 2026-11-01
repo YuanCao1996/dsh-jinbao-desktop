@@ -3,11 +3,21 @@ import {join} from 'node:path';
 import {locateNativeModules,nativeImporter} from './native-modules.mjs';
 import {chatUrl,limitedJson} from '../dsh-game-services/client.mjs';
 import {gameModePrompt} from '../dsh-coach-server/lib/game-mode-prompt.js';
+import {roleInstruction} from './roles.mjs';
 import {cloudContext,agentQuestion} from './cloud-agent.mjs';
 import {userMemoryTool} from './user-memory.mjs';
 import {readChatCompletion} from '../agent-activity/openai-stream.mjs';
 import {parseGenericObservation,genericIdentityPrompt} from './generic-identity.mjs';
 const fail=(status,message)=>Object.assign(Error(message),{status});
+// The BYOK route builds its own per-turn text, so the selected mentor's tone has to be
+// injected here as well. The cloud route does the same via roleInstruction in
+// cloud-agent.mjs, and automatic broadcasts pass automatic=true so a mentor that
+// changes stance for auto tasks (铁汁) is treated the same on both routes.
+export function localTurnText(request, rules) {
+  const role = roleInstruction(request?.role, request?.game, request?.automatic === true);
+  return (role ? role + '\n' : '') + rules + '\n' + agentQuestion(request)
+    + '\n请先按需使用工具。当前游戏：' + request.game + '；会话仅属于本局。';
+}
 export async function createLocalAgent({stateDir,getConfig,getKey,getContext,queryEvents,memoryTools,isCurrent=()=>true,capture,search,webSearch,observationPlan,onObservation,onProgress=()=>{},getActivityEnabled=()=>false,moduleRoot,fetchImpl=fetch}){
  const config=await getConfig();
  const modules=await locateNativeModules({stateDir,desktopPath:config.desktopPath,moduleRoot});
@@ -70,7 +80,7 @@ export async function createLocalAgent({stateDir,getConfig,getKey,getContext,que
    progress({event:'started'});
    timer=setTimeout(()=>{timedOut=true;void agent.cancel({kind:'user'});},90000);
    matchTimer=setInterval(()=>{if(!isCurrent(request.game,request.match))void agent.cancel({kind:'user'});},500);
-   agent.followup(llm.createUserMessage({content:[{type:'text',text:rules+'\n'+agentQuestion(request)+'\n请先按需使用工具。当前游戏：'+request.game+'；会话仅属于本局。'}],source:{kind:'user'}}));await agent.whenIdle();
+   agent.followup(llm.createUserMessage({content:[{type:'text',text:localTurnText(request,rules)}],source:{kind:'user'}}));await agent.whenIdle();
    if(closing||!isCurrent(request.game,request.match))throw fail(409,'对局已切换');
    if(timedOut)throw fail(504,'本次分析超时');
    const final=agent.session.snapshotEvents().slice(from).filter(e=>e.type==='assistant/message').at(-1);if(!final||llm.lastAssistantStreamChunk(final.data.stream,'finish')?.reason?.kind!=='stop')throw lastModelError??fail(502,'DSH 未能提交有效回答');

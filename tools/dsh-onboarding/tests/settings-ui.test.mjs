@@ -2,6 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
+test('settings restores its tab credential after reload and replaces it on a fresh launch',async()=>{
+ const html=await readFile(new URL('../settings.html',import.meta.url),'utf8');
+ const init=html.match(/const incomingNonce=location\.hash\.slice\(1\);[\s\S]*?history\.replaceState\(null,'',location\.pathname\);/)[0];
+ const values=new Map();const sessionStorage={setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)};
+ const run=hash=>vm.runInNewContext(init+'\nnonce',{location:{hash,pathname:'/'},history:{replaceState(){}},sessionStorage});
+ const first='a'.repeat(64),second='b'.repeat(64);
+ assert.equal(run('#'+first),first);assert.equal(run(''),first);assert.equal(run('#'+second),second);assert.equal(run(''),second);
+});
+test('exploration restores the settings credential after reload',async()=>{
+ const html=await readFile(new URL('../exploration.html',import.meta.url),'utf8');
+ const init=html.match(/const incomingNonce=location\.hash\.slice\(1\);[\s\S]*?history\.replaceState\(null,'',location\.pathname\);/)[0];
+ const values=new Map(),sessionStorage={setItem:(k,v)=>values.set(k,v),getItem:k=>values.get(k)};
+ const run=hash=>vm.runInNewContext(init+'\nnonce',{location:{hash,pathname:'/exploration'},history:{replaceState(){}},sessionStorage});
+ const token='c'.repeat(64);assert.equal(run('#'+token),token);assert.equal(run(''),token);
+});
 test('settings visibly switches from binding form to signed-in card and back on logout',async()=>{
  const html=await readFile(new URL('../settings.html',import.meta.url),'utf8');
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(([,id])=>[id,{hidden:false,value:'',textContent:'',className:'',classes:new Set(),classList:{toggle(name,on){if(on)elements.get(id).classes.add(name);else elements.get(id).classes.delete(name);}},scrollIntoView(){},focus(){}}]));

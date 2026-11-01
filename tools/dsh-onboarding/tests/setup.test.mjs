@@ -20,7 +20,7 @@ test('setup guards secrets, pairs, routes BYOK directly and revokes cloud token'
  const stateDir=await mkdtemp(join(tmpdir(),'jinbao-setup-')),setup=await createSetupServer({credentials,stateDir,port:0,fetchImpl});
  t.after(setup.close);const base=setup.url.split('/#')[0],nonce=setup.url.split('#')[1];
  const request=(path,b,headers={})=>fetch(base+path,{method:b===undefined?'GET':'POST',headers:{'X-Jinbao-Setup':nonce,'Content-Type':'application/json',...headers},...(b===undefined?{}:{body:JSON.stringify(b)})});
- assert.equal((await fetch(base+'/api/status')).status,403);
+ const expired=await fetch(base+'/api/status');assert.equal(expired.status,403);assert.match((await expired.json()).error,/设置页面已失效/);
  assert.equal((await request('/api/model',{mode:'cloud'},{Origin:'https://evil.test'})).status,403);
  assert.equal((await request('/v1/chat/completions',{messages:[]})).status,401);
  const start=await (await request('/api/login/start',{})).json();assert.equal(start.userCode,'1234ABCD');assert.ok(!JSON.stringify(start).includes('server-secret'));

@@ -4,9 +4,9 @@
 
 [下载 Windows 版](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/latest/download/jinbao-desktop-windows.zip) · [金宝官网 / 手机 App](https://www.jinbaoai.top/#download) · [版本与更新记录](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases)
 
-## 独立桌面版预览（v0.2.4）
+## 独立桌面版预览（v0.2.5）
 
-**GitHub 预发布下载：**[jinbao-desktop-windows.zip](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.2.4-standalone-preview.1/jinbao-desktop-windows.zip)。
+**GitHub 预发布下载：**[jinbao-desktop-windows.zip](https://github.com/YuanCao1996/dsh-jinbao-desktop/releases/download/v0.2.5-standalone-preview.1/jinbao-desktop-windows.zip)。
 
 完整解压后双击 `开始使用.cmd`，自动打开悬浮窗与设置页，等待进入游戏。本预发布包默认使用金宝官方云端服务，不要求另装 DSH Desktop，也不包含 ADB；群聊后端仍未部署，群聊入口保持关闭。
 

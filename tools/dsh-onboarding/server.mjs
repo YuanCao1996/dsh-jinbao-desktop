@@ -184,7 +184,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
     res.end(await readFile(new URL('./settings.html',import.meta.url)));return;
    }
-   if(!same(req.headers['x-jinbao-setup'],nonce))throw error(403);
+   if(!same(req.headers['x-jinbao-setup'],nonce)){send(res,403,{error:'设置页面已失效，请从金宝重新打开设置页面。'});return;}
    if(req.headers.origin&&req.headers.origin!=='http://'+expectedHost)throw error(403);
    if(teamRoutes&&await teamRoutes(req,res))return;
    if(req.url==='/api/exploration/suggestion'&&req.method==='GET'){const view=overlay.view();send(res,200,{suggestion:currentHeroSuggestion(view),modeSuggestion:currentModeSuggestion(view)});return;}

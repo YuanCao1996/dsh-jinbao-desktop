@@ -26,6 +26,8 @@ if($Action -eq 'shortcut') {
         $shortcut.Arguments='"'+$Target+'"'
         $shortcut.WorkingDirectory=[IO.Path]::GetDirectoryName($Target)
         $shortcut.Description='启动金宝游戏教练'
+        $icon=Join-Path ([IO.Path]::GetDirectoryName($Target)) 'tools\dsh-onboarding\exploration-icon.ico'
+        if(Test-Path -LiteralPath $icon -PathType Leaf){$shortcut.IconLocation=$icon+',0'}
         $shortcut.Save()
     }
     exit 0

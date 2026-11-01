@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>金宝设置</title>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>金宝设置</title><link rel="icon" href="/exploration-icon.png" type="image/png">
 <style>
 /* finesse · register=product · existing settings / light-neutral / feedback-only */
 :root{color-scheme:light;--page:#f4f5f2;--surface:#fdfdfb;--inset:#eef0eb;--ink:#292d29;--muted:#626c63;--line:rgba(40,48,40,.12);--accent:#ee9232;--accent-ink:#87490c;--accent-soft:#fff0df;--good:#287149;--bad:#a82e35;--bad-soft:#fceff0;--focus:rgba(238,146,50,.24);--shadow:0 1px 3px rgba(34,45,32,.04)}
@@ -10,7 +10,7 @@
 @media(pointer:coarse){button{min-height:44px}input,select{font-size:16px}}
 @media(prefers-reduced-motion:reduce){*,*:after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 </style></head><body><div class="settings-shell"><aside class="settings-sidebar"><div class="settings-brand"><span aria-hidden="true">金</span><div><strong>金宝</strong><small>桌面端设置</small></div></div><nav class="settings-nav" aria-label="设置分类"><button type="button" data-settings-page="account" aria-current="page">账号与额度</button><button type="button" data-settings-page="model">模型服务</button><button type="button" data-settings-page="games">游戏与观察</button><button type="button" data-settings-page="phone">手机连接</button><button type="button" data-settings-page="voice">角色与语音</button><button type="button" data-settings-page="memory">记忆与展示</button><button type="button" data-settings-page="updates">更新与诊断</button></nav><small>Windows 桌面版 · 本地设置</small></aside><main>
-<header class="settings-heading"><small>偏好设置</small><h1 id="settingsPageTitle">账号与额度</h1><p id="settingsPageDescription">管理当前电脑的登录账号与官方模型额度。</p></header><p id="runtimeNotice" hidden>独立桌面版：官方云端服务无需 DSH Desktop；自己的 API Key 使用本机 DSH 原生 Agent。</p><div id="message" role="status" aria-live="polite"></div>
+<header class="settings-heading"><small>偏好设置</small><h1 id="settingsPageTitle">账号与额度</h1><p id="settingsPageDescription">管理当前电脑的登录账号与官方模型额度。</p></header><details style="margin:0 0 18px;border:1px solid #e6ded2;border-radius:16px;background:#fffaf3;overflow:hidden"><summary style="padding:10px 16px;cursor:pointer;color:#805536">探索的旅程 · 展开欢迎卡片</summary><div style="display:flex;align-items:center;gap:20px;padding:0 16px 16px"><img src="/exploration-poster.jpg" alt="举剑向前的探索者" style="width:92px;height:130px;object-fit:cover;border-radius:10px"><div><strong>今天，探索新的可能</strong><p>和你一起探索未至之境。</p></div></div></details><p id="runtimeNotice" hidden>独立桌面版：官方云端服务无需 DSH Desktop；自己的 API Key 使用本机 DSH 原生 Agent。</p><div id="message" role="status" aria-live="polite"></div>
 <footer id="modelActions" data-settings-group="model"><span id="modelSaveState" role="status" aria-live="polite">正在读取设置…</span><div class="model-buttons"><button type="button" id="discardModel" class="secondary" hidden>放弃更改</button></div></footer>
 <section id="updateNotice" class="success" role="status" hidden><h2 id="updateNoticeTitle"></h2><p id="updateNoticeMessage"></p><pre id="updateNoticeNotes"></pre><button id="updateAck" class="secondary">知道了</button></section>
 <section id="accountCard"><h2 id="accountTitle">金宝账号</h2><p id="account">正在检查登录状态…</p><div id="signedIn" hidden><span class="badge">✓ 登录成功 · 已记住此电脑</span><p id="rights"></p><button id="changeAccount" class="secondary">切换账号</button><button id="logout" class="secondary">退出登录</button></div>
@@ -134,4 +134,22 @@ function initializeSettingsUi(){if(typeof document.querySelectorAll!=='function'
 function initializeModelChoices(){if(typeof document.querySelectorAll!=='function')return;const group=document.createElement('fieldset'),legend=document.createElement('legend');group.className='mode-choices';legend.textContent='模型调用方式';group.append(legend);const descriptions={cloud:'使用金宝账号额度，无需配置密钥。',byok:'使用你的模型与额度，需要本机 DSH 引擎。',demo:'不调用模型，不产生模型请求。'};for(const option of el('mode').options){const label=document.createElement('label'),input=document.createElement('input'),copy=document.createElement('span'),title=document.createElement('strong'),help=document.createElement('small');label.className='mode-choice';input.type='radio';input.name='model-mode-choice';input.value=option.value;input.checked=option.selected;input.onchange=()=>{el('mode').value=input.value;show();};title.textContent=option.textContent;help.textContent=descriptions[option.value];copy.append(title,help);label.append(input,copy);group.append(label);}el('mode').after(group);el('mode').hidden=true;document.querySelector('label[for="mode"]').hidden=true;}
 initializeModelChoices();initializeSettingsUi();if(typeof document.createElement==='function'&&typeof document.querySelector==='function'){const link=document.createElement('a');link.id='teamRoomLink';link.href='/team-room#'+nonce;link.textContent='开黑队伍 · 创建、邀请和群聊';link.hidden=true;document.querySelector('main')?.prepend(link);}run(()=>refresh(true));let lastPoll=Date.now();setInterval(()=>{const fast=['checking','downloading','verifying','extracting'].includes(latest?.update?.state)||['requested','waiting-host','applying'].includes(latest?.updateApply?.state);if(!document.hidden&&Date.now()-lastPoll>=(fast?2000:15000)){lastPoll=Date.now();run(()=>refresh());}},1000);
 if(typeof document.createElement==='function'&&typeof document.querySelector==='function'){const explorationLink=document.createElement('a');explorationLink.href='/exploration#'+nonce;explorationLink.textContent='探索图鉴与排行榜';explorationLink.style.display='block';explorationLink.style.margin='12px 0';document.querySelector('main')?.prepend(explorationLink);}
+if(typeof document.createElement==='function'&&typeof document.querySelector==='function'){
+ const welcomeLink=document.createElement('a');welcomeLink.id='welcomeGuideLink';welcomeLink.href='/welcome#'+nonce;
+ welcomeLink.textContent='新手引导 · 6 张真实界面截图';welcomeLink.style.display='block';welcomeLink.style.margin='12px 0';
+ document.querySelector('main')?.prepend(welcomeLink);
+ // Open the guide once per install. Popup blockers can refuse window.open, so fall back
+ // to a visible banner instead of silently doing nothing.
+ const autoKey='jinbao-welcome-auto';
+ let tries=0;const timer=setInterval(()=>{
+  tries++;
+  if(tries>60||latest===undefined||latest===null){if(tries>60)clearInterval(timer);return;}
+  clearInterval(timer);
+  let already=false;try{already=sessionStorage.getItem(autoKey)==='1';}catch(_){}
+  if(latest.welcomeSeen!==false||already)return;
+  try{sessionStorage.setItem(autoKey,'1');}catch(_){}
+  let opened=null;try{opened=window.open('/welcome#'+nonce,'_blank');}catch(_){}
+  if(!opened){welcomeLink.textContent='新手引导 · 首次使用建议先看一遍';welcomeLink.style.fontWeight='600';}
+ },250);
+}
 </script></body></html>

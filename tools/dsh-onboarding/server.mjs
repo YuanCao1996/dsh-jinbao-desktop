@@ -16,7 +16,7 @@ import { currentHeroSuggestion, currentModeSuggestion } from './exploration-evid
 import { createShutdown } from '../cloud-desktop/shutdown.mjs';
 const refs={local:'JINBAO_LOCAL_ACCESS_KEY',cloud:'JINBAO_SERVICE_TOKEN',byok:'JINBAO_USER_MODEL_API_KEY',speech:'JINBAO_USER_SPEECH_API_KEY',sync:'JINBAO_SYNC_TOKEN'};
 const same=(a,b)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
+const send=(res,status,value,headers)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...(headers??{})});res.end(JSON.stringify(value));};
 const error=status=>Object.assign(Error('setup operation failed'),{status});
 async function body(req,max=512*1024,onBytes){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>max){onBytes?.(declared);req.resume();throw error(413);}let size=0;const chunks=[];for await(const c of req){size+=c.length;onBytes?.(size);if(size>max)throw error(413);chunks.push(c);}try{const b=JSON.parse(Buffer.concat(chunks));if(!b||typeof b!=='object'||Array.isArray(b))throw 0;return b;}catch{throw error(400);}}
 export async function createSetupServer({credentials,stateDir,port=3084,coachPort=3081,serviceBaseUrl='https://api.jinbaoai.top',fetchImpl=fetch,cloudAgent,localAgent,runtimeId,prepareModel,onModelChange,updateController,observation,nativeInstaller,logSource,userMemory,activity,diagnostics,speech,canAutoRequest,teamRooms=false,teamHostPreview=false,teamCacheStore,teamCacheReports,teamUsageOutbox,teamUsageError=false,teamCacheError=false}) {
@@ -67,6 +67,41 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   // Existing trial/activation billing stays independent of WeChat device association.
   if(login&&!current?.startsWith('jc_'))await acceptCloud(result);
   pairing=null;void phoneSync.enable().catch(()=>{});
+ }
+ // Renewal used to live only inside GET /api/status, so a user who never opened the
+ // settings page never renewed: cloud-login.json kept its login-time renewAfter, the
+ // token expired unnoticed and every model call started failing with 401. It also
+ // required now<expiresAt, which made a just-expired token unrecoverable without a
+ // fresh login, and the failure was swallowed by a bare catch. The renewal now runs on
+ // a background timer, is attempted once past renewAfter even if already expired, and
+ // records its outcome so the failure can be surfaced instead of staying silent.
+ let cloudRenew={state:'idle',at:0,status:null};
+ async function renewCloudSession({force=false}={}){
+  if(cloudRenew.state==='expired'&&!force)return cloudRenew;
+  const token=await resolve('cloud');
+  if(!token){cloudRenew={state:'absent',at:Date.now(),status:null};return cloudRenew;}
+  let lifetime=null;
+  try{lifetime=JSON.parse(await readFile(join(stateDir,'cloud-login.json'),'utf8'));}catch{}
+  const now=Date.now();
+  if(!force&&!(lifetime&&Number.isFinite(lifetime.renewAfter)&&now>lifetime.renewAfter))return cloudRenew;
+  if(!force&&now<nextRenewAttempt)return cloudRenew;
+  nextRenewAttempt=now+300000;
+  try{
+   await locked(async()=>{
+    const current=await resolve('cloud');
+    if(current!==token)return;
+    await acceptCloud(await remote('/desktop/auth/session/renew',current,{}));
+   });
+   cloudRenew={state:'renewed',at:Date.now(),status:200};
+   await writeFile(join(stateDir,'cloud-renew.json'),JSON.stringify(cloudRenew),{mode:0o600}).catch(()=>{});
+  }catch(error){
+   const status=Number.isFinite(error?.status)?error.status:null;
+   // 401/403 is the server's final answer: this token can never be renewed again and
+   // only a fresh login recovers, so stop spending attempts on it.
+   cloudRenew={state:status===401||status===403?'expired':'failed',at:Date.now(),status};
+   await writeFile(join(stateDir,'cloud-renew.json'),JSON.stringify(cloudRenew),{mode:0o600}).catch(()=>{});
+  }
+  return cloudRenew;
  }
  async function syncToken(){
   let token=await resolve('sync')??(syncForgotten?null:await resolve('cloud'));
@@ -152,6 +187,9 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     const textOnly={...b,messages:b.messages.map(m=>({...m,content:Array.isArray(m.content)?m.content.map(p=>p?.type==='image_url'?{type:'image_url',image_url:{url:'[inline image]'}}:p):m.content}))};
     if(Buffer.byteLength(JSON.stringify(textOnly))>512*1024)throw error(413);
     diagnostic.messageCount=b.messages.length;diagnostic.toolCount=Array.isArray(b.tools)?b.tools.length:0;diagnostic.systemBytes=Buffer.byteLength(JSON.stringify(b.messages.filter(m=>m.role==='system')));
+    // The gateway meters quota in bytes (prompt + tools + max_tokens + 256), so the
+    // tool-schema cost has to be visible next to the message bytes.
+    diagnostic.toolsBytes=Array.isArray(b.tools)?Buffer.byteLength(JSON.stringify(b.tools)):0;
     if(config.mode==='demo')throw error(409);
     const token=await resolve(config.mode==='byok'?'byok':'cloud');if(!token)throw error(401);
     const endpoint=config.mode==='byok'?chatUrl(config.baseUrl):new URL('/v1/chat/completions',service);
@@ -161,6 +199,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     try{
      const upstream=await fetchImpl(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({...b,model:config.mode==='byok'?config.model:'game-fast',max_tokens:Math.min(Number.isInteger(b.max_tokens)?b.max_tokens:2048,2048)}),redirect:'error',signal:controller.signal});
      if(!upstream.ok){
+      // Keep the gateway's backoff hint. Rate limiting is by far the most common
+      // upstream failure (2,993 responses in three days), and a caller can only pace
+      // itself if the server's Retry-After survives this hop.
+      const retryAfter=upstream.headers.get('retry-after');
       if(upstream.status===400){
        let problem;try{problem=await limitedJson(upstream,4096);}catch{}
        const code=problem?.error?.code,message=String(problem?.error?.message??'');
@@ -168,7 +210,8 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
         diagnostic.errorCode='context_length_exceeded';send(res,400,{error:{type:'invalid_request_error',code:'context_length_exceeded',message:'maximum context length exceeded'}});return;
        }
       }else await upstream.body?.cancel();
-      throw error(upstream.status);
+      const wait=/^[0-9]{1,5}$/.test(String(retryAfter??''))&&Number(retryAfter)>0?String(retryAfter):null;
+      throw Object.assign(error(upstream.status),wait?{retryAfter:wait}:{});
      }
      res.writeHead(200,{'Content-Type':b.stream?'text/event-stream':'application/json','Cache-Control':'no-store'});
      let bytes=0;for await(const chunk of upstream.body){bytes+=chunk.length;if(bytes>2*1024*1024)throw error(502);if(!res.write(chunk))await once(res,'drain',{signal:controller.signal});}res.end();
@@ -176,12 +219,28 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     return;
    }
    if(team&&await serveTeamPage(req,res))return;
+   if(req.method==='GET'&&['/exploration-poster.jpg','/exploration-icon.png'].includes(req.url)){
+    res.writeHead(200,{'Content-Type':req.url.endsWith('.jpg')?'image/jpeg':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});
+    res.end(await readFile(new URL('.'+req.url,import.meta.url)));return;
+   }
    if(req.method==='GET'&&req.url==='/exploration'){
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src https://game.gtimg.cn; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
     res.end(await readFile(new URL('./exploration.html',import.meta.url)));return;
    }
+   // First-run guide: real overlay screenshots plus CSS transitions. The filenames are
+   // an explicit allowlist so the route cannot read anything outside welcome/.
+   if(req.method==='GET'&&req.url==='/welcome'){
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
+    res.end(await readFile(new URL('./welcome.html',import.meta.url)));return;
+   }
+   if(req.method==='GET'&&req.url.startsWith('/welcome/')&&req.url.endsWith('.png')){
+    const name=req.url.slice('/welcome/'.length);
+    if(!['advice','augments','equipment','players','events','chat'].includes(name.slice(0,-4)))throw error(404);
+    res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});
+    res.end(await readFile(new URL('./welcome/'+name,import.meta.url)));return;
+   }
    if(req.method==='GET'&&(req.url==='/'||req.url==='/?page=voice')){
-    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
+    res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
     res.end(await readFile(new URL('./settings.html',import.meta.url)));return;
    }
    if(!same(req.headers['x-jinbao-setup'],nonce)){send(res,403,{error:'设置页面已失效，请从金宝重新打开设置页面。'});return;}
@@ -246,23 +305,16 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     const reply=snapshot.lastReply;
     send(res,200,{text:typeof reply?.text==='string'?reply.text.slice(0,2000):'',updatedAt:Number.isFinite(reply?.at)?reply.at:null,game:typeof snapshot.game==='string'?snapshot.game.slice(0,32):null});return;
    }
+   if(req.url==='/api/welcome/seen'&&req.method==='POST'){
+    const value={at:Date.now(),version:typeof config?.version==='string'?config.version:null};
+    await writeFile(join(stateDir,'welcome-seen.json'),JSON.stringify(value),{mode:0o600}).catch(()=>{});
+    send(res,200,{seen:true,at:value.at});return;
+   }
    if(req.url==='/api/status'&&req.method==='GET'){
     if(Date.now()-email.checkedAt>60000){try{const capability=await remote('/desktop/auth/email/capabilities');email={enabled:capability.enabled===true,checkedAt:Date.now()};}catch{email={enabled:false,checkedAt:Date.now()};}}
     if(Date.now()-wechat.checkedAt>60000){try{const capability=await remote('/desktop/auth/wechat/capabilities');wechat={enabled:capability.enabled===true,checkedAt:Date.now()};}catch{wechat={enabled:false,checkedAt:Date.now()};}}
+    await renewCloudSession();
     let token=await resolve('cloud');let account=null,accountError=null;
-    if(token?.startsWith('jd_'))try{
-     const lifetime=JSON.parse(await readFile(join(stateDir,'cloud-login.json'),'utf8'));
-     if(Date.now()>lifetime.renewAfter&&Date.now()<lifetime.expiresAt&&Date.now()>=nextRenewAttempt){
-      await locked(async()=>{
-       const current=await resolve('cloud');
-       if(current!==token||Date.now()<nextRenewAttempt)return;
-       // Apply backoff before calling upstream so concurrent status polls share it.
-       nextRenewAttempt=Date.now()+300000;
-       await acceptCloud(await remote('/desktop/auth/session/renew',current,{}));
-      });
-      token=await resolve('cloud');
-     }
-    }catch{ /* A failed renewal does not invalidate an otherwise valid session. */ }
     if(token)try{account=await remote('/desktop/account',token);}catch(e){accountError=e.status??503;}
     let update=null;
     try{const path=join(stateDir,'updates/status.json');if((await stat(path)).size<16384){const saved=JSON.parse(await readFile(path,'utf8'));update=Object.fromEntries(['state','version','currentVersion','message','at','notes','downloadedBytes','totalBytes','percent','bytesPerSecond','failedPhase','retryable'].filter(k=>saved[k]!==undefined).map(k=>[k,saved[k]]));}}catch{}
@@ -273,7 +325,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
     let releaseNotes=null;try{const bundled=JSON.parse(await readFile(new URL('./release-notes.json',import.meta.url),'utf8'));if(bundled.version===version)releaseNotes=bundled.notes;}catch{}
     let maintenance=null;try{maintenance=JSON.parse(await readFile(join(stateDir,'maintenance-status.json'),'utf8'));}catch{}
     let emailDisplay=null;if(account?.loginMethod==='email')try{emailDisplay=JSON.parse(await readFile(join(stateDir,'email-account.json'),'utf8')).display;}catch{}
-    send(res,200,{...config,agentActivity:activity?.status()??{supported:false,enabled:false},agentRuntime:runtimeId??(cloudAgent?'cloud-preview':'local-dsh'),observation:observation?.status(),logSource:logSource?.status(),nativeInstallation:nativeInstaller?.status(),version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,teamSupported:!!team,teamCache:teamCacheStore?{...teamCacheStore.status(),reports:teamCacheReports?.status()}:{supported:false,...(teamCacheError?{error:'cleanup_unavailable'}:{})},teamUsage:teamUsageOutbox?teamUsageOutbox.status():{supported:false,...(teamUsageError?{error:'usage_unavailable'}:{})},phoneSync:phoneSync.status(),...await diagnostic()});return;
+    send(res,200,{...config,welcomeSeen:await readFile(join(stateDir,'welcome-seen.json'),'utf8').then(()=>true,()=>false),agentActivity:activity?.status()??{supported:false,enabled:false},agentRuntime:runtimeId??(cloudAgent?'cloud-preview':'local-dsh'),observation:observation?.status(),logSource:logSource?.status(),nativeInstallation:nativeInstaller?.status(),version,pluginUpdatePending,phoneCaptureEnabled,emailEnabled:email.enabled,wechatEnabled:wechat.enabled,emailDisplay,cloudConfigured:!!token,byokConfigured:!!await resolve('byok'),account,accountError,cloudRenew,update,updateApply,updateResult,releaseNotes,maintenance,mobileUrl:new URL('/desktop/mobile',service).href,teamSupported:!!team,teamCache:teamCacheStore?{...teamCacheStore.status(),reports:teamCacheReports?.status()}:{supported:false,...(teamCacheError?{error:'cleanup_unavailable'}:{})},teamUsage:teamUsageOutbox?teamUsageOutbox.status():{supported:false,...(teamUsageError?{error:'usage_unavailable'}:{})},phoneSync:phoneSync.status(),...await diagnostic()});return;
    }
    if(req.method!=='POST'||!String(req.headers['content-type']).startsWith('application/json'))throw error(404);
    const b=await body(req,8192);
@@ -424,13 +476,16 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    if(value?.disableSync){await phoneSync.disable();send(res,200,{disabled:true});return;}
    if(value?.enableSync){await phoneSync.enable();send(res,200,{enabled:true});return;}
    send(res,200,value);
-  }catch(e){if(res.headersSent){res.destroy();return;}if(e.code==='local_dsh_unavailable'){send(res,409,{error:'未找到兼容的 DSH 原生引擎。请使用此页的官方安装按钮安装或更新 DSH，或填写正确的程序路径；官方云端仍可使用。'});return;}const status=[400,401,403,404,409,410,413,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:status===401?'请登录或配置模型密钥':status===403?'配置访问被拒绝':status===409?'请先配置模型或重新生成配对码':status===410?'配对码已过期':status===429?'首批体验名额已满或请求过于频繁':status===400?'配置格式不正确':'连接失败，请稍后重试'});}
+  }catch(e){if(res.headersSent){res.destroy();return;}if(e.code==='local_dsh_unavailable'){send(res,409,{error:'未找到兼容的 DSH 原生引擎。请使用此页的官方安装按钮安装或更新 DSH，或填写正确的程序路径；官方云端仍可使用。'});return;}const status=[400,401,403,404,409,410,413,429,502,503].includes(e.status)?e.status:503;send(res,status,{error:status===401?'请登录或配置模型密钥':status===403?'配置访问被拒绝':status===409?'请先配置模型或重新生成配对码':status===410?'配对码已过期':status===429?'首批体验名额已满或请求过于频繁':status===400?'配置格式不正确':'连接失败，请稍后重试'},status===429&&e.retryAfter?{'Retry-After':e.retryAfter}:undefined);}
  });
  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
  const url='http://127.0.0.1:'+server.address().port+'/#'+nonce;
  await writeFile(join(stateDir,'settings-link.txt'),url,{mode:0o600});
+ // Renew on a timer so the session no longer depends on someone opening the settings page.
+ const renewTimer=setInterval(()=>{void renewCloudSession().catch(()=>{});},60000);
+ renewTimer.unref?.();
  let httpClosing;
  const stopAccepting=()=>{accepting=false;team?.stopAccepting();if(!httpClosing){httpClosing=new Promise(resolve=>server.close(()=>resolve()));server.closeAllConnections();}};
- const stopSetup=createShutdown({quiesce:stopAccepting,steps:[['commands',()=>mutation],['phone',()=>phoneSync.close()],['team',()=>team?.close()],['memories',()=>memories.close()],['overlay',()=>overlay.close()],['http',()=>httpClosing]]});
+ const stopSetup=createShutdown({quiesce:stopAccepting,steps:[['renewal',()=>{clearInterval(renewTimer);}],['commands',()=>mutation],['phone',()=>phoneSync.close()],['team',()=>team?.close()],['memories',()=>memories.close()],['overlay',()=>overlay.close()],['http',()=>httpClosing]]});
  return {url,port:server.address().port,stopAccepting,view:overlay.view,config:()=>({...config}),ensureTrialLogin:()=>locked(async()=>{if(config.mode!=='cloud'||await resolve('cloud'))return;await acceptCloud(await remote('/desktop/auth/ip/register',null,{}));}),search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote('/site/search',token,query);},close:async()=>{if((await stopSetup()).failed.length)throw Error('setup_shutdown_failed');}};
 }

@@ -290,7 +290,7 @@ export async function createTeamBridge({ stateDir, serviceBaseUrl, getToken, get
   await flush();
   timer = setInterval(() => { void tick().catch(() => {}); }, pollMs); timer.unref();
   if (settings.activeRoomId) void tick().catch(() => {});
-  const stopAccepting = () => { closed = true; clearInterval(timer); host?.quiesce(); };
+  const stopAccepting = () => { closed = true; clearInterval(timer); publisher.reset(); host?.quiesce(); };
   const stop = createShutdown({ quiesce: stopAccepting,
     steps: [['commands', () => mutation], ['host', () => host?.close()], ['poll', () => running],
       ['overlay', () => atomic(overlayFile, { supported: false, updatedAt: now() })], ['io', () => io]] });

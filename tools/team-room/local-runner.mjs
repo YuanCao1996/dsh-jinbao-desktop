@@ -39,7 +39,7 @@ export async function createLocalRoomRunner({ stateDir, getConfig, getKey, modul
   const modules = await locateNativeModules({ stateDir, desktopPath: config.desktopPath || undefined, moduleRoot });
   const load = nativeImporter(modules);
   const [{ Context }, llm, { default: Sessions }, { default: Projection }, { default: Tools }, { default: Agents },
-    { default: Loop }, { default: Prompt }, { default: Persistence }, { default: Meter }, { default: Compaction }] = await Promise.all(
+    { default: Loop }, { default: Prompt }, Persistence, { default: Meter }, { default: Compaction }] = await Promise.all(
     ['cordis', 'dsh-llm', 'dsh-session', 'dsh-session-projection', 'dsh-tools', 'dsh-agent', 'dsh-agent-loop', 'dsh-system-prompt',
       'dsh-session-persistence-jsonl', 'dsh-token-meter', 'dsh-compaction-basic'].map(name => load('@deepseek-ai/' + name)));
   if (typeof Context !== 'function' || typeof llm.LlmAdapter !== 'function' || typeof llm.createUserMessage !== 'function'
@@ -109,7 +109,7 @@ export async function createLocalRoomRunner({ stateDir, getConfig, getKey, modul
       await mkdir(directory, { recursive: true, mode: 0o700 });
       await mount(Prompt, { includeHarnessIdentity: false, includeRuntimeContext: false,
         personaPrefix: roomSystemPolicy(turn.current, turn.mentorInstruction) });
-      await mount(llm.default); await mount(Sessions); await mount(Persistence, { root: directory, compression: 'none' });
+      await mount(llm.default); await mount(Sessions); await mount(Persistence.default ?? Persistence, { root: directory, compression: 'none' });
       await mount(Projection); await mount(Tools, { mode: 'native' }); await mount(Agents); await mount(Loop, { agents: [], maxParallelToolCalls: 1 });
       await mount(Meter); await mount(Compaction, { auto: false, maxTokens: 1024, retainRatio: .1 });
       const ctx = entry.ctx;

@@ -1,9 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTeamBridge } from '../bridge.mjs';
+test('disabling sharing while an upload is in flight stops the rest of that batch', { timeout: 5000 }, async t => {
+  const stateDir = await mkdtemp(join(tmpdir(), 'team-stop-share-'));
+  let bridge, releaseUpload, firstUpload; const started = new Promise(resolve => { firstUpload = resolve; });
+  t.after(async () => { releaseUpload?.(); await bridge?.close(); await rm(stateDir, { recursive: true, force: true }); });
+  const room = { id: 'room', selfMemberId: 'member', ownerMemberId: 'owner', membershipVersion: 1,
+    members: [{ id: 'member' }], currentMatch: { id: 'match', game: 'lol' } };
+  await writeFile(join(stateDir, 'team-room-settings.json'), JSON.stringify({ version: 1, activeRoomId: room.id, mode: 'team',
+    deviceId: '00000000-0000-4000-8000-000000000000', stateVersion: 1, shareGameInfo: true,
+    binding: { roomMatchId: 'match', localMatch: 'local', game: 'lol' } }));
+  let uploads = 0;
+  bridge = await createTeamBridge({ stateDir, serviceBaseUrl: 'https://example.test', getToken: () => 'fixture', pollMs: 60000, now: () => 100000,
+    getGameIdentity: async () => null,
+    getFacts: async () => ({ game: 'lol', match: 'local', at: 100000, phase: 'InProgress', gameSeconds: 120,
+      me: { champion: '安妮', level: 6, teamKills: 1, enemyKills: 0 }, allies: [], enemies: [] }),
+    fetchImpl: async (url, request) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/dashboard')) return Response.json({ room, messages: { items: [], hasMore: false }, tasks: { items: [] },
+        budget: {}, memories: { items: [] }, connections: { items: [] }, confirmations: { items: [] } });
+      if (path.endsWith('/observations') && request.method === 'POST') { uploads++; firstUpload(); await new Promise(resolve => { releaseUpload = resolve; }); return Response.json({ accepted: true }); }
+      return Response.json(room);
+    } });
+  await started;
+  const disabled = bridge.command('sharing', { enabled: false });
+  for (;;) {
+    if (JSON.parse(await readFile(join(stateDir, 'team-room-settings.json'), 'utf8')).shareGameInfo === false) break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  releaseUpload(); await disabled;
+  assert.equal(uploads, 1); assert.equal(bridge.view().shareGameInfo, false);
+});
 test('desktop bridge writes final-only group view, remembers room and avoids repost after budget denial', async t => {
   const stateDir = await mkdtemp(join(tmpdir(), 'team-bridge-'));
   t.after(() => rm(stateDir, { recursive: true, force: true }));

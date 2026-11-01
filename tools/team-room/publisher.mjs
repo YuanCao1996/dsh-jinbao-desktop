@@ -4,6 +4,10 @@ const nameOf = value => typeof value === 'string' ? value : value?.name ?? value
 const heroName = hero => hero?.champion ?? hero?.heroName;
 const heroId = (hero, side = 'our') => `${side}-${hash(hero?.championAlias ?? hero?.championId ?? heroName(hero))}`;
 const boundedInt = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max ? value : null;
+const publicEvents = Object.freeze({ GameStart: ['game_started', '对局开始'], GameEnd: ['game_ended', '对局结束'],
+  Ace: ['team_aced', '团灭'], TurretKilled: ['tower_destroyed', '防御塔被摧毁'],
+  InhibKilled: ['objective', '水晶被摧毁'], InhibRespawningSoon: ['objective', '水晶即将重生'], InhibRespawned: ['objective', '水晶已重生'],
+  DragonKill: ['objective', '小龙被击败'], BaronKill: ['objective', '大龙被击败'], HeraldKill: ['objective', '峡谷先锋被击败'] });
 
 // Projection is an allowlist. No raw logs, chat, screenshots, player identifiers,
 // preferences or API credentials ever cross this boundary.
@@ -57,6 +61,18 @@ export function projectTeamFacts(facts, { deviceId, roomMatchId, nextVersion, no
     push('match_state', { gameTimeSeconds: Math.max(0, Math.floor(facts.gameSeconds)), ourKills, enemyKills, heroes,
       phase: facts.ended ? 'ended' : facts.phase === 'ChampSelect' ? 'select' : facts.phase === 'InProgress' ? 'playing' : 'loading' });
   }
+  if (facts.game === 'lol' && Number.isFinite(facts.gameSeconds)) {
+    for (const event of (Array.isArray(facts.events) ? facts.events : []).slice(-40)) {
+      const match = typeof event?.key === 'string' && /^([A-Za-z]+):([0-9]{1,12})$/.exec(event.key);
+      const descriptor = match && Object.hasOwn(publicEvents, match[1]) ? publicEvents[match[1]] : null;
+      const time = typeof event?.time === 'string' && /^(\d{1,3}):(\d{2})$/.exec(event.time);
+      if (!descriptor || !time || Number(time[2]) > 59) continue;
+      const seconds = Number(time[1]) * 60 + Number(time[2]);
+      if (seconds > facts.gameSeconds + 5 || facts.gameSeconds - seconds > 30) continue;
+      push('key_event', { eventId: `event-${hash([match[1], match[2]])}`, type: descriptor[0], entityId: `entity-${hash(match[1])}`,
+        gameTimeSeconds: seconds, summary: descriptor[1] });
+    }
+  }
   for (const event of (facts.completedEquipmentEvents ?? []).slice(-5)) {
     if (!Number.isFinite(event.at) || now - event.at > 20_000 || !Number.isFinite(event.time)) continue;
     const entity = all.find(hero => heroName(hero) === event.hero);
@@ -71,18 +87,21 @@ export function projectTeamFacts(facts, { deviceId, roomMatchId, nextVersion, no
 }
 
 export function createTeamPublisher({ client, deviceId, getFacts, nextVersion, now = Date.now }) {
-  const sent = new Map(); let scope;
+  const sent = new Map(); let scope, generation = 0;
   return {
     async tick({ room, binding }) {
+      const started = generation;
       const facts = await getFacts();
+      if (started !== generation) return { published: 0, state: 'cancelled' };
       if (!facts || !room.currentMatch || binding?.roomMatchId !== room.currentMatch.id
         || binding.localMatch !== facts.match || binding.game !== facts.game
         || room.currentMatch.game !== facts.game) return { published: 0, state: 'binding_required' };
-      const generation = JSON.stringify([room.id, room.currentMatch.id, room.membershipVersion]);
-      if (generation !== scope) { sent.clear(); scope = generation; }
+      const scopeKey = JSON.stringify([room.id, room.currentMatch.id, room.membershipVersion]);
+      if (scopeKey !== scope) { sent.clear(); scope = scopeKey; }
       const packets = projectTeamFacts(facts, { deviceId, roomMatchId: room.currentMatch.id, nextVersion, now: now() });
       let published = 0;
       for (const packet of packets) {
+        if (started !== generation) return { published, state: 'cancelled' };
         const decision = { ...packet.payload };
         if (packet.kind === 'member_state') delete decision.gold;
         if (['augment_round', 'augment_selected'].includes(packet.kind)) delete decision.gameTimeSeconds;
@@ -90,14 +109,16 @@ export function createTeamPublisher({ client, deviceId, getFacts, nextVersion, n
         const key = hash([room.id, packet.roomMatchId, packet.kind, decision]);
         // Unchanged state receives a low-frequency heartbeat for freshness;
         // repeated critical events are still deduplicated by the room service.
-        const immutable = ['augment_selected', 'equipment_completed'].includes(packet.kind);
+        const immutable = ['augment_selected', 'equipment_completed', 'key_event'].includes(packet.kind);
         const slot = immutable ? key : packet.kind, prior = sent.get(slot);
         if (prior?.key === key && (immutable || now() - prior.at < 10_000)) continue;
-        await client.publish(room.id, packet); sent.set(slot, { key, at: now() }); published++;
+        await client.publish(room.id, packet); published++;
+        if (started !== generation) return { published, state: 'cancelled' };
+        sent.set(slot, { key, at: now() });
         if (sent.size > 100) sent.delete(sent.keys().next().value);
       }
       return { published, state: packets.length ? 'sharing' : 'waiting_fresh_state' };
     },
-    reset() { sent.clear(); scope = null; },
+    reset() { generation++; sent.clear(); scope = null; },
   };
 }

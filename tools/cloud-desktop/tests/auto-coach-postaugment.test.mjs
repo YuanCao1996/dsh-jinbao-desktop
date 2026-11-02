@@ -28,10 +28,10 @@ test('confirming an augment produces playstyle advice on the battle page',async(
     augment:'珠光护手',champion:'安妮',who:'self',source:'log-confirmed',confidence:'high'})+'\n');
   await waitFor(()=>overlay.view().advice.includes('本局已选海克斯')&&overlay.view().advice.includes('珠光护手'),'owned applied');
 
-  for(let i=0;i<5&&!overlay.view().advice.includes('强化效果');i++){
-    await coach.tick();
-    await new Promise(r=>setTimeout(r,150));
-  }
+  // Tick until the advice lands. A fixed 5x150ms window was too tight: under a
+  // full-suite run this turn takes ~955ms, so the retries ran out and the test
+  // failed on CPU contention rather than on behaviour.
+  await waitFor(async()=>{await coach.tick();return overlay.view().advice.includes('强化效果');},'postAugment advice');
   const advice=overlay.view().advice;
   assert.ok(stages.includes('postAugment'),'postAugment stage must run after the confirmation, saw: '+JSON.stringify(stages));
   assert.ok(advice.includes('强化效果'),'the confirmed augment must produce playstyle advice on the battle page:\n'+advice);

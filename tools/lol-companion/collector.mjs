@@ -51,7 +51,12 @@ const startCardWatch=offer=>{
  let buffer='';
  const onLine=line=>{
   let result;try{result=JSON.parse(line);}catch{return;}
-  if(!running||!Number.isInteger(result.picked)||!offer)return;
+  if(!running||!offer)return;
+  if(!Number.isInteger(result.picked)){
+   // 判定不出来时把两帧路径留下：既是视觉兜底的输入，也是阈值标定的原始数据。
+   if(result.baselineImage&&result.lastImage)log.append({kind:'augment_vision_ambiguous',roll:offer.roll??null,reason:result.reason??'',frames:result.frames??0,peak:result.peak??null,baselineImage:result.baselineImage,lastImage:result.lastImage});
+   return;
+  }
   const options=Array.isArray(offer.options)?offer.options:[];
   const option=options.find(row=>Number(row?.slot)===result.picked)??options[result.picked];
   const name=typeof option==='string'?option:option?.name;

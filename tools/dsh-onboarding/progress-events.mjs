@@ -5,10 +5,12 @@ export function progressSeconds(value,fallback=null){
   const m=typeof value==='string'&&/^(\d{1,3}):(\d{2})$/.exec(value);
   return m?Number(m[1])*60+Number(m[2]):fallback;
 }
-export function addProgressEvent(state,key,description,seconds,topic){
+export function addProgressEvent(state,key,description,seconds,topic,kind){
   if(state.events.some(e=>e.key===key))return;
   const time=Number.isFinite(seconds)&&seconds>=0?String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(Math.floor(seconds%60)).padStart(2,'0'):'时间未知';
-  state.events.push({key,text:description,time,...(topic?{topic}:{})});state.events=state.events.slice(-40);
+  // `kind` travels with the event so the Agent can tell an equipment change from an
+  // augment confirmation without spending a query round-trip to find out.
+  state.events.push({key,text:description,time,...(topic?{topic}:{}),...(typeof kind==='string'&&kind?{kind:kind.slice(0,40)}:{})});state.events=state.events.slice(-40);
 }
 const heroes=state=>[state.me,...state.allies,...state.enemies].filter(p=>p?.champion);
 const identity=value=>String(value??'').replace(/[\s·]/g,'').toLowerCase();
@@ -34,7 +36,7 @@ export function projectProgressEvent(state,event){
   if(event.kind==='purchase'){
     const hero=namedHero(state,event)??(isOwn(state,event)?state.me.champion:null),item=clean(event.item);
     if(state.game==='lol'&&!isCompletedItem({id:event.itemId,name:item}))return;
-    addProgressEvent(state,JSON.stringify(['purchase',seconds,hero,item||event.itemId]),`${hero??'英雄未识别'}购买装备：${item||'装备名称未识别'}`,seconds,'equipment');
+    addProgressEvent(state,JSON.stringify(['purchase',seconds,hero,item||event.itemId]),`${hero??'英雄未识别'}购买装备：${item||'装备名称未识别'}`,seconds,'equipment','purchase');
   }
   if(['augment_picked','augment_mutate','augment_picked_chat'].includes(event.kind)){
     const augment=clean(event.augment??event.name);if(!augment)return;
@@ -43,14 +45,20 @@ export function projectProgressEvent(state,event){
     // augment as owned. Attribution is never bypassed by a capture source.
     const own=confirmed&&isOwn(state,event);
     const hero=namedHero(state,event),owner=own?'自己':hero??'归属未确认';
-    addProgressEvent(state,JSON.stringify(['augment',event.kind,owner,augment,confirmed]),`${confirmed?'海克斯选择':'疑似海克斯选择'}：${owner} · ${augment}`,seconds,'augment-selection');
+    addProgressEvent(state,JSON.stringify(['augment',event.kind,owner,augment,confirmed]),`${confirmed?'海克斯选择':'疑似海克斯选择'}：${owner} · ${augment}`,seconds,'augment-selection',event.kind);
     if(own&&!state.ownedAugments.includes(augment))state.ownedAugments.push(augment);
+    // A countdown-default pick is what the player actually ended up with, even though it
+    // is not a user choice. Keep it separately so advice can account for it and label it.
+    if(isOwn(state,event)&&event.source==='countdown-default-confirmed'&&event.confidence!=='low'){
+      state.revealedAugments=state.revealedAugments??[];
+      if(!state.revealedAugments.includes(augment))state.revealedAugments.push(augment);
+    }
   }
   if(event.kind==='augment_offer'){
     const names=state.offers.map(o=>clean(typeof o==='string'?o:o.name)).filter(Boolean);
-    if(names.length)addProgressEvent(state,JSON.stringify(['offers',event.roll,names]),`${event.reroll?'海克斯刷新':'海克斯三选一'}：${names.join('、')}`,seconds);
+    if(names.length)addProgressEvent(state,JSON.stringify(['offers',event.roll,names]),`${event.reroll?'海克斯刷新':'海克斯三选一'}：${names.join('、')}`,seconds,undefined,'augment_offer');
   }
-  if(event.kind==='augment_offer_closed')addProgressEvent(state,'offer-closed:'+event.roll,'海克斯面板关闭，等待确认选择结果',seconds);
+  if(event.kind==='augment_offer_closed')addProgressEvent(state,'offer-closed:'+event.roll,'海克斯面板关闭，等待确认选择结果',seconds,undefined,'augment_offer_closed');
 }
 export function observeEquipment(state){
   const seen=new Set();
@@ -70,6 +78,6 @@ export function observeEquipment(state){
     if(added.length&&state.enemies.includes(player)){
       state.completedEquipmentEvents=[...(state.completedEquipmentEvents??[]),{at:state.at,time:state.gameSeconds,hero:player.champion,items:added}].slice(-12);
     }
-    if(added.length||removed.length)addProgressEvent(state,JSON.stringify(['inventory',key,state.at,added,removed]),`装备更新：${player.champion}`+(added.length?' · 新增 '+added.join('、'):'')+(removed.length?' · 移除 '+removed.join('、'):''),state.gameSeconds,'equipment');
+    if(added.length||removed.length)addProgressEvent(state,JSON.stringify(['inventory',key,state.at,added,removed]),`装备更新：${player.champion}`+(added.length?' · 新增 '+added.join('、'):'')+(removed.length?' · 移除 '+removed.join('、'):''),state.gameSeconds,'equipment','inventory');
   }
 }

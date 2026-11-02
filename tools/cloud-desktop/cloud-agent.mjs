@@ -2,6 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {serviceUrl,limitedJson} from '../dsh-game-services/client.mjs';
 import {equipmentContext} from '../dsh-onboarding/equipment-context.mjs';
+import {eventWindow} from '../dsh-coach-server/lib/event-window.mjs';
 import {roleInstruction} from './roles.mjs';
 const fail=(status,message)=>Object.assign(Error(message),{status});
 export function agentQuestion(request){
@@ -25,7 +26,7 @@ export function cloudContext(memory,game,match,{eventQuery=false,observationPlan
   bench:c?.phase==='ChampSelect'?c?.bench?.slice(0,20):undefined,
   offers:c?.offers?.slice(0,6).map(compact),owned_augments:c?.ownedAugments?.slice(0,12).map(compact),
   equipment_decision:equipment?{...equipment,currentItems:equipment.currentItems.slice(0,8).map(compact),enemies:equipment.enemies.slice(0,5).map(e=>({hero:String(e.hero??'').slice(0,120),items:e.items.slice(0,8).map(compact)})),unassignedEnemyItems:equipment.unassignedEnemyItems.slice(0,8).map(compact),confirmedAugments:equipment.confirmedAugments.slice(0,12).map(compact),assumedAugments:equipment.assumedAugments.slice(0,6)}:undefined},
-  events:(c?.events??[]).slice(-20).map(e=>({time:e.time,text:String(e.text??'').slice(0,240)})),client_context:{game_id:game,mode:c?.mode??'',capabilities:{event_query_v1:eventQuery,observation_plan_v1:game==='generic'&&observationPlan,user_memory_v1:userMemory},user_memory:{confirmed_preferences:(memory.preferences??[]).slice(-6)}}};
+  events:eventWindow(c?.events).rows,client_context:{game_id:game,mode:c?.mode??'',capabilities:{event_query_v1:eventQuery,observation_plan_v1:game==='generic'&&observationPlan,user_memory_v1:userMemory},user_memory:{confirmed_preferences:(memory.preferences??[]).slice(-6)}}};
  const oversized=()=>Buffer.byteLength(JSON.stringify(value))>24000;
  while(oversized()&&value.events.length){value.events.shift();value.client_context.context_reduced=true;}
  while(oversized()&&value.client_context.user_memory.confirmed_preferences.length){value.client_context.user_memory.confirmed_preferences.shift();value.client_context.context_reduced=true;}

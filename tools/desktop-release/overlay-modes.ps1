@@ -114,7 +114,7 @@ function Update-OverlayPlayback {
   if($script:speakEnabled -and !$script:managedSpeech){try{if(!$script:synth){Add-Type -AssemblyName System.Speech;$script:synth=New-Object Speech.Synthesis.SpeechSynthesizer;$voice=$script:synth.GetInstalledVoices()|Where-Object {$_.VoiceInfo.Culture.Name -like 'zh*'}|Select-Object -First 1;if(!$voice){throw 'Chinese voice unavailable'};$script:synth.SelectVoice($voice.VoiceInfo.Name)};$script:synth.SpeakAsyncCancelAll();$script:synth.SpeakAsync([string]$message.text)|Out-Null}catch{if($script:synth){try{$script:synth.Dispose()}catch{};$script:synth=$null};$script:speakEnabled=$false;$controls.HintText.Text='本机中文语音不可用，已保留文字播报'}}
  }
  $script:playbackInitialized=$true
- $controls.BubbleLabel.Text=if($script:snapshot.confirmation){'金宝 !'}elseif($script:unread){'金宝 '+$script:unread}else{'金宝'}
+ if($controls.BubbleBadge){$script:bubbleCount=[Math]::Min(99,[int]$script:unread);$controls.BubbleBadgeText.Text=if($script:snapshot.confirmation){'!'}else{[string]$script:bubbleCount};$controls.BubbleBadge.Visibility=if($script:snapshot.confirmation -or $script:bubbleCount -gt 0){'Visible'}else{'Collapsed'}}
  $controls.NarrowExpand.Content=if($script:snapshot.confirmation){'!'}else{'▣'}
  if(!$script:snapshot.confirmation){$quickConfirm.IsOpen=$false;$script:popupConfirmId=''}
  elseif($script:displayMode -eq 'narrow' -and !$script:confirmationJob -and $script:confirmationHandledId -ne [string]$script:snapshot.confirmation.id -and ($script:popupConfirmId -ne [string]$script:snapshot.confirmation.id -or $script:popupConfirmKey -ne (Get-ConfirmationChoiceKey $script:snapshot.confirmation))){Show-QuickConfirmation $script:snapshot.confirmation}

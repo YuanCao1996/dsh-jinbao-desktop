@@ -93,3 +93,13 @@ test('OCR inserting an extra 经 into the verb still classifies and attributes t
  for(const event of events)emit(event);
  assert.equal(s.ownedAugments.length,2,'已经质变/已经选择了 still counts as an explicit record');
 });
+
+test('a countdown-default pick is kept as auto-picked without claiming the user chose it',()=>{
+ const s=initialOverlayState();
+ applyOverlayEvent(s,{game:'lol',kind:'augment_picked',who:'self',augment:'坦克引擎',source:'countdown-default-confirmed',confidence:'high',time:600,t:1},'one');
+ assert.deepEqual(s.ownedAugments,[]);
+ assert.deepEqual(s.revealedAugments,['坦克引擎']);
+ applyOverlayEvent(s,{game:'lol',kind:'augment_picked',who:'self',augment:'灵魂虹吸',source:'user-confirmed',confidence:'high',time:610,t:2},'one');
+ assert.deepEqual(s.ownedAugments,['灵魂虹吸']);
+ assert.deepEqual(s.revealedAugments,['坦克引擎']);
+});

@@ -55,7 +55,9 @@ test('overlay withdraws obsolete content from battle page and playback while kee
   s.me.dead=false;
   const view=overlayView(s);
   assert.equal(view.playback.length,0);assert.equal(view.revokedPlayback.length,1);
-  assert.doesNotMatch(view.advice,/优先补装备/);assert.equal(s.broadcasts.length,1);
+  // Revoked from playback, but the battle page keeps the last text with a staleness
+  // marker instead of dropping back to a status label the player cannot act on.
+  assert.match(view.advice,/优先补装备/);assert.match(view.advice,/稍早建议，局势已变化/);assert.equal(s.broadcasts.length,1);
   s.me.dead=true;assert.equal(overlayView(s).playback.length,0);
 });
 test('polls trigger opening and level six once, then material changes with game-time cooldown', () => {
@@ -172,4 +174,28 @@ test('native monitor rebuilds stage context and suppresses a reply when options 
   // Already stale queued observations never consume another model request.
   assert.equal(await monitor.submitInteraction(event,'one',body),'');
   assert.equal(prompts.length,1);
+});
+
+test('objective key events get their own stage, task and short-lived validity', () => {
+ const current = { game:'lol', match:'m', phase:'InProgress', gameSeconds:600,
+  me:{champion:'安妮',level:11,items:[]}, allies:[], enemies:[], ownedAugments:[], events:[] };
+ const cases = [['ace','ace',/推进/], ['turret','turret',/转线|压塔/], ['inhib','inhib',/超级兵/], ['objective','objective',/龙/]];
+ for (const [trigger, stage, word] of cases) {
+  const plan = buildLolCoachingPlan([{kind:'key_event',coachTrigger:trigger,keyEvent:{name:'X',time:'10:00',text:'t'}}], current);
+  assert.equal(plan.stage, stage, trigger);
+  assert.match(plan.prompt, word, trigger);
+  assert.equal(plan.facts.keyEvent?.name, 'X', trigger);
+  const validity = createAdviceValidity(stage, current, 1000);
+  assert.equal(validity.expiresAt, 45000 + 1000, stage + ' keeps a short window');
+  assert.ok(adviceIsValid(validity, current, 2000), stage + ' stays valid while nothing changes');
+  assert.ok(!adviceIsValid(validity, { ...current, allies:[{champion:'锐雯',dead:false}] }, 2000), stage + ' dies when the fight state changes');
+ }
+});
+
+test('auto-picked augments reach the plan facts so the advice can account for them', () => {
+ const current = { game:'lol', match:'m', phase:'InProgress', gameSeconds:600,
+  me:{champion:'安妮',level:11,items:[]}, allies:[], enemies:[], ownedAugments:[], revealedAugments:['坦克引擎'], events:[] };
+ const plan = buildLolCoachingPlan([{kind:'augment_mutate'}], current);
+ assert.equal(plan.stage, 'postAugment');
+ assert.deepEqual(plan.facts.autoPickedAugments, ['坦克引擎']);
 });

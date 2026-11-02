@@ -1,4 +1,9 @@
-import {HttpFetchProvider} from '@deepseek-ai/dsh-web-fetch-http';
+// Optional host package. A missing or version-mismatched provider may only disable
+// the custom web decoder: a static import here once stopped the whole coach plugin
+// from loading on a host that did not ship this package.
+let HttpFetchProvider = null;
+try { ({ HttpFetchProvider } = await import('@deepseek-ai/dsh-web-fetch-http')); }
+catch (error) { console.warn('[coach-server] web fetch provider unavailable:', error?.code ?? error?.message); }
 export function gameSearchQuery(query,state={}){
  const q=String(query??'').trim();
  if(state.game==='lol'&&state.mode==='KIWI'&&/lol|league\s+of\s+legends|英雄联盟|海克斯|大乱斗|aram/i.test(q)&&!/王者|召唤师峡谷|经典模式|云顶|金铲铲|斗魂竞技场/.test(q)){
@@ -36,6 +41,7 @@ export function decodeWebBytes(bytes,contentType=''){
  return text;
 }
 export async function registerGameFetch(web){
+ if(!HttpFetchProvider)return false;
  // Extend only native decoding. Native HTTP transport retains DNS pinning, public-address checks and redirect policy.
  class GameFetch extends HttpFetchProvider{
   async readBody(response,url,signal){

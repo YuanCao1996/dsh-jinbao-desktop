@@ -56,11 +56,17 @@ for(const name of dependencies){
  await copyDependency(join(bundled,name),installed);
 }
 mkdirSync(dirname(patch),{recursive:true});mkdirSync(join(state,'logs'),{recursive:true});
-for(const name of ['dsh-game-services','dsh-onboarding','dsh-coach-server']){
+// The onboarding and coach plugins statically import these siblings, so an install
+// that skips them produces a plugin that cannot be loaded at all.
+for(const name of ['dsh-game-services','dsh-onboarding','dsh-coach-server','lol-companion','team-room','shared']){
  const from=join(source,name),to=join(profiles,'node_modules',name);
  if(!existsSync(join(from,'package.json')))throw Error('Missing release plugin: '+name);
  await cp(from,to,{recursive:true,filter:p=>!relative(from,p).split(/[\\/]/).some(part=>part==='tests'||part.includes('.bak'))});
 }
+// cloud-desktop is the standalone app; the host reuses only these two side-effect
+// free helpers, so copy them instead of dragging standalone-only modules along.
+mkdirSync(join(profiles,'node_modules','cloud-desktop'),{recursive:true});
+for(const name of ['user-memory.mjs','shutdown.mjs'])copyFileSync(join(source,'cloud-desktop',name),join(profiles,'node_modules','cloud-desktop',name));
 const updated=doc.toString();
 if(updated!==original){if(existsSync(patch))copyFileSync(patch,patch+'.jinbao-'+Date.now()+'.bak');writeFileSync(patch+'.tmp',updated);renameSync(patch+'.tmp',patch);}
 console.log('Installed.');

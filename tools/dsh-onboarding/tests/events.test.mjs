@@ -27,3 +27,23 @@ test('ordinary kills do not evict key events and the page keeps at most forty ke
  for(let i=1;i<=45;i++)emit('TurretKilled',i);
  assert.equal(s.events.length,40);
 });
+
+test('the events page mirrors the window the Agent receives and says what was held back',()=>{
+ const s=initialOverlayState();let t=1;
+ const emit=(id)=>applyOverlayEvent(s,{game:'lol',kind:'event',name:'TurretKilled',id,time:id,t:++t},'game');
+ for(let i=1;i<=35;i++)emit(i);
+ // State keeps 40 for history; the page and the model both see the same 20-row window.
+ assert.equal(s.events.length,35);
+ const page=overlayView(s).events;
+ assert.equal(page.split('\n').filter(line=>line.startsWith('00:')).length,20);
+ assert.match(page,/更早 15 条未进入智能体上下文/);
+ // The newest event is shown, the oldest is not.
+ assert.match(page,/防御塔被摧毁/);
+ assert.ok(page.includes('00:35') || page.includes('00:3'), 'newest row present');
+});
+
+test('event rows carry a kind so the Agent can classify them without querying',()=>{
+ const s=initialOverlayState();let t=1;
+ applyOverlayEvent(s,{game:'lol',kind:'event',name:'Ace',id:7,time:120,t:++t},'game');
+ assert.equal(s.events.at(-1).kind,'Ace');
+});

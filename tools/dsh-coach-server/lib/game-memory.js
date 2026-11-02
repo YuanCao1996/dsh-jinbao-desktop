@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile, rename, appendFile, open, realpath } from 'node:fs/promises';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
+import { eventWindow } from './event-window.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const preferenceQueues=new Map();
@@ -118,7 +119,7 @@ export function createGameMemory(stateDir) {
       const value = cleanGameData({ game: state.game, mode: state.mode, match: state.match, at: state.at, matchStartedAt: state.matchStartedAt,
         gameSeconds: state.gameSeconds, ended: state.ended, phase: state.phase, me: state.me,
         allies: state.allies, enemies: state.enemies, bench: state.bench, offers: state.offers,
-        offerHistory: state.offerHistory, ownedAugments: state.ownedAugments, augmentRounds:state.augmentRounds,
+        offerHistory: state.offerHistory, ownedAugments: state.ownedAugments, revealedAugments: state.revealedAugments ?? [], augmentRounds:state.augmentRounds,
         events: state.events, completedEquipmentEvents:state.completedEquipmentEvents, broadcasts: state.broadcasts, chat: state.chat, knowledge });
       const encoded = JSON.stringify(value);
       if (snapshots.get(key) === encoded) return queue;
@@ -148,11 +149,11 @@ export function createGameMemory(stateDir) {
         result.current = { game, mode: current.mode, match, phase: current.phase, gameSeconds: current.gameSeconds, me: current.me,
           allies: current.allies, enemies: current.enemies, bench: current.phase === 'ChampSelect' ? current.bench : [],
           augmentRounds: current.augmentRounds, ended: current.ended,
-          offers: current.offers, ownedAugments: current.ownedAugments, events: current.events?.slice(-12),
+          offers: current.offers, ownedAugments: current.ownedAugments, events: eventWindow(current.events, { count: 12, totalBytes: 4000 }).rows,
           broadcasts: current.broadcasts?.slice(-3), chat: current.chat?.slice(-4), contextReduced: true };
       }
       if (JSON.stringify(result).length > 16000) result.current = { game, mode: current?.mode, match, champion: current?.me?.champion,
-        events:current?.events?.slice(-8).map(e=>({time:e.time,text:String(e.text??'').slice(0,240)})),ownedAugments:current?.ownedAugments?.slice(-12),contextReduced: true };
+        events:eventWindow(current?.events, { count: 8, totalBytes: 2400 }).rows,ownedAugments:current?.ownedAugments?.slice(-12),contextReduced: true };
       return result;
     },
     history,

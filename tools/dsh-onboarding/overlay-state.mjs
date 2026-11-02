@@ -13,6 +13,7 @@ import {teamStrength,TEAM_STRENGTH_NOTE,liveTeamEstimate,LIVE_ESTIMATE_NOTE} fro
 import {chatFailureMessage} from './chat-errors.mjs';
 import {suggestOverlayQuestion} from './chat-suggestion.mjs';
 import {adviceIsValid,createAdviceValidity} from '../dsh-coach-server/lib/lol-coaching-plan.js';
+import {eventWindow} from '../dsh-coach-server/lib/event-window.mjs';
 import {whoKilled,recordMultikill,settlePraise,PRAISE_ROLES} from './multikill-praise.mjs';
 import {champSelectPartnerText} from '../lol-companion/partner-index.mjs';
 import {createKnowledgeSearch} from './knowledge-search.mjs';
@@ -160,7 +161,7 @@ export function applyOverlayEvent(state, event, file, {continueStart=false}={}) 
       const key=Number.isInteger(id)?name+':'+id:JSON.stringify([name,seconds,event.turret??event.TurretKilled,event.InhibKilled??event.InhibitorKilled]);
       if(!state.events.some(e=>e.key===key)){
         const result=name==='GameEnd'?(event.Result==='Win'?'胜利':event.Result==='Lose'?'失败':null):null;
-        state.events.push({key,time:clock(seconds),text:label+(result?' · '+result:'')});
+        state.events.push({key,time:clock(seconds),text:label+(result?' · '+result:''),kind:name});
         state.events=state.events.slice(-40);
       }
     }
@@ -273,9 +274,33 @@ export function overlayView(state, knowledge = {}) {
   const candidates = ranked.filter(row => offered.includes(row.name)).map(augmentLine);
   for(const name of offered)if(!ranked.some(row=>row.name===name))candidates.push(name+' · 暂无该英雄排名');
   // Revocation is permanent: a later death or item swap must not revive old advice.
-  for (const reply of state.broadcasts) if (!adviceIsValid(reply.validity,state)||(reply.expiresAt&&Date.now()>=reply.expiresAt)||(reply.allyUltimate&&state.allies.find(p=>p.championAlias===reply.allyUltimate)?.dead!==false)) reply.revoked = true;
+  // Two kinds are distinguished. "Hard" means the fact the advice stated is no longer
+  // true (an ally ultimate that has since been used) and it must disappear. "Stale"
+  // only means the match moved on: advice expires after 45-90s while automatic
+  // analyses are spaced 60s+ apart, so without keeping the last text the page fell
+  // back to a status label and the user effectively never saw any advice.
+  for (const reply of state.broadcasts){
+    // Anything revoked elsewhere (an ally ultimate that has since been consumed) stays
+    // revoked for good.
+    if (reply.revoked) reply.revokedHard = true;
+    // Short-lived HUD reminders may be shown while fresh, but must never come back as
+    // "slightly earlier advice": they assert a fact that stops being true within seconds.
+    const ephemeral = !!reply.allyUltimate;
+    const expired = !!(reply.expiresAt && Date.now()>=reply.expiresAt);
+    const invalid = !adviceIsValid(reply.validity,state);
+    if (reply.revokedHard || expired || invalid){
+      reply.revoked = true;
+      if (ephemeral) reply.revokedHard = true;
+    } else {
+      reply.revoked = false;
+      reply.revokedHard = false;
+    }
+  }
   const validBroadcasts = state.broadcasts.filter(r => !r.revoked);
-  const current = validBroadcasts.at(-1)?.text || state.agentError || state.coachStatus?.label || (state.broadcasts.length?'局势已变化，正在更新针对性建议…':'等待进入游戏，检测到对局后自动生成策略建议。');
+  const staleBroadcast = validBroadcasts.length ? null
+    : [...state.broadcasts].reverse().find(r => !r.revokedHard && r?.text && (Date.now() - (Number(r.at)||0)) < 300000);
+  const staleText = staleBroadcast ? staleBroadcast.text + '（稍早建议，局势已变化）' : '';
+  const current = validBroadcasts.at(-1)?.text || staleText || state.agentError || state.coachStatus?.label || (state.broadcasts.length?'局势已变化，正在更新针对性建议…':'等待进入游戏，检测到对局后自动生成策略建议。');
   const playbook=!state.ended&&state.augmentPlaybook?.owned===JSON.stringify([...state.ownedAugments].sort())&&state.augmentPlaybook.text!==current?'\n\n强化方案参考 · '+clock(state.augmentPlaybook.gameSeconds)+'\n'+state.augmentPlaybook.text:'';
   const augmentTitle='当前三选一 · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
   const augmentBody=candidates.join('\n')+(offered.length<3?'\n已识别 '+offered.length+'/3 个位置，其余卡片继续识别中…':'');
@@ -295,6 +320,9 @@ export function overlayView(state, knowledge = {}) {
     keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : me.genericState?.gameName??'游戏教练'),
     summary: state.game==='generic'?'所选窗口 · '+(me.genericState?.windowTitle??'等待观察'):[me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
+    // Cheap confirmation signal for the coach's pre-flight guard: it must decide whether
+    // a turn is worth a context read without reading the context.
+    ownedAugmentCount: state.ownedAugments.length,
     advice: (state.game==='generic'?[me.genericState?.gameName||'游戏身份待核实',me.genericState?.gameMode,me.genericState?.roundState==='between'?'等待下一局':'当前窗口观察中']:['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:'']).filter(Boolean).join(' · ')+'\n\n'+current+playbook+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):'')+(partnerHint?'\n\n'+partnerHint:''),
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(!state.ended&&state.equipmentStatus?'\n'+state.equipmentStatus:'')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
@@ -310,7 +338,10 @@ export function overlayView(state, knowledge = {}) {
     playerRows,
     stats: heroStats+'\n\n'+roster.join('\n'),
     teamfight: state.teamfight || '可在聊天中询问本局团战打法；建议会结合双方阵容和当前装备。',
-    events: state.events.map(e => `${e.time} ${e.text}`).join('\n') || '等待关键事件：装备购买、海克斯选择、团灭和重要目标。',
+    // The events page now mirrors exactly the window the Agent receives, so "why did it
+    // ignore that event?" is answerable from the UI instead of from logs. Held-back rows
+    // are called out rather than silently hidden.
+    events: (()=>{const {rows,heldBack}=eventWindow(state.events);const body=rows.map(e=>`${e.time} ${e.text}`).join('\n');return (body||'等待关键事件：装备购买、海克斯选择、团灭和重要目标。')+(heldBack?`\n（更早 ${heldBack} 条未进入智能体上下文，可在聊天中要求查询）`:'');})(),
     chat: state.chat.slice(-12).map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
     chatRows: state.chat.slice(-40).map(r => ({role:r.role,origin:r.origin??'',text:r.text,failed:r.failed===true})),
     suggestedQuestion: suggestOverlayQuestion(state),

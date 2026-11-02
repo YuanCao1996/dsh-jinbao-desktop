@@ -1,7 +1,7 @@
 import{appendFile,writeFile,rename}from'node:fs/promises';import{join}from'node:path';
 import{stateCoachingTrigger,buildLolCoachingPlan,createAdviceValidity,adviceIsValid}from'../dsh-coach-server/lib/lol-coaching-plan.js';
 export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>true,canRequest=()=>true,now=Date.now,trace=()=>{},publish=entry=>appendFile(join(stateDir,'logs/coach_broadcasts.jsonl'),JSON.stringify(entry)+'\n',{mode:0o600}),publishStatus=async value=>{if(!stateDir)return;const file=join(stateDir,'coach-status.json');await writeFile(file+'.tmp',JSON.stringify(value),{mode:0o600});await rename(file+'.tmp',file);}}){
- let busy=false,closed=false,match='',store={},offers='',owned='',selection='',retryAt=0;
+ let busy=false,closed=false,match='',store={},offers='',owned='',ownedCount=0,selection='',retryAt=0;
  const live=v=>v&&['lol','wzry','generic'].includes(v.game)&&v.match&&!v.ended&&v.phase!=='CapturePaused'&&Number.isFinite(v.updatedAt)&&now()-v.updatedAt<=30000&&v.updatedAt<=now()+500;
  const stillCurrent=v=>{const latest=view();return !closed&&live(latest)&&latest.game===v.game&&latest.match===v.match;};
  const note=(v,action,reason,extra={})=>{try{trace({game:v?.game,match:v?.match,action,reason,...extra});}catch{}};
@@ -11,9 +11,13 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
   if(busy||agent.busy?.()){note(v,'skip','busy');return;}
   if(!enabled()){note(v,'skip','disabled');return;}
   if(!live(v)){note(v,'skip','no_live_match');return;}
-  if(match!==v.game+':'+v.match){match=v.game+':'+v.match;store={};offers='';owned='';selection='';retryAt=0;}
+  if(match!==v.game+':'+v.match){match=v.game+':'+v.match;store={};offers='';owned='';ownedCount=0;selection='';retryAt=0;}
   if(now()<retryAt){note(v,'skip','retry_backoff',{retryAt});return;}
-  if(!canRequest()){note(v,'skip','output_backpressure');if(now()-(store.waitStatusAt??-Infinity)>=30000){store.waitStatusAt=now();await status(v,'interrupted','等待下一次低频自动分析');}return;}
+  // A confirmation is the player's explicit request for guidance. The view carries only
+  // the count, so this stays the cheap guard: while nothing new is confirmed the turn is
+  // still skipped before any context is read.
+  const maybeConfirmed=Number(v.ownedAugmentCount??0)>ownedCount;
+  if(!canRequest()&&!maybeConfirmed){note(v,'skip','output_backpressure');if(now()-(store.waitStatusAt??-Infinity)>=30000){store.waitStatusAt=now();await status(v,'interrupted','等待下一次低频自动分析');}return;}
   busy=true;
   try{
    const c=(await getContext(v.game,v.match)).current;if(!stillCurrent(v)||!c||c.match!==v.match||c.ended){note(v,'skip','context_changed');return;}
@@ -45,7 +49,7 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
    const equipmentChanges=plan.stage==='enemyChange'?(c.completedEquipmentEvents??[]).filter(e=>e.at>(store.equipmentAt??0)).map(e=>e.hero+'：'+e.items.join('、')).join('；'):'';
    const message='自动教练任务：'+plan.prompt.split('\n').filter(line=>!line.startsWith('【本轮筛选事实 JSON】')).join('\n')+(equipmentChanges?'\n本轮新成型的敌方装备（日志观测）：'+equipmentChanges:'')+'\n先按需读取本局工具事实。缺少价格资料时只说明下一件目标，不编报价或断言买得起。';
    const actionable=message+'\n这是战况即时播报：用2至3句先说现在做什么，再说针对谁或等什么条件，最后点明当前装备、阵容或已选海克斯为何支持这个动作。不要复述时钟、等级、比分、KDA或整套装备清单，不写泛泛的注意走位/配合队友。不编造冷却、价格、排名或未知技能状态；缺资料时依据已确认事实给保守建议，避免用整段工具错误说明占据正文。未确认可购买时，把装备建议安排在下一次可购买时，不说现在先买再上线；不以英雄总胜率解释单件装备强度，省略未核验百分比；不把召唤物挡路说成能够阻断位移，不断言未经核验的技能交互。';
-   const answer=await agent.ask({game:v.game,match:v.match,question:actionable,topic:'advice',automatic:true});
+   const answer=await agent.ask({game:v.game,match:v.match,question:actionable,topic:'advice',automatic:true,...(maybeConfirmed?{urgent:true}:{})});
    const current=(await getContext(v.game,v.match)).current;
    if(!stillCurrent(v)||!current){note(v,'reply_discarded','context_changed');return;}
    if(!adviceIsValid(validity,current,now())){await status(v,'stale','关键局势已变化，等待下一次有效分析…',{stage:plan.stage});retryAt=now()+1000;return;}
@@ -59,7 +63,7 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
    if(plan.stage==='enemyChange')nextStore.equipmentAt=Math.max(...(c.completedEquipmentEvents??[]).map(e=>e.at),0);
    store=nextStore;
    if(plan.stage==='augment')offers=offerKey;
-   if(plan.stage==='postAugment')owned=ownedKey;
+   if(plan.stage==='postAugment'){owned=ownedKey;ownedCount=Number(v.ownedAugmentCount??0);}
    if(plan.stage==='selection')selection=selectionKey;
   }catch(error){if(!stillCurrent(v))return;if(error.code==='auto_deferred'){retryAt=Math.max(now()+3000,Number(error.retryAt)||0);await status(v,'interrupted','等待下一次低频自动分析',{retryAt});note(v,'skip','output_backpressure',{retryAt});return;}const interrupted=error.code==='agent_preempted';retryAt=now()+(interrupted?1000:15000);await status(v,interrupted?'interrupted':'failed',interrupted?'已优先处理手动请求，稍后继续生成策略':error.status===429?'策略请求受限，稍后自动重试':error.status===401?'登录已失效，请在设置中重新登录':error.status===504?'策略分析超时，稍后自动重试':'策略生成失败，稍后自动重试；可在设置查看诊断',{code:typeof error.code==='string'&&/^[a-z_0-9]{1,80}$/.test(error.code)?error.code:'agent_request_failed',retryAt});}finally{busy=false;}
  },close(){closed=true;}};

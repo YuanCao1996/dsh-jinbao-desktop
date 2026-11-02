@@ -121,6 +121,7 @@ const origin = new URL(server.url).origin, nonce = new URL(server.url).hash.slic
 
 ## 提交前检查
 
+0. **两条线同步**：本次改动是否同时落在宿主内插件与独立版？见 [`DEVELOPMENT.md`](DEVELOPMENT.md#两条线必须同步开发硬性要求) 的同步清单与已知差异表。只改一条线视为未完成。
 1. `npm test` 与相关 `node --test` 全绿。
 2. 没有真实密钥、令牌、账号、内网地址进入代码或文档。
 3. 不提交 `.bak-*`、诊断输出、日志、临时目录。

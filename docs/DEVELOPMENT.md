@@ -84,6 +84,47 @@ jinbao.exe（Launcher.cs 编译，转发 --headless / --team-rooms / --team-byok
 
 关闭是有序链（`createShutdown`），新增常驻资源时必须挂到关闭步骤里，否则进程无法正常退出。
 
+## 两条线必须同步开发（硬性要求）
+
+产品同时以**宿主内插件**（`dsh-coach-server` + `dsh-onboarding` 装进 DSH 的 profile）和**独立预览版**（`tools/cloud-desktop`）交付。**任何改动都必须同时落在两条线上，不允许只改一条。**
+
+### 共享与分叉
+
+| 模块 | 宿主内 | 独立版 | 说明 |
+|---|---|---|---|
+| `dsh-coach-server/lib/*`（日志解析、记忆、教练计划、上下文预算） | ✅ | ✅ 部分 | 独立版通过 `auto-coach` / `game-memory` / 事件工具间接使用 |
+| `dsh-onboarding/overlay-state.mjs`、`progress-events.mjs` | ✅ | ✅ | 悬浮窗投影与事件流，两条线同源 |
+| `dsh-onboarding/server.mjs`、`settings.html` | ✅ | ✅ | 设置页与本地服务，同一份代码两种宿主 |
+| `cloud-desktop/*` | ❌ 不装 | ✅ | 独立版专属：进程编排、模型路由、语音、更新、诊断 |
+| `desktop-release/*.ps1` | 悬浮窗由启动器按包调用 | ✅ | WPF 悬浮窗脚本，两条线共用同一份 |
+| `jinbao-launcher`、`game-observation`、`generic-game-assistant` | ❌ | ✅ | 独立版/实验线 |
+
+判据：**改动落在上表前四行时，两条线都要开发、都要测、都要能构建**；落在独立版专属行时，只需保证不破坏宿主内插件的加载。
+
+### 每轮改动的最低同步清单
+
+1. `npm test` + `npm run test:generic` 通过。
+2. `node --test tools/cloud-desktop/tests/*.test.mjs` 与 `tools/team-room/tests` 通过（不在 npm 脚本里）。
+3. **独立版**：`node tools/cloud-desktop/build-preview.mjs <新目录>` 构建成功，产物逐文件与仓库哈希一致。
+4. **宿主内**：把 `tools/dsh-coach-server`、`tools/dsh-onboarding` 同步进 DSH profile（排除 `tests`、`.bak*`），并确认 `dsh-onboarding/plugin.mjs` 与 `dsh-coach-server/lib/index.js` 都能在子进程里 `import()` 成功。
+5. 两条线的**行为差异**要写进提交说明：同一功能在两侧的触发时机、上下文窗口、可用工具是否等价。
+
+### 两条线已知差异（改动时要主动对齐）
+
+| 能力 | 宿主内 | 独立版 |
+|---|---|---|
+| 回合内上下文热更新 | ❌ 回合开始拍一次快照 | ✅ 每 2 s `POST /context` |
+| 上下文投影 | `turn-context.js` 含英雄 `tier/winRate` | `cloud-agent.mjs` 的 `player` **不含** `tier/winRate` |
+| 自动建议闸门 | 单闸门 | 按主题（advice / equipment）独立计时 |
+| 知识库/胜率数据 | 随上下文带 `knowledge` | 只能通过工具检索 |
+
+新增上下文字段时，两条线的投影必须一起改，否则同一场比赛两侧建议质量会不一致。
+
+### 版本与交付
+
+- 独立版版本号必须**严格大于**更新源当前版本，否则启动时会被自动更新换成缓存里的旧包（`update.mjs` 只在 `compareVersions(release, current) > 0` 时应用）。
+- 宿主内插件没有独立版本号，按 profile 目录内容同步；**同步后必须重启 DSH 才生效**。
+
 ## 端口与状态目录
 
 | 项 | 值 |

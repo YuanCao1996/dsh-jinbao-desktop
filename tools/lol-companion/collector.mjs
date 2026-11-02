@@ -16,6 +16,8 @@ import { homedir } from 'node:os';
 import { join,dirname } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {writeFile,rename} from 'node:fs/promises';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 const folder=process.env.JINBAO_LOG_DIR??join(homedir(),'.dsh','jinbao','logs');
 let log=createEventLog(folder,'client-'+Date.now()),phase=null,lastEvent=-1,gameTime=null;
 let nextMatch=true;
@@ -34,7 +36,39 @@ const captureReport=async value=>{
  const path=join(process.env.JINBAO_STATE_DIR??dirname(folder),'augment-diagnostics.json');
  try{await writeFile(path+'.tmp',JSON.stringify({at:Date.now(),sequence:++captureSequence,...value}),{mode:0o600});await rename(path+'.tmp',path);}catch{}finally{captureReportBusy=false;}
 };
-const observer=createAugmentObserver(names,event=>{if(running)log.append(event);});
+// 视觉判定：面板出现时另起一个进程，20Hz 采样三张卡，找出"只有它在变"的那张。
+// 必须是独立进程——它要跑满整个面板期，占用 capture worker 会让采集停摆十几秒。
+const cardWatchScript=fileURLToPath(new URL('./card-watch.ps1',import.meta.url));
+let cardWatch=null;
+const stopCardWatch=()=>{if(cardWatch){const owned=cardWatch;cardWatch=null;try{owned.kill()}catch{}}};
+const startCardWatch=offer=>{
+ stopCardWatch();
+ const powershell=join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
+ let child;
+ try{child=spawn(powershell,['-NoProfile','-ExecutionPolicy','Bypass','-File',cardWatchScript,'-Watch','-TimeoutMs','12000'],{windowsHide:true,stdio:['ignore','pipe','ignore']});}catch{return;}
+ cardWatch=child;
+ const finish=()=>{if(cardWatch===child)cardWatch=null;};
+ let buffer='';
+ const onLine=line=>{
+  let result;try{result=JSON.parse(line);}catch{return;}
+  if(!running||!Number.isInteger(result.picked)||!offer)return;
+  const options=Array.isArray(offer.options)?offer.options:[];
+  const option=options.find(row=>Number(row?.slot)===result.picked)??options[result.picked];
+  const name=typeof option==='string'?option:option?.name;
+  if(typeof name!=='string'||!name)return;
+  // 判定成功的这一条会把该轮标记为已确认，确认弹窗因此不再出现。
+  log.append({kind:'augment_picked',who:'self',name,augment:name,roll:offer.roll??null,source:'vision-click',confidence:'high',gameTime:lastLiveState?.gameTime??gameTime??null,visionReason:result.reason??'',visionFrames:result.frames??0});
+ };
+ child.stdout?.setEncoding('utf8');
+ child.stdout?.on('data',chunk=>{buffer+=chunk;if(buffer.length>8192){stopCardWatch();return;}let end=buffer.indexOf('\n');while(end>=0){onLine(buffer.slice(0,end).trim());buffer=buffer.slice(end+1);end=buffer.indexOf('\n');}});
+ child.on('error',finish);child.on('exit',finish);
+};
+const observer=createAugmentObserver(names,event=>{
+ if(!running)return;
+ log.append(event);
+ if(event.kind==='augment_offer')startCardWatch(event);
+ // 面板关闭不杀监视器：它的判定结果可能还差一帧才输出，让它自然结束（淡出即停或超时）。
+});
 const chatObserver=createChatObserver(names,event=>{if(running)log.append(event);});
 const readChatCatalog=createChatCatalogReader(lcuRequest);
 let enrichItem=item=>item,championNames=new Map(),champions=[];
@@ -45,7 +79,7 @@ const hudAssets=createHudAssets({stateDir:process.env.JINBAO_STATE_DIR??dirname(
  if(result.status!==200)throw Error('Portrait unavailable');return result.data;
 }});
 const acceptCatalog=catalog=>{chatObserver.setCatalog(catalog);if(catalog.items)enrichItem=createItemCatalogue(catalog.items);if(catalog.champions){champions=catalog.champions;championNames=new Map(champions.filter(c=>c.alias&&c.name).map(c=>[c.alias.toLowerCase(),c.name]));}};
-const stop=()=>{running=false;captureStop.abort();captureWorker.close();void hudAssets.close();};
+const stop=()=>{running=false;stopCardWatch();captureStop.abort();captureWorker.close();void hudAssets.close();};
 process.once('SIGINT',stop);process.once('SIGTERM',stop);
 process.on('message',message=>{if(message?.action==='stop')stop();});
 if(process.connected)process.once('disconnect',stop);

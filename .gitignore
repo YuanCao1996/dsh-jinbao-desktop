@@ -10,3 +10,6 @@ workspace/
 *.bak
 *.log
 *.jsonl
+
+# Local editor/build backups must never enter a release
+*.bak-*

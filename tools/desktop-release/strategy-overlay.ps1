@@ -83,6 +83,9 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <TextBlock x:Name="ConfirmationTitle" Foreground="#FBBF24" FontSize="12" TextWrapping="Wrap"/>
      <WrapPanel x:Name="ConfirmationChoices"/>
     </StackPanel>
+    <Border x:Name="EventTickerPanel" DockPanel.Dock="Bottom" Visibility="Collapsed" BorderBrush="#34424F" BorderThickness="0,1,0,0" Margin="4,6,4,0" Padding="0,5,0,0">
+     <TextBlock x:Name="EventTicker" Foreground="#9CAABA" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="最新一条对局事件，随事件更新"/>
+    </Border>
     <Button x:Name="LatestMessageButton" DockPanel.Dock="Bottom" Content="回到最新消息 ↓" FontSize="11" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,4"/>
     <Border x:Name="AgentActivityPanel" DockPanel.Dock="Bottom" Visibility="Collapsed" BorderBrush="#34424F" BorderThickness="0,1,0,0" Margin="4,8,4,0" Padding="0,6,0,0">
      <DockPanel MaxHeight="180">
@@ -139,10 +142,14 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
    <Thumb x:Name="ResizeGrip" Width="26" Height="26" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-8,-8" Cursor="SizeNWSE" ToolTip="拖动调整窗口大小，会记住你的尺寸">
     <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="#01000000"><Path Data="M 7,22 L 22,7 M 14,22 L 22,14 M 21,22 L 22,21" Stroke="#B39A71" StrokeThickness="1.5"/></Grid></ControlTemplate></Thumb.Template>
    </Thumb>
-   <Grid x:Name="Bubble" Visibility="Collapsed" Background="#01000000" Cursor="SizeAll">
-    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-    <TextBlock x:Name="BubbleLabel" Text="金宝" Foreground="#93C5FD" FontSize="14" VerticalAlignment="Center" ToolTip="点击展开；按住拖动"/>
-    <Button x:Name="BubbleClose" Grid.Column="1" Content="×" Padding="4,0" Margin="0" ToolTip="退出悬浮窗"/>
+   <Grid x:Name="Bubble" Visibility="Collapsed" Background="#01000000" Cursor="Hand" Width="56" Height="56" ToolTip="单击展开；按住拖动">
+    <Border x:Name="BubbleBall" Width="52" Height="52" CornerRadius="26" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#F224272B" BorderBrush="#2E3742" BorderThickness="1">
+    <Border.Effect><DropShadowEffect BlurRadius="16" ShadowDepth="0" Opacity="0.5" Color="#000000"/></Border.Effect>
+    <TextBlock x:Name="BubbleLabel" Text="&#x25C9;" Foreground="#FF9F2F" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+    </Border>
+    <Border x:Name="BubbleBadge" Width="20" Height="20" CornerRadius="10" HorizontalAlignment="Right" VerticalAlignment="Top" Background="#FF9F2F" BorderBrush="#30343A" BorderThickness="1" Visibility="Collapsed">
+    <TextBlock x:Name="BubbleBadgeText" Text="" Foreground="#FFFFFF" FontSize="11" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+    </Border>
    </Grid>
   </Grid>
  </Border>
@@ -150,8 +157,8 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 '@
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
-foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleClose')){$controls[$name]=$window.FindName($name)}
-foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','SuggestButton','ScreenButton','ChatStatusText','TeamModeButton','TeamManageButton')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleBall','BubbleBadge','BubbleBadgeText')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','EventTicker','EventTickerPanel','SuggestButton','ScreenButton','ChatStatusText','TeamModeButton','TeamManageButton')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
@@ -199,28 +206,28 @@ function Set-PointerMode([bool]$hotzone){
 }
 function Set-Interaction([bool]$enabled){
  $script:interactiveMode=$enabled
- $controls.HintText.Text=if($enabled){'右下角缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 恢复穿透'}else{'右下角拖动缩放 · Ctrl+滚轮调整正文'}
+ $controls.HintText.Text=if($enabled){'右下角缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 恢复穿透'}else{'右下角拖动缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 输入问题'}
  Set-PointerMode $false
 }
 function Set-Collapsed([bool]$on,[switch]$PreserveMode){
  if($script:collapsed -eq $on){return}
  if($on){
   if($script:displayMode -eq 'large'){$script:expandedWidth=$window.Width;$script:expandedHeight=$window.Height}
-  $window.MinWidth=0;$window.MinHeight=0;$window.Width=110;$window.Height=52
+  $window.MinWidth=0;$window.MinHeight=0;$window.Width=56;$window.Height=56
   $window.Left=$area.Right-$window.Width
   $window.Top=[Math]::Max($area.Top,[Math]::Min($window.Top,$area.Bottom-$window.Height))
-  $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed'
+  $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed';$controls.MainBorder.CornerRadius='28'
   if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
  }else{
   $window.Width=$script:expandedWidth;$window.Height=$script:expandedHeight
-  $window.MinWidth=420;$window.MinHeight=220;$window.ResizeMode='CanResize';$controls.ResizeGrip.Visibility='Visible'
+  $window.MinWidth=360;$window.MinHeight=320;$window.ResizeMode='CanResize';$controls.ResizeGrip.Visibility='Visible';$controls.MainBorder.CornerRadius='14';$controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1
   $controls.Expanded.Visibility='Visible';$controls.Bubble.Visibility='Collapsed'
   if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
   $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
   $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
  }
  $script:collapsed=$on
- if($on){$controls.MainBorder.Padding='8';$controls.MainBorder.BorderThickness=1;Set-BackgroundOpacity}
+ if($on){$controls.MainBorder.Padding='0';$controls.MainBorder.BorderThickness=0;Set-BackgroundOpacity}
  if($script:displayMode -and !$PreserveMode){if($on){$script:displayMode='silent'}else{$script:displayMode='large';$controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1;$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';Set-BackgroundOpacity};Save-DisplayMode}
  if(!$on -and $PreserveMode -and $script:displayMode -eq 'narrow'){$controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible';$window.ResizeMode='NoResize';Set-NarrowMetrics}
  Set-PointerMode $true
@@ -243,7 +250,7 @@ function Set-CaptureVisibility([bool]$show){
 function Set-BackgroundOpacity {
  $percent=[Math]::Round($controls.OpacitySlider.Value)
  $color=[Windows.Media.Color]::FromArgb([byte][Math]::Round(255*$percent/100),16,21,27)
- $controls.MainBorder.Background=if($script:displayMode -eq 'narrow' -and $script:subtitleMode -and !$script:collapsed){[Windows.Media.Brushes]::Transparent}else{New-Object Windows.Media.SolidColorBrush($color)}
+ $controls.MainBorder.Background=if($script:collapsed -or ($script:displayMode -eq 'narrow' -and $script:subtitleMode)){[Windows.Media.Brushes]::Transparent}else{New-Object Windows.Media.SolidColorBrush($color)}
  $controls.OpacityText.Text=([string]$percent)+'%'
  if(Get-Command Update-OverlaySurface -ErrorAction SilentlyContinue){Update-OverlaySurface}
 }
@@ -356,11 +363,11 @@ function Update-Page {
    $index++
   }
  }
- $controls.ChatPanel.Visibility=if($script:tab -eq 'chat'){'Visible'}else{'Collapsed'}
+ $controls.ChatPanel.Visibility=if($script:tab -eq 'advice'){'Visible'}else{'Collapsed'}
  Update-OverlaySurface
  if(Get-Command Update-AgentActivity -ErrorAction SilentlyContinue){Update-AgentActivity}
  $scroll.UpdateLayout()
- if($script:tab -eq 'events' -or $followChat -or (!$samePage -and $script:tab -eq 'chat' -and !$script:scrollPositions.ContainsKey('chat'))){$scroll.ScrollToEnd()}
+ if($followChat -or (!$samePage -and $script:tab -eq 'advice' -and !$script:scrollPositions.ContainsKey('advice'))){$scroll.ScrollToEnd()}
  elseif($samePage){$scroll.ScrollToVerticalOffset($offset)}
  elseif($script:scrollPositions.ContainsKey($script:tab)){$scroll.ScrollToVerticalOffset($script:scrollPositions[$script:tab])}
  else{$scroll.ScrollToTop()}
@@ -368,15 +375,18 @@ function Update-Page {
  $script:renderedTab=$script:tab
 }
 function Set-Tab([string]$name){
- if($name -ne 'chat' -and $script:speechJob){Stop-Job $script:speechJob;Remove-Job $script:speechJob -Force;$script:speechJob=$null}
+ if($name -notin @('chat','advice') -and $script:speechJob){Stop-Job $script:speechJob;Remove-Job $script:speechJob -Force;$script:speechJob=$null}
  if($name -eq 'stats'){$name='players'}
+ # 事件与聊天已并入战况：作为别名切到战况；从聊天入口进来时保持可输入状态。
+ $focusComposer=($name -eq 'chat')
+ if($name -in @('events','chat')){$name='advice'}
  $script:tab=$name
  foreach($button in $controls.Tabs.Children){$selected=$button.Tag -eq $name;$button.Background=if($selected){'#322B20'}else{'Transparent'};$button.Foreground=if($selected){'#EDC989'}else{'#9CAABA'};$button.BorderBrush=if($selected){'#6F5836'}else{'Transparent'}}
- Set-Interaction ($name -eq 'chat')
+ Set-Interaction $focusComposer
  Update-Page
- if($name -eq 'chat' -and $window.IsVisible){$window.Activate() | Out-Null;$controls.QuestionBox.Focus() | Out-Null;[Windows.Input.Keyboard]::Focus($controls.QuestionBox) | Out-Null}
+ if($focusComposer -and $window.IsVisible){$window.Activate() | Out-Null;$controls.QuestionBox.Focus() | Out-Null;[Windows.Input.Keyboard]::Focus($controls.QuestionBox) | Out-Null}
 }
-foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','胜率'),@('events','事件'),@('chat','聊天'))){
+foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','胜率'))){
  $button=New-Object Windows.Controls.Button
  $button.Tag=$entry[0];$button.Content=$entry[1];$button.FontSize=12;$button.Padding='4,6';$button.ToolTip='切换到'+$entry[1]
  $button.Add_Click({param($sender,$eventArgs) Set-Tab ([string]$sender.Tag)})
@@ -529,7 +539,7 @@ $controls.QuestionBox.Add_PreviewKeyDown({param($sender,$eventArgs)
 })
 $controls.CollapseButton.Add_Click({Set-Collapsed $true})
 $controls.CloseButton.Add_Click({$window.Close()})
-$controls.BubbleClose.Add_Click({$window.Close()})
+# The collapsed ball deliberately has no close button: a click expands it and the tray menu exits.
 $controls.ActionButton.Add_Click({
  $action=[string]$controls.ActionButton.Tag
  if($action -in @('login','settings','download','cancel-download')){
@@ -563,6 +573,8 @@ function Start-Drag($sender,$eventArgs){
 }
 $controls.Header.Add_MouseLeftButtonDown({param($sender,$eventArgs) Start-Drag $sender $eventArgs})
 $controls.Bubble.Add_MouseLeftButtonDown({param($sender,$eventArgs) Start-Drag $sender $eventArgs})
+$controls.Bubble.Add_MouseEnter({if($script:collapsed){$controls.BubbleBall.BorderBrush='#FF9F2F'}})
+$controls.Bubble.Add_MouseLeave({if($script:collapsed){$controls.BubbleBall.BorderBrush='#2E3742'}})
 function Update-Drag([double]$x,[double]$y,[bool]$pressed){
  if($script:dragging){
   if(!$pressed){
@@ -647,7 +659,7 @@ function Invoke-OverlayShortcut([int]$id){
   if($script:displayMode -ne 'large'){Set-DisplayMode 'large'}
   Set-Collapsed $false
   if($id -in @(704,705)){
-   $pages=if($script:snapshot.game -eq 'generic'){@('advice','events','chat')}else{@('advice','equipment','augments','players','events','chat')};$index=[Array]::IndexOf($pages,$script:tab)
+   $pages=if($script:snapshot.game -eq 'generic'){@('advice')}else{@('advice','equipment','augments','players')};$index=[Array]::IndexOf($pages,$script:tab)
    $delta=if($id -eq 704){-1}else{1};Set-Tab $pages[(($index+$delta+$pages.Count)%$pages.Count)]
   }
  }
@@ -771,11 +783,11 @@ try{
     $click=New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)
     $controls.SettingsButton.RaiseEvent($click)
     $controls.CollapseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
-    $script:testResult.collapsed=$script:collapsed -and $window.Width -eq 110
+    $script:testResult.collapsed=$script:collapsed -and $window.Width -eq 56
     $script:testResult.collapsedRightEdge=[Math]::Abs($window.Left+$window.Width-$area.Right) -lt 1
     Set-Collapsed $false;$script:testResult.expanded=$window.Width -ge 420
     $script:testResult.tabs=$controls.Tabs.Children.Count
-    $script:testResult.simplifiedNavigation=$controls.Tabs.Children.Count -eq 6 -and @($controls.Tabs.Children | Where-Object {$_.Tag -eq 'teamfight'}).Count -eq 0 -and $null -eq $window.FindName('RefreshButton') -and $null -eq $window.FindName('TacticButton') -and $null -eq $window.FindName('InteractionButton') -and $null -eq $window.FindName('AppearanceButton')
+    $script:testResult.simplifiedNavigation=$controls.Tabs.Children.Count -eq 4 -and @($controls.Tabs.Children | Where-Object {$_.Tag -eq 'teamfight'}).Count -eq 0 -and $null -eq $window.FindName('RefreshButton') -and $null -eq $window.FindName('TacticButton') -and $null -eq $window.FindName('InteractionButton') -and $null -eq $window.FindName('AppearanceButton')
     $script:testResult.appearanceInSettings=$controls.SettingsButton.ContextMenu.Items[0] -eq $controls.AppearanceMenuItem
     $script:testResult.singleWinRateTab=@($controls.Tabs.Children | Where-Object {$_.Content -eq '胜率'}).Count -eq 1 -and @($controls.Tabs.Children | Where-Object {$_.Content -eq '对手' -or $_.Tag -eq 'stats'}).Count -eq 0
     $script:dragStartX=0;$script:dragStartY=0;$script:dragLeft=100;$script:dragTop=100;$script:dragging=$true;$script:bubbleDrag=$false
@@ -791,11 +803,11 @@ try{
     Set-PointerMode (Test-PointerHotzone ($controls.ResizeGrip.PointToScreen((New-Object Windows.Point(13,13)))))
     $script:testResult.resizeReceivesMouse=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x20) -eq 0
     Resize-Window -10000 -10000;$window.UpdateLayout()
-    $script:testResult.resizeMinimum=$window.Width -eq 420 -and $window.Height -eq 220 -and $controls.PageScroll.ActualHeight -gt 60
+    $script:testResult.resizeMinimum=$window.Width -eq 360 -and $window.Height -eq 320 -and $controls.PageScroll.ActualHeight -gt 60
     $script:testResult.summaryOnlyInBattle=$controls.TimeText.Parent.Visibility -eq 'Collapsed'
     Resize-Window 160 380;$window.UpdateLayout();Save-Bounds
     $savedBounds=[IO.File]::ReadAllText($boundsFile) | ConvertFrom-Json
-    $script:testResult.resizeSaved=$savedBounds.width -eq 580 -and $savedBounds.height -eq 600
+    $script:testResult.resizeSaved=$savedBounds.width -eq 520 -and $savedBounds.height -eq 700
     $controls.FontSlider.Value=18
     $savedFont=[IO.File]::ReadAllText($preferencesFile) | ConvertFrom-Json
     $script:testResult.fontZoomSaved=$controls.PageText.FontSize -eq 18 -and $savedFont.bodyFontSize -eq 18
@@ -804,6 +816,7 @@ try{
     $script:testResult.appearanceOpens=$controls.AppearancePanel.Visibility -eq 'Visible'
     $controls.AppearanceMenuItem.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.MenuItem]::ClickEvent)))
     foreach($button in $controls.Tabs.Children){$button.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))}
+    Set-Tab 'chat'
     $script:testResult.chatInteractive=$script:interactiveMode -and $controls.ChatPanel.Visibility -eq 'Visible'
     $script:testResult.chatFocusable=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x08000000) -eq 0
     $controls.OpacitySlider.Value=45
@@ -832,12 +845,11 @@ try{
     $controls.PageScroll.ScrollToEnd();$controls.PageScroll.UpdateLayout()
     $script:snapshot.chat+="`n又一条消息";Update-Page
     $script:testResult.chatFollowsBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
-    $script:snapshot=[pscustomobject]@{events=$longText}
-    Set-Tab 'events'
-    $script:testResult.eventsOpenAtBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
-    $controls.PageScroll.ScrollToVerticalOffset(100);$controls.PageScroll.UpdateLayout()
-    $script:snapshot.events+="`n最新装备购买事件";Update-Page
-    $script:testResult.eventsFollowNewest=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1 -and $controls.PageText.Text.EndsWith('最新装备购买事件')
+    # 事件已并入战况：只保留一行，随事件更新。
+    $script:snapshot=[pscustomobject]@{advice=$longText;eventTicker='12:34 购买装备：残疫'}
+    Set-Tab 'equipment';Set-Tab 'advice';$window.UpdateLayout()
+    $script:snapshot.eventTicker='12:35 最新装备购买事件';Update-Page;$window.UpdateLayout()
+    $script:testResult.eventsFollowNewest=$controls.EventTicker.Text -eq '12:35 最新装备购买事件' -and $controls.EventTickerPanel.Visibility -eq 'Visible'
     $script:snapshot=[pscustomobject]@{players='英雄战绩';playerRows=@([pscustomobject]@{side='敌';champion='厄斐琉斯';winRateText='55%';tierText='T0'})}
     Set-Tab 'players'
     $script:testResult.playerTableVisible=$controls.PlayersTable.Visibility -eq 'Visible' -and $controls.PageText.Visibility -eq 'Collapsed'
@@ -854,7 +866,7 @@ try{
     $script:playbackQueue.Add([pscustomobject]@{id='native-test';at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();text='安妮先清线，选择适合当前阵容的强化。'})
     Playback-Tick;$script:lineElapsed=10000;Playback-Tick
     $script:testResult.subtitleAdvances=$script:subtitleIndex -gt 0 -or $script:playbackPhase -eq 'linger' -or !$script:activePlayback
-    Set-DisplayMode 'silent';$window.UpdateLayout();$script:testResult.silentMode=$script:collapsed -and $controls.Bubble.Visibility -eq 'Visible'
+    Set-DisplayMode 'silent';$window.UpdateLayout();$script:testResult.silentMode=$script:collapsed -and $controls.Bubble.Visibility -eq 'Visible' -and [Math]::Round($window.Width) -eq 56 -and [Math]::Round($window.Height) -eq 56 -and $controls.BubbleBall.Visibility -eq 'Visible'
     Set-DisplayMode 'large';$window.UpdateLayout();$script:testResult.largeRestored=$controls.Expanded.Visibility -eq 'Visible' -and !$script:collapsed -and $window.Height -ge 220
     $selectionFixture.confirmation=@{id='test-confirm';title='刚才选了哪个海克斯？';options=@(@{name='乙';label='优先推荐 · 乙'},@{name='甲';label='甲'},@{name='丙';label='丙'})}
     [IO.File]::WriteAllText($stateFile,($selectionFixture|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false));Update-State

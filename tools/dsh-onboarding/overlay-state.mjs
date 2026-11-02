@@ -343,6 +343,15 @@ export function overlayView(state, knowledge = {}) {
     // are called out rather than silently hidden.
     events: (()=>{const {rows,heldBack}=eventWindow(state.events);const body=rows.map(e=>`${e.time} ${e.text}`).join('\n');return (body||'等待关键事件：装备购买、海克斯选择、团灭和重要目标。')+(heldBack?`\n（更早 ${heldBack} 条未进入智能体上下文，可在聊天中要求查询）`:'');})(),
     chat: state.chat.slice(-12).map(r => `${r.role === 'user' ? '我' : '教练'}：${r.text}`).join('\n\n') || '输入问题，与教练讨论当前对局。',
+   // The battle page is one conversation: advice the coach published and the turns the
+   // player exchanged are merged into a single chronological stream, oldest first.
+   thread: (() => {
+    const turns = state.chat.map(r => ({ role: r.role, origin: r.origin ?? '', text: r.text, failed: r.failed === true, at: Number(r.at) || 0, kind: 'chat' }));
+    const spoken = state.broadcasts.map(b => ({ role: 'assistant', origin: 'coach', text: b.text, at: Number(b.at) || 0, kind: b.topic === 'praise' ? 'praise' : 'advice' }));
+    return [...spoken, ...turns].filter(r => r.text).sort((a, b) => a.at - b.at).slice(-40);
+   })(),
+   // Events are too long to list here; the page keeps only the newest line and updates it.
+   eventTicker: (() => { const last = state.events.at(-1); return last ? `${last.time ?? ''} ${last.text ?? ''}`.trim() : ''; })(),
     chatRows: state.chat.slice(-40).map(r => ({role:r.role,origin:r.origin??'',text:r.text,failed:r.failed===true})),
     suggestedQuestion: suggestOverlayQuestion(state),
     status: state.agentStatus|| (knowledge.loading ? '正在检索推荐…' : ''), updatedAt: state.at,
@@ -546,7 +555,7 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       busy = true;
       const game=state.game||'lol',match = state.match, started = state.matchStartedAt;
       const stillCurrent = () => state.match === match && state.matchStartedAt === started;
-      const q = { role: 'user', text: question.trim(), origin: metadata.origin === 'phone' ? 'phone' : 'desktop' }; state.chat.push(q);
+      const q = { role: 'user', text: question.trim(), origin: metadata.origin === 'phone' ? 'phone' : 'desktop', at: Date.now() }; state.chat.push(q);
       state.chat = state.chat.slice(-50);
       try {
         await memory.record(state, { kind: 'chat', ...q, gameSeconds: state.gameSeconds }, 'overlay-chat');
@@ -557,14 +566,14 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
         if(!stillCurrent())throw Object.assign(Error('对局已切换，请在当前对局重新提问'),{status:409});
         if(typeof answer!=='string'||!answer.trim())throw Object.assign(Error('Empty Agent answer'),{status:502});
         const reply=answer.trim();
-        state.chat.push({ role: 'assistant', text: reply });
+        state.chat.push({ role: 'assistant', text: reply, at: Date.now() });
         await memory.record(state, { kind: 'chat', role: 'assistant', text: reply, gameSeconds: state.gameSeconds }, 'overlay-chat');
         if(topic==='teamfight')state.teamfight=text(answer);
         if(topic==='equipment')state.equipment=text(answer);
         if(topic==='augments')state.augmentAdvice=text(answer);
         return { answer: reply };
       } catch (e) {
-        if(stillCurrent())state.chat.push({ role: 'assistant', text: chatFailureMessage(e), failed:true });
+        if(stillCurrent())state.chat.push({ role: 'assistant', text: chatFailureMessage(e), failed:true, at: Date.now() });
         throw e;
       } finally { busy = false; await flush(); }
     },

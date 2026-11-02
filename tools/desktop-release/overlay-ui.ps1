@@ -42,18 +42,25 @@ function Show-OverlayModeMenu {
 function Update-ChatJump {
  if(!$controls.LatestMessageButton){return}
  $scroll=$controls.PageScroll
- $controls.LatestMessageButton.Visibility=if($script:tab -eq 'chat' -and $scroll.ScrollableHeight-$scroll.VerticalOffset -gt 32){'Visible'}else{'Collapsed'}
+ $controls.LatestMessageButton.Visibility=if(($script:tab -eq 'advice' -or $script:tab -eq 'chat') -and $scroll.ScrollableHeight-$scroll.VerticalOffset -gt 32){'Visible'}else{'Collapsed'}
 }
 function Update-OverlaySurface([bool]$force=$false){
  if(!$controls.RichContent){return}
  Update-OverlayComposer
  $font=[double]$controls.FontSlider.Value
  $rows=@($script:snapshot.chatRows|Where-Object {$_ -and $_.text})
- $key=$script:tab+'|'+$font+'|'+$controls.OpacitySlider.Value+'|'+$controls.PageText.Text+'|'+(ConvertTo-Json -InputObject $rows -Compress -Depth 3)
+ # 战况页把教练建议与对话合并成一条时间线：先取 thread，缺失时退回 chatRows。
+ $thread=@($script:snapshot.thread|Where-Object {$_ -and $_.text})
+ $key=$script:tab+'|'+$font+'|'+$controls.OpacitySlider.Value+'|'+$controls.PageText.Text+'|'+(ConvertTo-Json -InputObject $rows -Compress -Depth 3)+'|'+(ConvertTo-Json -InputObject $thread -Compress -Depth 3)
  if($force -or $script:surfaceKey -ne $key){
   $script:surfaceKey=$key;$controls.RichContent.Children.Clear()
-  if($script:tab -eq 'chat' -and $rows.Count){
-   foreach($row in $rows){
+  $bubbles=if($script:tab -eq 'advice'){ if($thread.Count){$thread}else{$rows} }else{ $rows }
+  if($bubbles.Count){
+   if($script:tab -eq 'advice'){
+    $metaLine=([string]$controls.PageText.Text -split "`r?`n" | Where-Object {$_ -match '^对局 '} | Select-Object -First 1)
+    if($metaLine){$meta=New-OverlayLabel $metaLine 11 '#9CAABA';$meta.Margin='2,0,2,10';$controls.RichContent.Children.Add($meta)|Out-Null}
+   }
+   foreach($row in $bubbles){
     $user=$row.role -eq 'user';$card=New-Object Windows.Controls.Border;$card.CornerRadius=10;$card.Padding='12,10';$card.Margin=if($user){'40,0,0,10'}else{'0,0,20,10'};$card.Background=New-OverlaySurfaceBrush $(if($user){'#3F6278'}else{'#293747'});$card.BorderBrush=if($user){'#354C58'}else{'#2B3642'};$card.BorderThickness=1
     $column=New-Object Windows.Controls.StackPanel
     $speakerName=if($row.origin -eq 'team' -and $row.displayName){[string]$row.displayName}elseif($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
@@ -79,6 +86,13 @@ function Update-OverlaySurface([bool]$force=$false){
     $body=New-OverlayLabel $value $font '#E8EEF5';Set-HighlightedText $body $value;$column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null;$index++
    }
   }
+ }
+ if($controls.EventTicker){
+  # Events stay a single updating line instead of a page of their own.
+  $tick=[string]$script:snapshot.eventTicker
+  $controls.EventTicker.Text=$tick
+  $controls.EventTicker.Visibility=if($tick -and $script:tab -eq 'advice'){'Visible'}else{'Collapsed'}
+  $controls.EventTickerPanel.Visibility=$controls.EventTicker.Visibility
  }
  $rich=$controls.RichContent.Children.Count -gt 0 -and $controls.PlayersTable.Visibility -ne 'Visible'
  $controls.RichContent.Visibility=if($rich){'Visible'}else{'Collapsed'}

@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {join} from 'node:path';
+import {readFile} from 'node:fs/promises';
 import {locateNativeModules,nativeImporter} from './native-modules.mjs';
 import {chatUrl,limitedJson} from '../dsh-game-services/client.mjs';
 import {gameModePrompt} from '../dsh-coach-server/lib/game-mode-prompt.js';
@@ -8,6 +9,7 @@ import {cloudContext,agentQuestion} from './cloud-agent.mjs';
 import {userMemoryTool} from './user-memory.mjs';
 import {readChatCompletion} from '../agent-activity/openai-stream.mjs';
 import {parseGenericObservation,genericIdentityPrompt} from './generic-identity.mjs';
+import {TIEBREAK_SYSTEM} from '../dsh-onboarding/vision-tiebreak.mjs';
 const fail=(status,message)=>Object.assign(Error(message),{status});
 // The BYOK route builds its own per-turn text, so the selected mentor's tone has to be
 // injected here as well. The cloud route does the same via roleInstruction in
@@ -86,5 +88,24 @@ export async function createLocalAgent({stateDir,getConfig,getKey,getContext,que
    const final=agent.session.snapshotEvents().slice(from).filter(e=>e.type==='assistant/message').at(-1);if(!final||llm.lastAssistantStreamChunk(final.data.stream,'finish')?.reason?.kind!=='stop')throw lastModelError??fail(502,'DSH 未能提交有效回答');
    const text=llm.joinAssistantStreamText(final.data.stream).trim();if(!text)throw fail(502,'DSH 未能提交有效回答');await ctx.sessionPersistence.flush();return text.slice(0,12000);
   }finally{clearTimeout(timer);clearInterval(matchTimer);progress({event:'completed'});busy=false;currentRequest=null;}
- },async close(){closing=true;lifetime.abort();await owned?.dispose();for(const fiber of fibers.reverse())await fiber.dispose();}};
+ },
+  // The card watcher refuses when it cannot isolate one changed card and saves two
+  // frames instead. This is the same direct chat call the screen tool already makes,
+  // kept off the agent session so a tie-break never pollutes the turn transcript.
+  async askImage({question,images}={}){
+   if(closing)throw fail(409,'本地 Agent 正在关闭');
+   const list=(Array.isArray(images)?images:[]).filter(row=>typeof row?.path==='string').slice(0,2);
+   if(!list.length)throw fail(400,'没有可比对的图片');
+   const cfg=await getConfig(),key=await getKey();
+   const blocks=[{type:'text',text:String(question??'').slice(0,1200)}];
+   for(const image of list){
+    const mediaType=image.mediaType==='image/jpeg'?'image/jpeg':'image/png';
+    blocks.push({type:'image_url',image_url:{url:'data:'+mediaType+';base64,'+(await readFile(image.path)).toString('base64')}});
+   }
+   const response=await fetchImpl(chatUrl(cfg.baseUrl),{method:'POST',redirect:'error',signal:AbortSignal.timeout(30000),headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify({model:cfg.model,stream:false,max_tokens:8,messages:[{role:'system',content:TIEBREAK_SYSTEM},{role:'user',content:blocks}]})});
+   if(!response.ok){await response.body?.cancel();throw fail(502,'看图未能完成');}
+   const result=await limitedJson(response,4096);
+   return String(result.choices?.[0]?.message?.content??'');
+  },
+  async close(){closing=true;lifetime.abort();await owned?.dispose();for(const fiber of fibers.reverse())await fiber.dispose();}};
 }

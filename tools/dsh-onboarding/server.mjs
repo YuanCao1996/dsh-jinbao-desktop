@@ -166,6 +166,13 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    if(typeof result.answer!=='string'||!result.answer.trim())throw error(502);
    return result.answer;
   },
+  // Only the BYOK route can attach images today: it already talks to the user's
+  // own chat endpoint, which may accept image_url blocks. The cloud and legacy
+  // gateways only take text turns, so there the watcher's own decision stands.
+  agentImage:async request=>{
+   if(config.mode==='byok'&&typeof localAgent?.askImage==='function')return localAgent.askImage(request);
+   throw error(503);
+  },
   search:async query=>{const token=await resolve('cloud');if(!token)throw error(401);return remote(runtimeId==='standalone'?'/desktop/agent-preview/knowledge':'/site/search',token,query);},
  });
  const phoneSync=await createPhoneSync({stateDir,view:overlay.view,ask:overlay.ask,getToken:syncToken,serviceBaseUrl:service,fetchImpl});

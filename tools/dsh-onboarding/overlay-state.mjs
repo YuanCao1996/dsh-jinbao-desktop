@@ -4,6 +4,7 @@ import { WZRY_ADAPTER } from '../dsh-coach-server/lib/adapters/wzry.js';
 import { projectWzryFacts } from '../dsh-coach-server/lib/adapters/wzry-facts.js';
 import { createMatchTracker } from '../dsh-coach-server/lib/match-tracker.js';
 import { rankedAugments, augmentLine, offerNames } from './augment-ranking.mjs';
+import { TIEBREAK_QUESTION, tiebreakPick } from './vision-tiebreak.mjs';
 import { projectProgressEvent,observeEquipment,addProgressEvent } from './progress-events.mjs';
 import { createGameMemory } from '../dsh-coach-server/lib/game-memory.js';
 import { normalizeLolMode } from '../dsh-coach-server/lib/game-mode-prompt.js';
@@ -40,7 +41,7 @@ export function clock(seconds) {
 export function initialOverlayState() {
   return { game: null, mode: '', match: null, at: 0, selfIdentityAt: 0, matchStartedAt: 0, gameSeconds: null, ended: false, phase: '',observedMatch:false,
     me: {}, allies: [], enemies: [], bench: [], playerStats: [], enemyItems: [], events: [], equipmentSnapshots:new Map(),
-    ownedAugments: [], augmentRounds: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, augmentCaptureReason: '', equipment: '', equipmentStatus:'', equipmentAssumptions: [], augmentAdvice: '', teamfight: '', broadcasts: [], chat: [],
+    ownedAugments: [], revealedAugments: [], augmentRounds: [], offers: [], offerRound: null, offerHistory: [], augmentCaptureAvailable: null, augmentCaptureReason: '', equipment: '', equipmentStatus:'', equipmentAssumptions: [], augmentAdvice: '', teamfight: '', broadcasts: [], chat: [],
     agentStatus:'', agentError:'', coachStatus:null, praiseChains:{} };
 }
 // Pure projection shared by live polling and log replay tests. Epoch time only orders
@@ -358,7 +359,7 @@ export function overlayView(state, knowledge = {}) {
   };
 }
 
-export async function createOverlayService({ stateDir, agentChat, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000,activity,canAutoRequest }) {
+export async function createOverlayService({ stateDir, agentChat, agentImage, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000,activity,canAutoRequest }) {
   search=createKnowledgeSearch(search);
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
@@ -467,6 +468,35 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       if(!stillCurrent()&&rosterChampions(state).length&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});
     }
   }
+  // The pixel watcher refuses when it cannot isolate one changed card, and saves the
+  // before/after frames instead. A vision model gets one look at those two frames; a
+  // parsed slot is a real observation, so it is injected through the same broadcast
+  // path as any other derived fact. Anything less than a clean answer stays a
+  // question for the player rather than a guess.
+  const tiebreaks=new Set();
+  async function runTiebreak(event){
+   if(typeof agentImage!=='function'||closed)return;
+   if(typeof event?.baselineImage!=='string'||typeof event?.lastImage!=='string')return;
+   const key=[state.game,state.match,event.roll??'',event.baselineImage,event.lastImage].join('|');
+   if(tiebreaks.has(key))return;
+   tiebreaks.add(key);
+   if(tiebreaks.size>32)tiebreaks.delete(tiebreaks.values().next().value);
+   const options=Array.isArray(event.options)&&event.options.length?event.options:state.offers;
+   try{
+    const answer=await agentImage({question:TIEBREAK_QUESTION,images:[
+     {path:event.baselineImage,mediaType:'image/png'},
+     {path:event.lastImage,mediaType:'image/png'},
+    ]});
+    if(closed)return;
+    const pick=tiebreakPick({answer,options,roll:event.roll});
+    if(!pick)return;
+    const applied={game:state.game,match:state.match,at:Date.now(),...pick};
+    router.apply(applied,'coach_broadcasts.jsonl');
+    await appendFile(join(logs,'coach_broadcasts.jsonl'),JSON.stringify(applied)+'\n',{mode:0o600});
+    state=router.state();
+    await flush();
+   }catch{}
+  }
   async function scan() {
     if (scanning || closed) return;
     scanning = true;
@@ -496,14 +526,17 @@ export async function createOverlayService({ stateDir, agentChat, search, pollMs
       }
       pending.sort((a, b) => eventTimestamp(a.event)-eventTimestamp(b.event));
       const observedStates = new Set();
+      const ambiguous=[];
       for (const { event, file, position } of pending) {
         updateAugmentRecommendations(state,knowledge.rows??[]);
         const observed = router.apply(event,file);
+        if(event?.kind==='augment_vision_ambiguous')ambiguous.push(event);
         if (observed) { await memory.record(observed,event,file,position); observedStates.add(observed); }
       }
       for (const observed of observedStates) await memory.snapshot(observed);
       await memory.flush();
       state=router.state();
+      for(const event of ambiguous)void runTiebreak(event);
       try{const progress=JSON.parse(await readFile(join(stateDir,'coach-status.json'),'utf8'));state.coachStatus=progress.game===state.game&&progress.match===state.match&&Date.now()-progress.at<120000?progress:null;}catch{state.coachStatus=null;}
       try{const progress=JSON.parse(await readFile(join(stateDir,'agent-status.json'),'utf8'));const same=progress.game===state.game&&progress.match===state.match,age=Date.now()-Number(progress.at??0);state.agentStatus=same&&age<30000?String(progress.label??''):'';/* A failed model/auth round is worth showing far longer than a transient progress label; a successful turn rewrites this file with phase=complete and clears it. */state.agentError=same&&progress.phase==='error'&&age<120000?String(progress.label??''):'';}catch{state.agentStatus='';state.agentError='';}
       if(state.match&&restoredChat){

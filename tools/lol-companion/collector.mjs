@@ -54,7 +54,7 @@ const startCardWatch=offer=>{
   if(!running||!offer)return;
   if(!Number.isInteger(result.picked)){
    // 判定不出来时把两帧路径留下：既是视觉兜底的输入，也是阈值标定的原始数据。
-   if(result.baselineImage&&result.lastImage)log.append({kind:'augment_vision_ambiguous',roll:offer.roll??null,reason:result.reason??'',frames:result.frames??0,peak:result.peak??null,baselineImage:result.baselineImage,lastImage:result.lastImage});
+   if(result.baselineImage&&result.lastImage)log.append({kind:'augment_vision_ambiguous',options:(Array.isArray(offer.options)?offer.options:[]).slice(0,3),roll:offer.roll??null,reason:result.reason??'',frames:result.frames??0,peak:result.peak??null,baselineImage:result.baselineImage,lastImage:result.lastImage});
    return;
   }
   const options=Array.isArray(offer.options)?offer.options:[];

@@ -312,7 +312,10 @@ export function matchAugmentName(raw, lookup) {
 }
 
 function cleanItem(s) {
-  const t = String(s ?? "").split(/[\s\d|★]+/)[0] ?? "";
+  // OCR often puts spaces between CJK glyphs (残 疫); splitting on whitespace first made
+  // the parser resolve the fragment "残" so such purchases always came out unresolved.
+  // Chinese item names carry no spaces, so joining them is safe; ids are still trimmed.
+  const t = String(s ?? "").replace(/\s+/g, "").split(/[|★]+/)[0].replace(/\d+$/, "") ?? "";
   return t.replace(/[。.!！,，、;；:：]+$/, "").trim();
 }
 

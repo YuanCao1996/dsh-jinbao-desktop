@@ -10,7 +10,7 @@ function lookup(map,value){
   return map.get(normalized(value))??null;
 }
 export function createChatObserver(augmentNames,emit){
-  let champions=[],items=[],seen=new Set();
+  let champions=[],items=[],seen=new Map();
   const augments=new Map(augmentNames.map(name=>[normalized(name),{name}]));
   return {
     reset(){seen.clear();},
@@ -32,7 +32,14 @@ export function createChatObserver(augmentNames,emit){
       const messages=parseChat(lines,{width:frame.width,height:frame.height,
         championsInText,isChampion:value=>aliases.has(normalized(value)),championFix:value=>aliases.get(normalized(value))??null,
         augmentLookup:value=>lookup(augments,value),itemLookup:value=>lookup(itemMap,value),
-        augmentsInText:value=>[...augments].filter(([key])=>normalized(value).includes(key)).map(([,row])=>row.name),
+        augmentsInText:value=>{
+          const text=normalized(value);
+          const hits=[...augments].filter(([key])=>text.includes(key));
+          // 虹吸 is a substring of 灵魂虹吸 (and 棱彩阶 of 质变：棱彩阶), so a single
+          // announcement matched two catalog entries and emitted two events. Keep only
+          // the longest matching name.
+          return hits.filter(([key])=>!hits.some(([other])=>other!==key&&other.includes(key))).map(([,row])=>row.name);
+        },
       });
       for(const message of messages){
         if(!['purchase','augment_mutate','augment_picked_chat'].includes(message.kind))continue;
@@ -49,11 +56,25 @@ export function createChatObserver(augmentNames,emit){
         const time=message.time??null;
         const names=message.kind==='purchase'?[message.item??null]:message.augments??[message.augment];
         const told=AUGMENT_VERB_RE.test(raw);
+        const at=Date.now();
         for(const name of names){
           if(message.kind!=='purchase'&&!augments.has(normalized(name)))continue;
-          const key=JSON.stringify([message.kind,time,champion,name]);if(seen.has(key))continue;seen.add(key);
-          if(seen.size>512)seen.delete(seen.values().next().value);
-          if(message.kind==='purchase')emit({kind:'chat_events',gameTime:state.gameTime,events:[{kind:'purchase',champion,time,item:name,itemId:message.itemId??null,itemUnresolved:!name}]});
+          // The same announcement is re-read across frames, and the in-game time is
+          // missing on some of those reads. Keying on the time therefore let one line
+          // through repeatedly (大力 appeared five times in a single match), so the key
+          // is the fact itself and a short window absorbs the re-reads.
+          const key=JSON.stringify([message.kind,champion,name]);
+          const last=seen.get(key);
+          // Purchases may legitimately repeat within seconds (two of the same item), so
+          // they only absorb immediate re-reads. Attributed augment picks are minutes
+          // apart, so a wide window is safe; an unattributed one is shared by every
+          // player in the match, so it must expire quickly or two players picking the
+          // same augment collapse into a single event.
+          const window=message.kind==='purchase'?3000:champion?20000:4000;
+          if(last!==undefined&&at-last<window)continue;
+          seen.set(key,at);
+          if(seen.size>512)seen.delete(seen.keys().next().value);
+          if(message.kind==='purchase')emit({kind:'chat_events',gameTime:state.gameTime,events:[{kind:'purchase',champion,time,item:name,itemRaw:message.itemRaw??null,itemId:message.itemId??null,itemUnresolved:!name}]});
           else emit({kind:'augment_mutate',augment:augments.get(normalized(name)).name,champion,
             who:champion?(champion===ownName?'self':'other'):'unknown',
             source:'log-confirmed',confidence:told?'high':'low',time,gameTime:state.gameTime});

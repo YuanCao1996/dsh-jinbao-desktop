@@ -411,8 +411,9 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   // Serialize disk snapshots: model requests and polling may finish concurrently.
   let writes = Promise.resolve();
   const flush = () => (writes = writes.catch(() => {}).then(save));
-  const equipmentCoach=createEquipmentCoach({getState:()=>state,canRequest:canAutoRequest,agentChat,save:flush,onAdvice:async(current,answer)=>{
-    const event={game:current.game,match:current.match,at:Date.now(),kind:'equipment-advice',broadcast:answer,priority:2,validity:createAdviceValidity('purchase',current)};
+  const equipmentCoach=createEquipmentCoach({getState:()=>state,canRequest:canAutoRequest,agentChat,save:flush,onAdvice:async(current,answer,reason)=>{
+     const stage=reason==='opening'?'opening':reason==='death'?'death':'purchase';
+    const event={game:current.game,match:current.match,at:Date.now(),kind:'equipment-advice',broadcast:answer,priority:2,validity:createAdviceValidity(stage,current)};
     router.apply(event,'coach_broadcasts.jsonl');await appendFile(join(logs,'coach_broadcasts.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
   },debounceMs:equipmentDebounceMs,cooldownMs:equipmentCooldownMs});
   function refresh(force = true) {

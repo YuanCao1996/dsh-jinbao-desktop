@@ -50,10 +50,30 @@ export function equipmentContext(state){
 
 export function createEquipmentCoach({getState,agentChat,save,onAdvice=()=>{},canRequest=()=>true,now=Date.now,debounceMs=2000,cooldownMs=30000}){
   let pending='',since=0,lastAt=-Infinity,lastDone='',busy=false,closed=false,retryAt=0,lastConfirmed='';
+  // 阵亡与开局都是"一次性事件"，不是"事实又变了"：它们各自只发一次，不走购买那次
+  // 的防抖与冷却，否则玩家阵亡时正好撞上冷却就永远收不到提醒。
+  let openingAskedFor='',lastMatch='';
+  const oneShot=(reason,question)=>{
+   busy=true;const current=getState(),match=current.match,started=current.matchStartedAt;
+   void agentChat({game:current.game,match,question,topic:'equipment',automatic:true}).then(async answer=>{
+    const now= getState();if(closed||now.ended||now.match!==match||now.matchStartedAt!==started)return;
+    if(typeof answer!=='string'||!answer.trim())return;const text=answer.trim().slice(0,4000);
+    if(reason==='opening')now.openingBuild=text;
+    await onAdvice(now,text,reason);await save();
+   }).catch(()=>{}).finally(()=>{busy=false;});
+  };
   return {
     tick(){
       const state=getState();
       if(closed||typeof agentChat!=='function'||!state.match||!state.me.champion||state.ended||state.phase==='ChampSelect'||now()-state.at>30000)return;
+      if(state.match!==lastMatch){lastMatch=state.match;openingAskedFor='';}
+      // 开局加载完成、双方阵容都拿到了，给一份六件完整装备规划（每局一次）。
+      // 大乱斗的加载阶段有时还看不到双方阵容，所以"刚进游戏且一件成装都没有"也算开局。
+      const openingWindow=state.phase==='Loading'||(state.phase==='InProgress'&&!items(state.me.items).some(isCompletedItem));
+      if(!openingAskedFor&&openingWindow&&state.allies.length&&state.enemies.length&&!busy&&canRequest()&&state.me.champion){
+       openingAskedFor=state.match;
+       oneShot('opening','【开局出装规划】对局加载完成，双方阵容已确定。请给出本局六件完整装备的购买顺序（含鞋子与关键小件），并说明针对点：对面谁的威胁最大、我方强化如何配合。现在是开局，不要假设已有任何成装。控制在300字内。\n【对局事实 JSON】\n'+JSON.stringify({hero:state.me.champion,allies:state.allies.map(p=>p.champion),enemies:state.enemies.map(p=>({hero:p.champion,items:items(p.items)})),confirmedAugments:[...state.ownedAugments]}));
+      }
       const facts=equipmentContext(state);
       if(!facts.currentItems.length&&!facts.enemies.some(e=>e.items.length)&&!facts.unassignedEnemyItems.length&&!facts.confirmedAugments.length&&!facts.assumedAugments.length)return;
       const key=decisionKey(state,facts);

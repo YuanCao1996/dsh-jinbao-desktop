@@ -82,3 +82,24 @@ test('enemy inventory changes during generation do not discard every equipment a
  let time=10000,resolve;const s=initialOverlayState();Object.assign(s,{game:'lol',match:'one',matchStartedAt:1,at:time,me:{champion:'安妮',items:[{name:'残疫'}]},enemies:[{champion:'锐雯',items:[{name:'无尽之刃'}]}]});
  const coach=createEquipmentCoach({getState:()=>s,now:()=>time,debounceMs:0,cooldownMs:0,save:async()=>{},agentChat:()=>new Promise(r=>resolve=r)});coach.tick();s.enemies[0].items.push({name:'水银之靴'});resolve('优先购买法穿装备');await new Promise(r=>setImmediate(r));assert.equal(s.equipment,'优先购买法穿装备');assert.match(s.equipmentStatus,/敌方装备已变化/);coach.tick();assert.equal(s.equipment,'优先购买法穿装备');coach.close();resolve('后续建议');
 });
+
+test('a loading game with both teams asks once for a full six-item plan',async()=>{
+ const state=initialOverlayState();
+ applyOverlayEvent(state,{game:'lol',kind:'game_start',t:20000,me:{champion:'安妮',items:[]}},'fixture');
+ state.phase='Loading';state.at=20000;
+ state.allies=[{champion:'盖伦'},{champion:'拉克丝'},{champion:'赵信'},{champion:'索拉卡'}];
+ state.enemies=[{champion:'锐雯'},{champion:'劫'},{champion:'薇恩'},{champion:'锤石'},{champion:'阿狸'}];
+ const asked=[],advised=[];
+ const coach=createEquipmentCoach({getState:()=>state,now:()=>20000,debounceMs:0,cooldownMs:0,canRequest:()=>true,save:async()=>{},
+  agentChat:async request=>{asked.push(request.question);return '1 卢登 2 法穿鞋 3 影焰 4 灭世者 5 中娅 6 大帽';},
+  onAdvice:async (_state,_text,reason)=>{advised.push(reason);}});
+ coach.tick();await new Promise(r=>setImmediate(r));
+ assert.equal(asked.length,1,'loading must trigger the opening plan');
+ assert.match(asked[0],/六件/);
+ assert.match(asked[0],/锐雯/,'both teams must be part of the plan facts');
+ assert.equal(state.openingBuild.startsWith('1 卢登'),true,'the plan is kept on the state for the battle page');
+ coach.tick();await new Promise(r=>setImmediate(r));
+ assert.equal(asked.length,1,'the opening plan is asked once per match');
+ assert.deepEqual(advised,['opening']);
+ coach.close();
+});

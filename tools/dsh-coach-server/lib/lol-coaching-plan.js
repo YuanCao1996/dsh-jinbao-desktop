@@ -146,7 +146,10 @@ function dependencies(current, stage) {
 
 export function createAdviceValidity(stage, current, now = Date.now()) {
   if (!current) return null;
-  return {version:1,match:current.match,stage,createdAt:now,expiresAt:now+(['death','purchase','enemyChange','situation','ace','inhib','objective','turret'].includes(stage)?45000:90000),
+  // 开局规划讲的是整局的六件装备顺序，有效期按整局给。依赖项必须和 adviceIsValid
+  // 里重算的那份一致，否则规划一生成就会被判成过期（opening 走默认依赖）。
+  const ttl = stage === 'opening' ? 600000 : (['death','purchase','enemyChange','situation','ace','inhib','objective','turret'].includes(stage) ? 45000 : 90000);
+  return {version:1,match:current.match,stage,createdAt:now,expiresAt:now+ttl,
     dependencies:dependencies(current,stage)};
 }
 

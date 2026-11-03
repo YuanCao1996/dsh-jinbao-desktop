@@ -216,3 +216,16 @@ test('a panel the OCR never resolves leaves its text behind for diagnosis',()=>{
  for(let i=0;i<8;i+=1)observer.observe(frame());
  assert.equal(output.filter(event=>event.kind==='augment_capture_blind').length,1,'the streak keeps counting until a frame resolves');
 });
+
+test('the blind snapshot never carries chat-area text',()=>{
+ // Chat sits at the bottom of the screen and its OCR lines can contain player names,
+ // which the diagnostics promise never to export.
+ const output=[],observer=createAugmentObserver(['甲','乙','丙'],event=>output.push(event));
+ const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
+  titleLines:[],
+  lines:[{text:'面板上方的字',x:600,y:200},{text:'玩家名已质变了',x:40,y:1000},{text:'另一条聊天',x:40,y:1030}]});
+ for(let i=0;i<8;i+=1)observer.observe(frame());
+ const blind=output.find(event=>event.kind==='augment_capture_blind');
+ assert.ok(blind,'a blind streak must still be reported');
+ assert.deepEqual(blind.lines.map(line=>line.text),['面板上方的字']);
+});

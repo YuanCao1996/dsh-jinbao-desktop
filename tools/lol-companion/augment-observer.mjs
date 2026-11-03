@@ -69,7 +69,10 @@ export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4
       if(recognized){zeroStreak=0;}else{zeroStreak+=1;}
       if(zeroStreak===8)emit({kind:'augment_capture_blind',t:at,method:frame.method??'full',
        size:[frame.width,frame.height],titleCount:(frame.titleLines??[]).length,
-       lines:lines.slice(0,12).map(line=>({text:String(line.text??'').slice(0,40),x:Math.round(Number(line.x)||0),y:Math.round(Number(line.y)||0),source:line.source}))});
+       // Only the panel band: chat lives at the bottom of the screen and its lines can carry
+       // player names, which the diagnostics promise never to export.
+       lines:lines.filter(line=>Number(line.y)<frame.height*0.7).slice(0,8)
+        .map(line=>({text:String(line.text??'').slice(0,24),x:Math.round(Number(line.x)||0),y:Math.round(Number(line.y)||0),source:line.source}))});
       // A new, stable title in an exhausted slot cannot be another reroll of
       // that old round. Require a second observation before reacquiring it.
       const exhaustedChanges=candidates.map((name,i)=>name&&current[i]&&name!==current[i]&&slots[i].length>=2?i:null).filter(i=>i!==null);

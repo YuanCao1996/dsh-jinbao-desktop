@@ -94,7 +94,7 @@ const captureTimer=setInterval(async()=>{
  const generation=captureGeneration;
  const captureStarted=Date.now();
  try{
-  const frame=await captureWorker.capture(captureStop.signal,{focus:captureSchedule.choose(observer.status().knownSlots??0)});
+  const frame=await captureWorker.capture(captureStop.signal,{focus:captureSchedule.choose()});
   if(running&&generation===captureGeneration&&lastLiveState){
    observer.observe(frame);
    if(frame.focus!=='titles')ultimateObserver.observe(frame,lastLiveState,hudAssets.key());

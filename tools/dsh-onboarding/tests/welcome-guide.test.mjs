@@ -29,10 +29,12 @@ test('the welcome guide is served with real screenshots behind a filename allowl
   // Every step image referenced must be one of the shipped screenshots. The page keeps
   // them in its STEPS array and interpolates /welcome/<name> at render time.
   const refs = [...html.matchAll(/image:'([a-z]+\.png)'/g)].map(match => match[1]);
-  assert.deepEqual([...new Set(refs)].sort(), ['advice.png', 'augments.png', 'chat.png', 'equipment.png', 'events.png', 'players.png']);
+  // The guide must only document the tabs the overlay actually has: the equipment page
+  // was removed and the events/chat pages were merged into the battle page.
+  assert.deepEqual([...new Set(refs)].sort(), ['advice.png', 'augments.png', 'players.png']);
   assert.match(html, /\/welcome\/\$\{esc\(step\.image\)\}/);
 
-  for (const name of ['advice.png', 'augments.png', 'chat.png']) {
+  for (const name of ['advice.png', 'augments.png', 'players.png']) {
     const image = await fetch(origin + '/welcome/' + name);
     assert.equal(image.status, 200, name);
     assert.equal(image.headers.get('content-type'), 'image/png', name);
@@ -48,7 +50,7 @@ test('the welcome route refuses anything outside the screenshot allowlist', asyn
   assert.equal((await fetch(origin + '/welcome/..%2Fpackage.json')).status, 403);
   // fetch() normalises '..' before sending, so this legitimately resolves to an allowed
   // file; it documents that normalisation, it is not a bypass.
-  assert.equal((await fetch(origin + '/welcome/advice.png/../chat.png')).status, 200);
+  assert.equal((await fetch(origin + '/welcome/augments.png/../players.png')).status, 200);
   // Percent-encoded traversal that survives normalisation must not serve anything.
   const encoded = await fetch(origin + '/welcome/%2E%2E%2Fpackage.json');
   assert.ok([403, 404].includes(encoded.status), 'encoded traversal must be refused, got ' + encoded.status);

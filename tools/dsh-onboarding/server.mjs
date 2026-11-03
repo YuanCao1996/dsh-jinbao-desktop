@@ -242,7 +242,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    }
    if(req.method==='GET'&&req.url.startsWith('/welcome/')&&req.url.endsWith('.png')){
     const name=req.url.slice('/welcome/'.length);
-    if(!['advice','augments','equipment','players','events','chat'].includes(name.slice(0,-4)))throw error(404);
+    if(!['advice','augments','players'].includes(name.slice(0,-4)))throw error(404);
     res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});
     res.end(await readFile(new URL('./welcome/'+name,import.meta.url)));return;
    }

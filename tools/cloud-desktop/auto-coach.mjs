@@ -1,7 +1,12 @@
 import{appendFile,writeFile,rename}from'node:fs/promises';import{join}from'node:path';
 import{stateCoachingTrigger,buildLolCoachingPlan,createAdviceValidity,adviceIsValid}from'../dsh-coach-server/lib/lol-coaching-plan.js';
+import{createCoachScheduler}from'./coach-scheduler.mjs';
 export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>true,canRequest=()=>true,now=Date.now,trace=()=>{},publish=entry=>appendFile(join(stateDir,'logs/coach_broadcasts.jsonl'),JSON.stringify(entry)+'\n',{mode:0o600}),publishStatus=async value=>{if(!stateDir)return;const file=join(stateDir,'coach-status.json');await writeFile(file+'.tmp',JSON.stringify(value),{mode:0o600});await rename(file+'.tmp',file);}}){
  let busy=false,closed=false,match='',store={},offers='',owned='',ownedCount=0,selection='',retryAt=0;
+ let lastDead=false,deadMatch='';
+ // Scheduling is separate from selection: it decides whether a turn can still be useful
+ // in time, and learns how long replies actually take per stage.
+ const scheduler=createCoachScheduler({now});
 
  // Each stage belongs to one panel slot, so refreshing one dimension never overwrites
 
@@ -27,7 +32,12 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
   // the count, so this stays the cheap guard: while nothing new is confirmed the turn is
   // still skipped before any context is read.
   const maybeConfirmed=Number(v.ownedAugmentCount??0)>ownedCount;
-  if(!canRequest()&&!maybeConfirmed){note(v,'skip','output_backpressure');if(now()-(store.waitStatusAt??-Infinity)>=30000){store.waitStatusAt=now();await status(v,'interrupted','等待下一次低频自动分析');}return;}
+  // A death is the one automatic turn the player effectively asked for: it must not wait for
+  // a quiet voice queue, because by the time the queue clears the player has respawned and
+  // can no longer shop. Only the alive->dead edge bypasses the gate.
+  if(v.match!==deadMatch){deadMatch=v.match;lastDead=v.dead===true;}
+  const dyingNow=v.dead===true,deathEdge=dyingNow&&!lastDead;lastDead=dyingNow;
+  if(!canRequest()&&!maybeConfirmed&&!deathEdge){note(v,'skip','output_backpressure');if(now()-(store.waitStatusAt??-Infinity)>=30000){store.waitStatusAt=now();await status(v,'interrupted','等待下一次低频自动分析');}return;}
   busy=true;
   try{
    const c=(await getContext(v.game,v.match)).current;if(!stillCurrent(v)||!c||c.match!==v.match||c.ended){note(v,'skip','context_changed');return;}
@@ -66,6 +76,9 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
 
    else if((c.completedEquipmentEvents??[]).some(e=>e.at>(store.equipmentAt??0)))events=[{kind:'state',coachTrigger:'enemyChange'}];
    else if(Number(c.gameSeconds)>0){const event={kind:'state',state:{...c.me,time:c.gameSeconds,enemyItems:(c.enemies??[]).flatMap(p=>p.items??[])}};event.coachTrigger=stateCoachingTrigger(event,nextStore);if(event.coachTrigger)events=[event];}
+   // Dying is the most actionable automatic turn, and it must not depend on an earlier
+   // publish having taught the coach the alive baseline (a busy queue swallows those).
+   if(deathEdge)events=[{kind:'state',coachTrigger:'death',state:{...c.me,time:c.gameSeconds,enemyItems:(c.enemies??[]).flatMap(p=>p.items??[])}}];
    if(!events.length&&store.lastValidity&&!adviceIsValid(store.lastValidity,c,now())&&now()-(store.lastAt??0)>=30000){events=c.offers?.length?[{kind:'augment_offer',options:c.offers}]:['Loading','GameStart'].includes(c.phase)?[{kind:'loading_roster'}]:[{kind:'state',coachTrigger:'situation'}];}
    // Remember what has already been seen even when this tick does nothing, so a consumed
 
@@ -75,12 +88,20 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
    if(!events.length){note(v,'skip','no_trigger');return;}
 
    const plan=buildLolCoachingPlan(events,c),validity=createAdviceValidity(plan.stage,c,now());
+  const scheduled=scheduler.submit({stage:plan.stage,at:now(),coalesceKey:plan.keyEvent?plan.stage+':'+plan.keyEvent.time:undefined});
+  const decision=scheduler.take();
+  // A turn that cannot finish inside its own window would only produce advice that is
+  // stale on arrival, which is how five broadcasts got revoked in one evening.
+  if(decision&&decision.lane==='drop'){note(v,'skip','deadline',{stage:plan.stage,reason:decision.reason});return;}
    await status(v,'running','正在生成本局策略建议…',{stage:plan.stage});
    const equipmentChanges=plan.stage==='enemyChange'?(c.completedEquipmentEvents??[]).filter(e=>e.at>(store.equipmentAt??0)).map(e=>e.hero+'：'+e.items.join('、')).join('；'):'';
    const message='自动教练任务：'+plan.prompt.split('\n').filter(line=>!line.startsWith('【本轮筛选事实 JSON】')).join('\n')+(equipmentChanges?'\n本轮新成型的敌方装备（日志观测）：'+equipmentChanges:'')+'\n先按需读取本局工具事实。缺少价格资料时只说明下一件目标，不编报价或断言买得起。';
    const workflow='工作方式（多步，不是一次性作答）：\n1) 先判断此刻最该做的一件事；事实不足时按需调用工具：query_match_events/game_log_query 查本局事件，site_query/web_search 查英雄、装备与强化资料，inspect_latest_screen 看当前画面。\n2) 任何数值（价格、冷却、强化效果、胜率）都以工具结果为依据；查不到就说明缺口，不猜。\n3) 复核：动作是否与剩余时间窗口、存活人数、装备进度一致，矛盾时换更保守的动作。\n4) 只输出播报正文，不列工具名、不描述过程。\n';
 const actionable=message+'\n'+workflow+'这是战况即时播报：用2至3句先说现在做什么，再说针对谁或等什么条件，最后点明当前装备、阵容或已选海克斯为何支持这个动作。不要复述时钟、等级、比分、KDA或整套装备清单，不写泛泛的注意走位/配合队友。不编造冷却、价格、排名或未知技能状态；缺资料时依据已确认事实给保守建议，避免用整段工具错误说明占据正文。未确认可购买时，把装备建议安排在下一次可购买时，不说现在先买再上线；不以英雄总胜率解释单件装备强度，省略未核验百分比；不把召唤物挡路说成能够阻断位移，不断言未经核验的技能交互。';
-   const answer=await agent.ask({game:v.game,match:v.match,question:actionable,topic:'advice',automatic:true,...(maybeConfirmed||plan.stage==='death'?{urgent:true}:{})});
+   const startedAt=now();
+  const answer=await agent.ask({game:v.game,match:v.match,question:actionable,topic:'advice',automatic:true,...(maybeConfirmed||plan.stage==='death'?{urgent:true}:{})});
+  scheduler.recordDuration(plan.stage,now()-startedAt);
+  if(decision&&decision.lane==='fast')note(v,'scheduled','fast_lane',{stage:plan.stage,reason:decision.reason});
    const current=(await getContext(v.game,v.match)).current;
    if(!stillCurrent(v)||!current){note(v,'reply_discarded','context_changed');return;}
    if(!adviceIsValid(validity,current,now())){await status(v,'stale','关键局势已变化，等待下一次有效分析…',{stage:plan.stage});retryAt=now()+1000;return;}

@@ -330,6 +330,9 @@ export function overlayView(state, knowledge = {}) {
   return {
     game: state.game, mode:state.mode, match: state.match, matchStartedAt:state.matchStartedAt, gameTime: state.game==='generic'?(state.phase==='CapturePaused'?'观察已停止':'观察中'):clock(state.gameSeconds), phase:state.phase, ended: state.ended,
     selfChampion: typeof me.champion==='string' ? me.champion : '',
+    // The coach needs to know the player is dead before it decides whether it may spend a
+    // turn: a death reminder is worth bypassing a busy voice queue, nothing else is.
+    dead: me.dead===true, respawn: Number.isFinite(Number(me.respawn)) ? Number(me.respawn) : null,
     selfIdentityAt: state.selfIdentityAt,
     selfChampionAlias: typeof me.championAlias==='string' ? me.championAlias : '',
     playback:validBroadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0,...(r.praise?{topic:'praise'}:{}),expiresAt:r.expiresAt??r.validity?.expiresAt??null})),

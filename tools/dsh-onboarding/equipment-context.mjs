@@ -48,31 +48,33 @@ export function equipmentContext(state){
       .map(r=>({round:r.id,name:r.assumed||r.recommended,reason:r.assumed?'倒计时默认推测，尚未经本人确认':'未确认选择，按本轮当前候选中英雄适配排名最高项推测'}))};
 }
 
-export function createEquipmentCoach({getState,agentChat,save,onAdvice=()=>{},canRequest=()=>true,now=Date.now,debounceMs=2000,cooldownMs=30000}){
+export function createEquipmentCoach({getState,agentChat,save,onAdvice=()=>{},canRequest=()=>true,now=Date.now,debounceMs=2000,cooldownMs=30000,openingRetryMs=15000}){
   let pending='',since=0,lastAt=-Infinity,lastDone='',busy=false,closed=false,retryAt=0,lastConfirmed='';
   // 阵亡与开局都是"一次性事件"，不是"事实又变了"：它们各自只发一次，不走购买那次
   // 的防抖与冷却，否则玩家阵亡时正好撞上冷却就永远收不到提醒。
-  let openingAskedFor='',lastMatch='';
-  const oneShot=(reason,question)=>{
+  let lastMatch='',opening={match:'',done:false,retryAt:0};
+  const oneShot=(reason,question,{onSuccess=()=>{},onFailure=()=>{}}={})=>{
    busy=true;const current=getState(),match=current.match,started=current.matchStartedAt;
    void agentChat({game:current.game,match,question,topic:'equipment',automatic:true}).then(async answer=>{
     const now= getState();if(closed||now.ended||now.match!==match||now.matchStartedAt!==started)return;
     if(typeof answer!=='string'||!answer.trim())return;const text=answer.trim().slice(0,4000);
     if(reason==='opening')now.openingBuild=text;
-    await onAdvice(now,text,reason);await save();
-   }).catch(()=>{}).finally(()=>{busy=false;});
+    await onAdvice(now,text,reason);await save();onSuccess();
+   }).catch(()=>{onFailure();}).finally(()=>{busy=false;});
   };
   return {
     tick(){
       const state=getState();
       if(closed||typeof agentChat!=='function'||!state.match||!state.me.champion||state.ended||state.phase==='ChampSelect'||now()-state.at>30000)return;
-      if(state.match!==lastMatch){lastMatch=state.match;openingAskedFor='';}
+      if(state.match!==lastMatch){lastMatch=state.match;opening={match:state.match,done:false,retryAt:0};}
       // 开局加载完成、双方阵容都拿到了，给一份六件完整装备规划（每局一次）。
       // 大乱斗的加载阶段有时还看不到双方阵容，所以"刚进游戏且一件成装都没有"也算开局。
       const openingWindow=state.phase==='Loading'||(state.phase==='InProgress'&&!items(state.me.items).some(isCompletedItem));
-      if(!openingAskedFor&&openingWindow&&state.allies.length&&state.enemies.length&&!busy&&canRequest()&&state.me.champion){
-       openingAskedFor=state.match;
-       oneShot('opening','【开局出装规划】对局加载完成，双方阵容已确定。请给出本局六件完整装备的购买顺序（含鞋子与关键小件），并说明针对点：对面谁的威胁最大、我方强化如何配合。现在是开局，不要假设已有任何成装。控制在300字内。\n【对局事实 JSON】\n'+JSON.stringify({hero:state.me.champion,allies:state.allies.map(p=>p.champion),enemies:state.enemies.map(p=>({hero:p.champion,items:items(p.items)})),confirmedAugments:[...state.ownedAugments]}));
+      // A failed opening turn used to consume the one shot, so a busy or preempted model left the
+      // player without the plan for the whole match. Keep retrying until it lands.
+      if(!opening.done&&openingWindow&&state.allies.length&&state.enemies.length&&!busy&&canRequest()&&state.me.champion&&now()>=opening.retryAt){
+       opening.retryAt=now()+openingRetryMs;
+       oneShot('opening','【开局出装规划】对局加载完成，双方阵容已确定。请给出本局六件完整装备的购买顺序（含鞋子与关键小件），并说明针对点：对面谁的威胁最大、我方强化如何配合。现在是开局，不要假设已有任何成装。控制在300字内。\n【对局事实 JSON】\n'+JSON.stringify({hero:state.me.champion,allies:state.allies.map(p=>p.champion),enemies:state.enemies.map(p=>({hero:p.champion,items:items(p.items)})),confirmedAugments:[...state.ownedAugments]},{onSuccess:()=>{opening.done=true;}}));
       }
       const facts=equipmentContext(state);
       if(!facts.currentItems.length&&!facts.enemies.some(e=>e.items.length)&&!facts.unassignedEnemyItems.length&&!facts.confirmedAugments.length&&!facts.assumedAugments.length)return;

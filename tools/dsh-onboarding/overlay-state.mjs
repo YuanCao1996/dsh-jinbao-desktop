@@ -375,7 +375,7 @@ export function overlayView(state, knowledge = {}) {
   };
 }
 
-export async function createOverlayService({ stateDir, agentChat, agentImage, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, knowledgeRetryMs=15000,activity,canAutoRequest }) {
+export async function createOverlayService({ stateDir, agentChat, agentImage, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, equipmentOpeningRetryMs=15000, knowledgeRetryMs=15000,activity,canAutoRequest }) {
   search=createKnowledgeSearch(search);
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
@@ -416,7 +416,7 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
      const stage=reason==='opening'?'opening':reason==='death'?'death':'purchase';
     const event={game:current.game,match:current.match,at:Date.now(),kind:'equipment-advice',broadcast:answer,priority:2,validity:createAdviceValidity(stage,current)};
     router.apply(event,'coach_broadcasts.jsonl');await appendFile(join(logs,'coach_broadcasts.jsonl'),JSON.stringify(event)+'\n',{mode:0o600});
-  },debounceMs:equipmentDebounceMs,cooldownMs:equipmentCooldownMs});
+  },debounceMs:equipmentDebounceMs,cooldownMs:equipmentCooldownMs,openingRetryMs:equipmentOpeningRetryMs});
   function refresh(force = true) {
     if(closed)return Promise.resolve();
     if(force)search.clear();

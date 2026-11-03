@@ -5,11 +5,13 @@ const TS_RE = /^\s*(\d{1,2}):(\d{2})\s*/;
 
 // Windows OCR frequently renders 已质变/已选择了 as 已经质变/已经选择了, and the same
 // extra 经 appears in kill announcements. Tolerate it everywhere the verb is matched.
-export const AUGMENT_VERB_RE = /已(?:经)?质变|已(?:经)?选择了/;
+// Windows OCR also splits a single line into several boxes, and the join then separates
+// the verb ("已质变 了"). Tolerate spaces inside every verb match.
+export const AUGMENT_VERB_RE = /已\s*(?:经\s*)?质\s*变|已\s*(?:经\s*)?选\s*择\s*了/;
 
-const MUTATE_RE = /已(?:经)?质变\s*[:：]?\s*(.*)$/;
+const MUTATE_RE = /已\s*(?:经\s*)?质\s*变\s*[:：]?\s*(.*)$/;
 
-const PICKED_RE = /已(?:经)?选择了\s*(.*)$/;
+const PICKED_RE = /已\s*(?:经\s*)?选\s*择\s*了\s*(.*)$/;
 
 const KILL_RE = /(?:击杀了|已(?:经)?终结了)/;
 
@@ -77,7 +79,10 @@ export function mergeByY(lines, opts = {}) {
   }
   for (const r of rows) {
     r.parts.sort((a, b) => a.x - b.x);
-    r.text = r.parts.map((p) => p.t).join(" ").replace(/\s+/g, " ").trim();
+    r.text = r.parts.map((p) => p.t).join(" ").replace(/\s+/g, " ")
+      // A verb split across two OCR boxes arrives as "已质变 了"; joining must not
+      // leave a space between two CJK characters or every such line loses its verb.
+      .replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g, "$1").trim();
     r.head = r.parts[0].t;
     r.tail = r.parts.length > 1 ? r.parts.slice(1).map((p) => p.t).join(" ") : "";
     const nameLo = AUG_NAME_X[0] * sx, nameHi = AUG_NAME_X[1] * sx;
@@ -152,14 +157,14 @@ export function parseChat(lines, opts = {}) {
       }
       const champFinal = champ || stripped.champions[0] || null;
       const augsCanon = augs.map((a) => canonicalAugment(a, opts));
-      out.push({ ...base, kind: "augment_mutate", augment: augsCanon[0] ?? null, augments: augsCanon, champion: champFinal });
+      out.push({ ...base, kind: "augment_mutate", augment: augsCanon[0] ?? null, augments: augsCanon, champion: champFinal, verb: true });
       continue;
     }
     const pk = PICKED_RE.exec(head) ?? PICKED_RE.exec(probe);
     if (pk) {
       const inline = augmentsIn(pk[1] ?? "", opts);
       const augs = (inline.length ? inline : augmentsIn(tail, opts)).map((a) => canonicalAugment(a, opts));
-      out.push({ ...base, kind: "augment_picked_chat", augment: augs[0] ?? null, augments: augs, champion: stripped.champions[0] ?? null });
+      out.push({ ...base, kind: "augment_picked_chat", augment: augs[0] ?? null, augments: augs, champion: stripped.champions[0] ?? null, verb: true });
       continue;
     }
     const bu = BUY_RE.exec(probe);
@@ -248,6 +253,26 @@ export function parseChat(lines, opts = {}) {
       continue;
     }
     out.push({ ...base, kind: "other" });
+  }
+  // OCR sometimes detects one in-game line as two rows: a verb fragment with no augment
+  // name, then the name with no owner. Both halves are useless alone, so stitch them back
+  // together — but only when they really are the same visual line (same y within a few
+  // pixels), otherwise two different announcements would be glued into one.
+  const verbOnly = (m) => m && m.kind === "augment_mutate" && !m.augment && m.verb === true;
+  const nameOnly = (m) => m && ["augment_mutate", "augment_picked_chat"].includes(m.kind) && m.augment && !m.champion;
+  const sameLine = (a, b) => Number.isFinite(a?.y) && Number.isFinite(b?.y) && Math.abs(a.y - b.y) <= 8;
+  for (let i = 0; i + 1 < out.length; i += 1) {
+    const a = out[i], b = out[i + 1];
+    const verbPart = verbOnly(a) && nameOnly(b) ? a : verbOnly(b) && nameOnly(a) ? b : null;
+    if (!verbPart || !sameLine(a, b)) continue;
+    const namePart = verbPart === a ? b : a;
+    out.splice(i, 2, {
+      ...namePart, kind: "augment_mutate", verb: true,
+      champion: verbPart.champion || namePart.champion || null,
+      time: verbPart.time ?? namePart.time ?? null,
+      text: `${a.text ?? ""} ${b.text ?? ""}`.trim(),
+    });
+    i -= 1;
   }
   const DEDUP_KINDS = new Set(["augment_mutate", "augment_picked_chat", "purchase"]);
   const seenKey = new Set();

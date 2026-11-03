@@ -55,7 +55,10 @@ export function createChatObserver(augmentNames,emit){
         const ownName=aliases.get(normalized(state.me?.championAlias))??aliases.get(normalized(state.me?.champion))??state.me?.champion;
         const time=message.time??null;
         const names=message.kind==='purchase'?[message.item??null]:message.augments??[message.augment];
-        const told=AUGMENT_VERB_RE.test(raw);
+        // The parser already proved the verb was there; re-testing the joined line used to
+        // disagree whenever OCR split the verb across boxes, which silently downgraded
+        // every such record to low confidence and dropped it from the owned list.
+        const told=message.verb===true||AUGMENT_VERB_RE.test(raw);
         const at=Date.now();
         for(const name of names){
           if(message.kind!=='purchase'&&!augments.has(normalized(name)))continue;
@@ -70,7 +73,10 @@ export function createChatObserver(augmentNames,emit){
           // apart, so a wide window is safe; an unattributed one is shared by every
           // player in the match, so it must expire quickly or two players picking the
           // same augment collapse into a single event.
-          const window=message.kind==='purchase'?3000:champion?20000:4000;
+          // An attributed augment is unique per player and match, so a minute of re-reads
+          // is still the same fact; unattributed lines are shared by everyone in the match
+          // and must expire quickly or two players collapse into one event.
+          const window=message.kind==='purchase'?3000:champion?120000:6000;
           if(last!==undefined&&at-last<window)continue;
           seen.set(key,at);
           if(seen.size>512)seen.delete(seen.keys().next().value);

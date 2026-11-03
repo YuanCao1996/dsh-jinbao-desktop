@@ -117,7 +117,7 @@ function Invoke-JinbaoCardWatch {
   [scriptblock]$Sleep={ param($ms) Start-Sleep -Milliseconds $ms },
   [switch]$KeepFrames
 )
- $baseline=$null;$previous=$null;$picked=$null;$streak=0;$frames=0;$baselineFrames=$null;$lastFrames=$null
+ $baseline=$null;$previous=$null;$picked=$null;$candidate=$null;$streak=0;$frames=0;$baselineFrames=$null;$lastFrames=$null
  $peak=@(0.0,0.0,0.0)
  $startedAt=& $Clock
  $reason='undecided'
@@ -156,13 +156,15 @@ function Invoke-JinbaoCardWatch {
    for($i=0;$i -lt 3;$i++){ if($i -ne $argmax -and $diff[$i] -lt ($max/3)){ $quiet++ } }
 
    if($max -ge $Threshold -and $quiet -eq 2){
-    # 唯一一张在动：悬停或点击的动画。
-    $picked=$argmax;$streak++
+    # 唯一一张在动：悬停或点击的动画。必须连续两帧都指向同一张才锁定 —— 单帧的
+    # 高亮/入场动画不足以说明玩家选了哪张，实况里选中卡与第二名的峰值只差 1.6 倍。
+    if($candidate -eq $argmax){ $streak++ } else { $candidate=$argmax;$streak=1 }
+    if($streak -ge 2){ $picked=$candidate }
    }elseif($max -ge $Threshold -and $quiet -eq 0){
     # 三张一起大改：面板在关闭/淡出。停止，沿用此前锁定的结果。
     $reason='panel-closed';break
    }else{
-    $streak=0
+    $candidate=$null;$streak=0
    }
   }finally{
    if($frame){
@@ -259,11 +261,18 @@ if($MyInvocation.InvocationName -ne '.'){
        Get-JinbaoCardFrame -width $width -height $height -originX $origin.X -originY $origin.Y
       }
       $payload=[ordered]@{picked=$result.picked;reason=$result.reason;frames=$result.frames;ms=$result.ms;peak=$result.peak}
-      if($null -eq $result.picked -and $result.baselineFrames){
+      # Undecided rounds are always kept because the tie-break needs the frames. Setting
+      # JINBAO_CARD_WATCH_FRAMES=always keeps decided rounds too, which is how a real match
+      # gets audited: every panel is reconstructable after the fact.
+      $keepAlways = $env:JINBAO_CARD_WATCH_FRAMES -match '^(1|true|always)$'
+      if($result.baselineFrames -and ($null -eq $result.picked -or $keepAlways)){
        try{
-        $dir=Join-Path $env:JINBAO_STATE_DIR ('card-watch-'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+        $label = if($null -eq $result.picked){ 'undecided-' + [string]$result.reason } else { 'picked-' + [string]($result.picked+1) }
+        $stateRoot = if($env:JINBAO_STATE_DIR){ $env:JINBAO_STATE_DIR } else { Join-Path $env:USERPROFILE '.jinbao-cloud-preview' }
+        $dir=Join-Path $stateRoot ('card-watch-'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+'-'+$label)
         $saved=Save-JinbaoCardFrames -Result $result -Directory $dir
         if($saved -and $saved.Count -eq 2){ $payload.baselineImage=$saved[0];$payload.lastImage=$saved[1] }
+        try{ Set-Content -Path (Join-Path $dir 'watch.json') -Value ($payload | ConvertTo-Json -Compress) -Encoding UTF8 }catch{}
        }catch{ $payload.saveError=$_.Exception.Message }
       }
      }

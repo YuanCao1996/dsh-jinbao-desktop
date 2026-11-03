@@ -10,13 +10,14 @@ export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4
   const catalog = new Map(names.map(name=>[normalize(name),name]));
   let current=[null,null,null],history=[],round=0,misses=0,slots=[[],[],[]],anchors=null;
   let pending=[null,null,null],suspended=null;
+  let zeroStreak=0;
   let lastValidAt=null,lastCapturedAt=null;
   const clearPanel=()=>{current=[null,null,null];history=[];slots=[[],[],[]];anchors=null;pending=[null,null,null];misses=0;};
   const suspendPanel=at=>{suspended={current:[...current],history:[...history],round,slots:slots.map(s=>[...s]),anchors,at};clearPanel();};
   let diagnostic={recognized:0,method:'none'};
   return {
     status(){return {...diagnostic};},
-    reset(){clearPanel();round=0;suspended=null;lastValidAt=null;lastCapturedAt=null;diagnostic={recognized:0,method:'none'};},
+    reset(){clearPanel();round=0;suspended=null;lastValidAt=null;lastCapturedAt=null;zeroStreak=0;diagnostic={recognized:0,method:'none'};},
     observe(frame){
       if(!frame?.foreground || !frame.available || frame.panelOccluded===true){pending=[null,null,null];diagnostic={recognized:0,method:frame?.method??'none',...(frame?.panelOccluded?{reason:'scoreboard_visible'}:{})};return;}
       const at=now();
@@ -62,6 +63,13 @@ export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4
         emit({kind:'augment_offer',roll:round,reopened:true,options:current.map((name,slot)=>name?{name,slot,rerollsUsed:slots[slot].length-1}:null).filter(Boolean),seen:history});
       }
       diagnostic={recognized,method:frame.method??'full',knownSlots:current.filter(Boolean).length};
+      // A panel that never resolves into cards is the one failure the status line cannot
+      // explain: either the OCR saw nothing at all, or it read text outside the catalog.
+      // Keep a small sample of what it did see so the next occurrence is diagnosable.
+      if(recognized){zeroStreak=0;}else{zeroStreak+=1;}
+      if(zeroStreak===8)emit({kind:'augment_capture_blind',t:at,method:frame.method??'full',
+       size:[frame.width,frame.height],titleCount:(frame.titleLines??[]).length,
+       lines:lines.slice(0,12).map(line=>({text:String(line.text??'').slice(0,40),x:Math.round(Number(line.x)||0),y:Math.round(Number(line.y)||0),source:line.source}))});
       // A new, stable title in an exhausted slot cannot be another reroll of
       // that old round. Require a second observation before reacquiring it.
       const exhaustedChanges=candidates.map((name,i)=>name&&current[i]&&name!==current[i]&&slots[i].length>=2?i:null).filter(i=>i!==null);

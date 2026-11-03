@@ -398,6 +398,7 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   let knowledge = {}, knowledgeKey = '', refreshTask = null, refreshQueued = false, scanning = false, closed = false, busy = false;
   let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
   let retryKnowledgeAt=Infinity;
+  let lastForcedKnowledgeAt=0;
   const contextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+state.me.champion+':'+JSON.stringify([offerNames(state.offers).sort(),[...state.ownedAugments].sort(),rosterChampions(state).sort()]);
   const baseContextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+(state.phase==='ChampSelect'?'selection':state.me.champion);
   const view=()=>({...overlayView(state,knowledge),agentActivity:activity?.snapshot(state)??{supported:false,enabled:false,revision:0,rows:[]}});
@@ -437,6 +438,9 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
     const cache = cached;
     const stillCurrent = () => !closed && key === contextKey();
     knowledge = { ...knowledge, loading: true }; await flush();
+    // Record the attempt up front: if this line is missing afterwards the refresh never
+    // started at all, which is a different bug from a lookup that returned nothing.
+    try{await writeFile(join(stateDir,'knowledge-status.json'),JSON.stringify({at:Date.now(),phase:'started',game:state.game,match:state.match,champion:state.me.champion,rows:(knowledge.rows??[]).length}));}catch{}
     const errors=[];
     const failed=e=>errors.push(Number(e?.status)||503);
     try {
@@ -576,6 +580,12 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
       }
       else if(!refreshTask&&Date.now()>=retryKnowledgeAt&&rosterChampions(state).length&&!state.ended&&Date.now()-state.at<30000&&(!cached.baseLoaded||rosterChampions(state).some(name=>!cached.heroes.has(name))||offerNames(state.offers).some(name=>!cached.candidates.has(name)))){
         retryKnowledgeAt=Date.now()+knowledgeRetryMs;void refresh(false).catch(()=>{});
+      }
+      // The page showed "正在查询…" forever because the refresh only ran when the context key
+      // changed. If a champion is known and the lookup still has no rows, force one attempt
+      // instead of waiting for a change that may never come.
+      if(!closed&&!refreshTask&&!state.ended&&state.me.champion&&!(knowledge.rows??[]).length&&Date.now()-state.at<30000&&Date.now()>=lastForcedKnowledgeAt+30000){
+       lastForcedKnowledgeAt=Date.now();void refresh(true).catch(()=>{});
       }
       settlePraise(state, Date.now(), { role: await currentPraiseRole() });
       await flush();

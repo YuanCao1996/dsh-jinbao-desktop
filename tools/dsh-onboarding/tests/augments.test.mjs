@@ -201,3 +201,18 @@ test('unchanged candidate rankings stay visible while a refreshed slot is being 
  assert.match(service.view().augments,/#2 · 乙/);assert.doesNotMatch(service.view().augments.split('英雄 Top10')[0],/#1 · 甲/);
  release();await until(()=>service.view().augments.includes('#1 · 丁'));
 });
+
+test('a panel the OCR never resolves leaves its text behind for diagnosis',()=>{
+ const output=[],observer=createAugmentObserver(['甲','乙','丙'],event=>output.push(event));
+ const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
+  titleLines:[],lines:[{text:'看不出的字',x:10,y:10},{text:'另一些字',x:20,y:30}]});
+ for(let i=0;i<8;i+=1)observer.observe(frame());
+ const blind=output.filter(event=>event.kind==='augment_capture_blind');
+ assert.equal(blind.length,1,'one snapshot per blind streak, not one per frame');
+ assert.equal(blind[0].lines[0].text,'看不出的字');
+ assert.equal(blind[0].titleCount,0);
+ assert.deepEqual(blind[0].size,[1920,1080]);
+ observer.observe({...frame(),available:false});
+ for(let i=0;i<8;i+=1)observer.observe(frame());
+ assert.equal(output.filter(event=>event.kind==='augment_capture_blind').length,1,'the streak keeps counting until a frame resolves');
+});

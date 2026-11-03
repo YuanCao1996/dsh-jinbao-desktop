@@ -386,7 +386,7 @@ function Set-Tab([string]$name){
  Update-Page
  if($focusComposer -and $window.IsVisible){$window.Activate() | Out-Null;$controls.QuestionBox.Focus() | Out-Null;[Windows.Input.Keyboard]::Focus($controls.QuestionBox) | Out-Null}
 }
-foreach($entry in @(@('advice','战况'),@('equipment','装备'),@('augments','海克斯'),@('players','胜率'))){
+foreach($entry in @(@('advice','战况'),@('augments','海克斯'),@('players','胜率'))){
  $button=New-Object Windows.Controls.Button
  $button.Tag=$entry[0];$button.Content=$entry[1];$button.FontSize=12;$button.Padding='4,6';$button.ToolTip='切换到'+$entry[1]
  $button.Add_Click({param($sender,$eventArgs) Set-Tab ([string]$sender.Tag)})
@@ -419,9 +419,9 @@ function Update-State {
   $changed=(!$script:snapshot -or !$script:renderedTab -or [string]$next.($script:tab) -ne [string]$script:snapshot.($script:tab))
   $enteredSelection=$next.phase -eq 'ChampSelect' -and (!$script:snapshot -or $script:snapshot.phase -ne 'ChampSelect')
   $script:snapshot=$next
-  foreach($button in $controls.Tabs.Children){$button.Visibility=if($next.game -eq 'generic' -and $button.Tag -in @('equipment','augments','players')){'Collapsed'}else{'Visible'}}
-  $controls.Tabs.Columns=if($next.game -eq 'generic'){3}else{6}
-  if($next.game -eq 'generic' -and $script:tab -in @('equipment','augments','players')){Set-Tab 'advice'}
+  foreach($button in $controls.Tabs.Children){$button.Visibility=if($next.game -eq 'generic' -and $button.Tag -in @('augments','players')){'Collapsed'}else{'Visible'}}
+  $controls.Tabs.Columns=if($next.game -eq 'generic'){1}else{3}
+  if($next.game -eq 'generic' -and $script:tab -in @('augments','players')){Set-Tab 'advice'}
   $confirmation=$next.confirmation
   $confirmId=if($confirmation){[string]$confirmation.id}else{''}
   $choicesKey=Get-ConfirmationChoiceKey $confirmation
@@ -659,7 +659,7 @@ function Invoke-OverlayShortcut([int]$id){
   if($script:displayMode -ne 'large'){Set-DisplayMode 'large'}
   Set-Collapsed $false
   if($id -in @(704,705)){
-   $pages=if($script:snapshot.game -eq 'generic'){@('advice')}else{@('advice','equipment','augments','players')};$index=[Array]::IndexOf($pages,$script:tab)
+   $pages=if($script:snapshot.game -eq 'generic'){@('advice')}else{@('advice','augments','players')};$index=[Array]::IndexOf($pages,$script:tab)
    $delta=if($id -eq 704){-1}else{1};Set-Tab $pages[(($index+$delta+$pages.Count)%$pages.Count)]
   }
  }
@@ -787,7 +787,7 @@ try{
     $script:testResult.collapsedRightEdge=[Math]::Abs($window.Left+$window.Width-$area.Right) -lt 1
     Set-Collapsed $false;$script:testResult.expanded=$window.Width -ge 420
     $script:testResult.tabs=$controls.Tabs.Children.Count
-    $script:testResult.simplifiedNavigation=$controls.Tabs.Children.Count -eq 4 -and @($controls.Tabs.Children | Where-Object {$_.Tag -eq 'teamfight'}).Count -eq 0 -and $null -eq $window.FindName('RefreshButton') -and $null -eq $window.FindName('TacticButton') -and $null -eq $window.FindName('InteractionButton') -and $null -eq $window.FindName('AppearanceButton')
+    $script:testResult.simplifiedNavigation=$controls.Tabs.Children.Count -eq 3 -and @($controls.Tabs.Children | Where-Object {$_.Tag -eq 'teamfight'}).Count -eq 0 -and $null -eq $window.FindName('RefreshButton') -and $null -eq $window.FindName('TacticButton') -and $null -eq $window.FindName('InteractionButton') -and $null -eq $window.FindName('AppearanceButton')
     $script:testResult.appearanceInSettings=$controls.SettingsButton.ContextMenu.Items[0] -eq $controls.AppearanceMenuItem
     $script:testResult.singleWinRateTab=@($controls.Tabs.Children | Where-Object {$_.Content -eq '胜率'}).Count -eq 1 -and @($controls.Tabs.Children | Where-Object {$_.Content -eq '对手' -or $_.Tag -eq 'stats'}).Count -eq 0
     $script:dragStartX=0;$script:dragStartY=0;$script:dragLeft=100;$script:dragTop=100;$script:dragging=$true;$script:bubbleDrag=$false
@@ -837,7 +837,7 @@ try{
     $offset=$controls.PageScroll.VerticalOffset
     $script:snapshot.advice=$longText+"`n新增策略";Update-Page
     $script:testResult.refreshPreservesScroll=$offset -gt 0 -and [Math]::Abs($controls.PageScroll.VerticalOffset-$offset) -lt 1
-    Set-Tab 'equipment';Set-Tab 'advice'
+    Set-Tab 'augments';Set-Tab 'advice'
     $script:testResult.tabRestoresScroll=[Math]::Abs($controls.PageScroll.VerticalOffset-$offset) -lt 1
     Set-Tab 'chat';$controls.PageScroll.ScrollToVerticalOffset(200);$controls.PageScroll.UpdateLayout()
     $script:snapshot.chat=$longText+"`n新的聊天消息";Update-Page
@@ -847,7 +847,7 @@ try{
     $script:testResult.chatFollowsBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
     # 事件已并入战况：只保留一行，随事件更新。
     $script:snapshot=[pscustomobject]@{advice=$longText;eventTicker='12:34 购买装备：残疫'}
-    Set-Tab 'equipment';Set-Tab 'advice';$window.UpdateLayout()
+    Set-Tab 'augments';Set-Tab 'advice';$window.UpdateLayout()
     $script:snapshot.eventTicker='12:35 最新装备购买事件';Update-Page;$window.UpdateLayout()
     $script:testResult.eventsFollowNewest=$controls.EventTicker.Text -eq '12:35 最新装备购买事件' -and $controls.EventTickerPanel.Visibility -eq 'Visible'
     $script:snapshot=[pscustomobject]@{players='英雄战绩';playerRows=@([pscustomobject]@{side='敌';champion='厄斐琉斯';winRateText='55%';tierText='T0'})}
@@ -910,7 +910,7 @@ try{
     # Exercise the actual HWND hook, without sending keys to any other app.
     [JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]703,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutCollapse=$script:collapsed
     [JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]702,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutExpand=!$script:collapsed
-    Set-Tab 'advice';[JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]705,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutNext=$script:tab -eq 'equipment'
+    Set-Tab 'advice';[JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]705,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutNext=$script:tab -eq 'augments'
     [JinbaoOverlayNative]::SendMessage($script:windowHandle,0x0312,[IntPtr]704,[IntPtr]::Zero)|Out-Null;$script:testResult.shortcutPrevious=$script:tab -eq 'advice'
     $script:testResult.modeButtonInSettings=$null -eq $window.FindName('ModeButton') -and $settingsMenu.Items.Contains($modeMenu)
     $script:testExitChoice=$true;$controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))

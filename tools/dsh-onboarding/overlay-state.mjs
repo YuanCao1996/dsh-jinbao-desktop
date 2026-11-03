@@ -301,7 +301,23 @@ export function overlayView(state, knowledge = {}) {
   const staleBroadcast = validBroadcasts.length ? null
     : [...state.broadcasts].reverse().find(r => !r.revokedHard && r?.text && (Date.now() - (Number(r.at)||0)) < 300000);
   const staleText = staleBroadcast ? staleBroadcast.text + '（稍早建议，局势已变化）' : '';
-  const current = validBroadcasts.at(-1)?.text || staleText || state.agentError || state.coachStatus?.label || (state.broadcasts.length?'局势已变化，正在更新针对性建议…':'等待进入游戏，检测到对局后自动生成策略建议。');
+  // The battle page shows exactly one message: whatever matters for the situation the
+  // player is in right now. Picking the newest broadcast regardless of context made a
+  // stale purchase hint sit on screen while the player was dead and an ace window open.
+  const live = reply => {
+    switch (reply.key) {
+      case 'death': return me.dead === true;
+      case 'augment': return (state.offers?.length ?? 0) > 0;
+      case 'purchase': return me.canShop === true;
+      default: return true;
+    }
+  };
+  // A message that answers the player's current state outranks a newer generic one.
+  const situationBonus = reply => (reply.key === 'death' || reply.key === 'augment' || reply.key === 'purchase') ? 2 : 0;
+  const score = reply => (Number(reply.priority) || 0) + situationBonus(reply);
+  const byUrgency = (a, b) => score(b) - score(a) || (Number(b.at) || 0) - (Number(a.at) || 0);
+  const fitting = validBroadcasts.filter(live).sort(byUrgency);
+  const current = (fitting[0] ?? [...validBroadcasts].sort(byUrgency)[0])?.text || staleText || state.agentError || state.coachStatus?.label || (state.broadcasts.length?'局势已变化，正在更新针对性建议…':'等待进入游戏，检测到对局后自动生成策略建议。');
   const playbook=!state.ended&&state.augmentPlaybook?.owned===JSON.stringify([...state.ownedAugments].sort())&&state.augmentPlaybook.text!==current?'\n\n强化方案参考 · '+clock(state.augmentPlaybook.gameSeconds)+'\n'+state.augmentPlaybook.text:'';
   const augmentTitle='当前三选一 · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
   const augmentBody=candidates.join('\n')+(offered.length<3?'\n已识别 '+offered.length+'/3 个位置，其余卡片继续识别中…':'');
@@ -463,6 +479,10 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
       if(stillCurrent())knowledge = { message: e.status === 401 || e.status === 403 ? '请在设置页登录并开通攻略检索权限；自带模型密钥与检索权限独立。' : '推荐检索暂时不可用，可在聊天中咨询。' };
     } finally {
       retryKnowledgeAt=Date.now()+(errors.includes(429)?Math.max(60000,knowledgeRetryMs):knowledgeRetryMs);
+      // Retrieval failures were invisible: the page only ever said "正在查询" and the log
+      // recorded nothing, so a broken lookup looked like a slow one. Persist one line per
+      // attempt so the next real match can be explained instead of guessed at.
+      try{await writeFile(join(stateDir,'knowledge-status.json'),JSON.stringify({at:Date.now(),game:state.game,match:state.match,champion:state.me.champion,rows:(knowledge.rows??[]).length,errors,message:knowledge.message??'',failed:!!knowledge.failed}));}catch{}
       updateAugmentRecommendations(state,knowledge.rows??[]);
       await flush();
       if(!stillCurrent()&&rosterChampions(state).length&&Date.now()-state.at<30000)void refresh(false).catch(()=>{});

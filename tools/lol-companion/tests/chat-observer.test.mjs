@@ -100,3 +100,37 @@ test('a told chat record reaches the owned list; an untold one does not', () => 
   assert.ok(state.ownedAugments.includes('急速之追求'), 'a told record must be owned: ' + JSON.stringify(state.ownedAugments));
   assert.ok(!state.ownedAugments.includes('台风'), 'an untold mention must not be owned: ' + JSON.stringify(state.ownedAugments));
 });
+
+test('the same announcement re-read a minute later is still one record',()=>{
+ // In the real match 双发快射 was recorded six times over four minutes because the chat
+ // line stayed long enough to be re-OCR-ed. Attribution is now reliable, so the window
+ // can cover the whole announcement without losing a genuinely different pick.
+ let clock=1_000_000;
+ const events=[];
+ const observer=createChatObserver(NAMES,(event)=>events.push(event),{now:()=>clock});
+ observer.setCatalog(catalog);
+ const frame=(text)=>({available:true,foreground:true,width:1920,height:1080,
+  lines:[{box:poly(20,700,320,22),text}]});
+ observer.observe(frame('虚空女皇 已质变了 双发快射'),meState);
+ clock+=30_000;
+ observer.observe(frame('虚空女皇 已质变了 双发快射'),meState);
+ clock+=50_000;
+ observer.observe(frame('虚空女皇 已质变了 双发快射'),meState);
+ assert.equal(events.length,1,'a re-read of the same announcement must not post again');
+ observer.observe(frame('虚空女皇 已质变了 台风'),meState);
+ assert.equal(events.length,2,'a different augment is a different record');
+});
+
+test('two players picking the same augment are not merged into one record',()=>{
+ let clock=2_000_000;
+ const events=[];
+ const observer=createChatObserver(NAMES,(event)=>events.push(event),{now:()=>clock});
+ observer.setCatalog(catalog);
+ const frame=(text)=>({available:true,foreground:true,width:1920,height:1080,
+  lines:[{box:poly(20,700,320,22),text}]});
+ observer.observe(frame('虚空女皇 已质变了 台风'),meState);
+ clock+=5_000;
+ observer.observe(frame('时间刺客 已质变了 台风'),meState);
+ assert.equal(events.length,2);
+ assert.deepEqual(events.map((event)=>event.who),['self','other']);
+});

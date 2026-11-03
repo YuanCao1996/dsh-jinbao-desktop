@@ -9,7 +9,7 @@ function lookup(map,value){
   }
   return map.get(normalized(value))??null;
 }
-export function createChatObserver(augmentNames,emit){
+export function createChatObserver(augmentNames,emit,{now=Date.now}={}){
   let champions=[],items=[],seen=new Map();
   const augments=new Map(augmentNames.map(name=>[normalized(name),{name}]));
   return {
@@ -59,7 +59,7 @@ export function createChatObserver(augmentNames,emit){
         // disagree whenever OCR split the verb across boxes, which silently downgraded
         // every such record to low confidence and dropped it from the owned list.
         const told=message.verb===true||AUGMENT_VERB_RE.test(raw);
-        const at=Date.now();
+        const at=now();
         for(const name of names){
           if(message.kind!=='purchase'&&!augments.has(normalized(name)))continue;
           // The same announcement is re-read across frames, and the in-game time is

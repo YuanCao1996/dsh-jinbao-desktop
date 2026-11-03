@@ -103,3 +103,19 @@ test('a loading game with both teams asks once for a full six-item plan',async()
  assert.deepEqual(advised,['opening']);
  coach.close();
 });
+
+test('a late announcement confirms its own round, never the panel that is open now',()=>{
+ const s=initialOverlayState();let at=1;
+ const emit=e=>applyOverlayEvent(s,{game:'lol',t:++at,...e},'one');
+ emit({kind:'game_start',me:{champion:'安妮',items:[]}});
+ emit({kind:'augment_offer',roll:1,options:['甲','乙','丙']});
+ emit({kind:'augment_offer_closed',roll:1});
+ emit({kind:'augment_offer',roll:2,options:['戊','己','庚']});
+ // Chat announces round 1's pick while round 2's panel is open.
+ emit({kind:'augment_mutate',augment:'甲',champion:'安妮',who:'self',source:'log-confirmed',confidence:'high'});
+ assert.ok(s.ownedAugments.includes('甲'),'the announcement still owns the augment');
+ assert.deepEqual(s.augmentRounds.find(r=>r.id===2).confirmed,[],'round 2 must stay unconfirmed so its dialog can still appear');
+ assert.deepEqual(s.augmentRounds.find(r=>r.id===1).confirmed,['甲'],'the announcement confirms the round it belongs to');
+ emit({kind:'augment_picked',roll:2,name:'戊',augment:'戊',who:'self',source:'vision-click',confidence:'high'});
+ assert.deepEqual(s.augmentRounds.find(r=>r.id===2).confirmed,['戊']);
+});

@@ -20,7 +20,12 @@ export function trackAugmentRound(state,event,previousOwned) {
   const added=state.ownedAugments.filter(n=>!previousOwned.includes(n));
   if(added.length){
     const rounds=[...state.augmentRounds].reverse();
-    const round=state.augmentRounds.find(r=>r.id===event.roll)??rounds.find(r=>!r.confirmed.length&&added.some(n=>r.options.includes(n)))??rounds.find(r=>!r.confirmed.length);
+    // A late announcement from an earlier round must not confirm the panel that is open now:
+  // that would suppress its confirmation dialog and attach the wrong augment to the round.
+  // The last fallback only covers rounds whose options were never read.
+  const round=state.augmentRounds.find(r=>r.id===event.roll)
+   ??rounds.find(r=>!r.confirmed.length&&added.some(n=>r.options.includes(n)))
+   ??rounds.find(r=>!r.confirmed.length&&!r.options.length);
     if(round){round.confirmed.push(...added);round.confirmationSource=event.source??'log-confirmed';round.assumed=null;round.recommended=null;}
   }
   const exact=state.augmentRounds.find(round=>round.id===event.roll);

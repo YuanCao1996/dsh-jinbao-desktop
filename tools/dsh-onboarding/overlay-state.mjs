@@ -345,7 +345,7 @@ export function overlayView(state, knowledge = {}) {
     ownedAugmentCount: state.ownedAugments.length,
     advice: (state.game==='generic'?[me.genericState?.gameName||'游戏身份待核实',me.genericState?.gameMode,me.genericState?.roundState==='between'?'等待下一局':'当前窗口观察中']:['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:'']).filter(Boolean).join(' · ')+'\n\n'+current+playbook+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):'')+(partnerHint?'\n\n'+partnerHint:''),
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(!state.ended&&state.equipmentStatus?'\n'+state.equipmentStatus:'')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
-    augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在装备页查看建议，或通过聊天咨询当前局势。':
+    augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在战况页查看建议，或通过聊天咨询当前局势。':
       (offered.length?augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n':'')+'英雄 Top10 海克斯 · '+(me.champion||'等待英雄')+'\n'+(ranked.slice(0,10).map(augmentLine).join('\n')||knowledge.message||'正在查询英雄适配排名…')+'\n\n资料库推荐组合 · '+(me.champion||'等待英雄')+'\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
       (offered.length?'\n\n本轮已见 '+state.offerHistory.length+'/6':'\n\n'+captureHint)+'\n\n本局已选\n'+(state.ownedAugments.join('、')||'尚未收到强化选择日志')+(augmentUpdates?'\n\n强化动态\n'+augmentUpdates:''),
     players: (teamWinRates?teamWinRates+'\n\n':'')+'英雄胜率 ↓\n'+(roster.join('\n') || '等待双方英雄数据。'),
@@ -502,8 +502,12 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   // path as any other derived fact. Anything less than a clean answer stays a
   // question for the player rather than a guess.
   const tiebreaks=new Set();
+  // Rolls that already produced a pick: a late timeout for the same round must not ask
+  // the vision model again and append a second, possibly different augment.
+  const decidedRolls=new Set();
   async function runTiebreak(event){
    if(typeof agentImage!=='function'||closed)return;
+   if(event.roll!=null&&decidedRolls.has(String(event.roll)))return;
    if(typeof event?.baselineImage!=='string'||typeof event?.lastImage!=='string')return;
    const key=[state.game,state.match,event.roll??'',event.baselineImage,event.lastImage].join('|');
    if(tiebreaks.has(key))return;
@@ -558,6 +562,7 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
       for (const { event, file, position } of pending) {
         updateAugmentRecommendations(state,knowledge.rows??[]);
         const observed = router.apply(event,file);
+        if(event?.kind==='augment_picked'&&event.roll!=null)decidedRolls.add(String(event.roll));
         if(event?.kind==='augment_vision_ambiguous')ambiguous.push(event);
         if (observed) { await memory.record(observed,event,file,position); observedStates.add(observed); }
       }

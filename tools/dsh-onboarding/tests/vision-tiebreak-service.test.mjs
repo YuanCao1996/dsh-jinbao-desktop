@@ -89,3 +89,20 @@ test('the same frame pair is only sent to the model once',async()=>{
   assert.equal(calls.length,1,'a re-read log line must not re-ask the model');
  }finally{await overlay.close();await rm(dir,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
 });
+
+test('a late timeout for an already decided round never asks the model again',async()=>{
+ const {dir,log,overlay,calls,at}=await start();
+ try{
+  await appendFile(log,offerLine(at));
+  await waitFor(()=>overlay.view().advice.includes('海克斯推荐'),'offer rendered');
+  // The watcher decided locally and the pick is already recorded for this round.
+  await appendFile(log,JSON.stringify({game:'lol',match:'one',kind:'augment_picked',t:at+150,roll:1,
+   name:'巨人杀手',augment:'巨人杀手',who:'self',source:'vision-click',confidence:'high'})+ '\n');
+  await waitFor(()=>ownedText(()=>overlay.view()).includes('巨人杀手'),'pick applied');
+  // A watcher that outlived its decision reports a timeout later; it must be ignored.
+  await appendFile(log,ambiguousLine(at+400));
+  await sleep(400);
+  assert.equal(calls.length,0,'no second opinion for a decided round');
+  assert.equal(ownedText(()=>overlay.view()).includes('珠光护手'),false,'no other augment may be added');
+ }finally{await overlay.close();await rm(dir,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
+});

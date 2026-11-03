@@ -41,6 +41,7 @@ const captureReport=async value=>{
 const cardWatchScript=fileURLToPath(new URL('./card-watch.ps1',import.meta.url));
 let cardWatch=null;
 const stopCardWatch=()=>{if(cardWatch){const owned=cardWatch;cardWatch=null;try{owned.kill()}catch{}}};
+const decidedRolls=new Set();
 const startCardWatch=offer=>{
  stopCardWatch();
  const powershell=join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe');
@@ -52,6 +53,11 @@ const startCardWatch=offer=>{
  const onLine=line=>{
   let result;try{result=JSON.parse(line);}catch{return;}
   if(!running||!offer)return;
+  // A watcher can outlive its own decision (the panel fades, or the same round is re-emitted
+  // after a suspend). A second verdict for one round would append a second augment to the
+  // owned list, so only the first verdict per round is accepted.
+  const roundKey=offer.roll==null?null:String(offer.roll);
+  if(roundKey!==null&&decidedRolls.has(roundKey))return;
   if(!Number.isInteger(result.picked)){
    // 判定不出来时把两帧路径留下：既是视觉兜底的输入，也是阈值标定的原始数据。
    if(result.baselineImage&&result.lastImage)log.append({kind:'augment_vision_ambiguous',options:(Array.isArray(offer.options)?offer.options:[]).slice(0,3),roll:offer.roll??null,reason:result.reason??'',frames:result.frames??0,peak:result.peak??null,baselineImage:result.baselineImage,lastImage:result.lastImage});
@@ -62,6 +68,7 @@ const startCardWatch=offer=>{
   const name=typeof option==='string'?option:option?.name;
   if(typeof name!=='string'||!name)return;
   // 判定成功的这一条会把该轮标记为已确认，确认弹窗因此不再出现。
+  if(roundKey!==null)decidedRolls.add(roundKey);
   log.append({kind:'augment_picked',who:'self',name,augment:name,roll:offer.roll??null,source:'vision-click',confidence:'high',gameTime:lastLiveState?.gameTime??gameTime??null,visionReason:result.reason??'',visionFrames:result.frames??0});
  };
  child.stdout?.setEncoding('utf8');

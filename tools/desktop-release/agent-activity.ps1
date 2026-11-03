@@ -83,7 +83,7 @@ function Test-AgentActivitySurface {
  $script:testResult.activityLatestWorks=$controls.AgentActivityScroll.ScrollableHeight-$controls.AgentActivityScroll.VerticalOffset -lt 2
  $activity.instanceId='restarted-backend';$activity.rows=@();Update-AgentActivity
  $script:testResult.activityRestartClears=$script:activityNodes.Count -eq 0 -and !$controls.AgentActivityRows.Children[0].Text.Contains('读取关键事件')
- Set-Tab 'equipment';$script:testResult.activityHiddenOtherPage=$controls.AgentActivityPanel.Visibility -eq 'Collapsed'
+ Set-Tab 'players';$script:testResult.activityHiddenOtherPage=$controls.AgentActivityPanel.Visibility -eq 'Collapsed'
  Set-Tab 'advice';Set-DisplayMode 'narrow';$script:testResult.activityHiddenNarrow=$controls.AgentActivityPanel.Visibility -eq 'Collapsed'
  Set-DisplayMode 'large';$activity.enabled=$false;Update-AgentActivity
  $script:testResult.activityOffClears=$controls.AgentActivityPanel.Visibility -eq 'Collapsed' -and $controls.AgentActivityRows.Children.Count -eq 0

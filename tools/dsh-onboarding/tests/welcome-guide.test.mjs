@@ -77,3 +77,23 @@ test('marking as seen requires the setup nonce', async t => {
   const denied = await fetch(origin + '/api/welcome/seen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   assert.equal(denied.status, 403);
 });
+
+test('the guide documents exactly the tabs the overlay defines', async () => {
+  // The guide drifted once already: the equipment tab was removed and events/chat were merged
+  // into the battle page, but the screenshots and steps still showed six pages. Reading both
+  // sources keeps the count honest without hand-maintained numbers.
+  const fs = await import('node:fs/promises');
+  const { fileURLToPath } = await import('node:url');
+  const here = fileURLToPath(new URL('.', import.meta.url));
+  const overlay = await fs.readFile(join(here, '..', '..', 'desktop-release', 'strategy-overlay.ps1'), 'utf8');
+  const tabLine = overlay.match(/foreach\(\$entry in @\((.+?)\)\)\{/s);
+  assert.ok(tabLine, 'the overlay tab definition must stay findable');
+  const tabs = [...tabLine[1].matchAll(/\(\s*'([a-z]+)'\s*,\s*'([^']+)'\s*\)/g)].map((match) => match[1]);
+  assert.ok(tabs.length >= 3, 'unexpected tab definition: ' + tabLine[1].slice(0, 120));
+  const page = await fs.readFile(join(here, '..', 'welcome.html'), 'utf8');
+  const steps = [...page.matchAll(/image:'([a-z]+\.png)'/g)].map((match) => match[1]);
+  assert.equal(steps.length, tabs.length, 'the guide must show one step per tab, tabs=' + JSON.stringify(tabs) + ' steps=' + JSON.stringify(steps));
+  for (const tab of tabs) {
+    assert.ok(steps.includes(tab + '.png'), 'missing screenshot for tab ' + tab);
+  }
+});

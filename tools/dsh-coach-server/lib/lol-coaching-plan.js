@@ -137,6 +137,10 @@ function dependencies(current, stage) {
     return {champion:me.champion,phase:current.phase,
       allies:list(current.allies).filter(p=>p.dead!==true).map(p=>p.champion).sort().join(','),
       enemies:list(current.enemies).filter(p=>p.dead!==true).map(p=>p.champion).sort().join(',')};
+  // An opening build order is a plan for the whole game: buying the first component or an
+  // enemy finishing an item does not make it wrong. Only the champion (and, outside this
+  // function, the match) defines which plan it is; the phase itself moves on immediately.
+  if(stage==='opening')return {champion:me.champion};
   const common = {champion:me.champion,phase:current.phase,levelBand:Number(me.level)>=6?'ultimate':'early',items:canonical(list(me.items).filter(isCompletedItem)),owned:canonical(current.ownedAugments),dead:me.dead === true};
   if (stage === 'augment') return {...common,offers:canonical(current.offers)};
   if (stage === 'selection') return {champion:me.champion,phase:current.phase,bench:canonical(current.bench),allies:canonical(current.allies)};

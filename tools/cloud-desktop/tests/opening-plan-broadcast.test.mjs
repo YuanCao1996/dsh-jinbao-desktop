@@ -53,6 +53,12 @@ test('a loading game with both teams puts the six-item plan on the battle page o
     assert.ok(askedOnce >= 1, 'the agent must be asked for the plan');
     assert.match(asked[0].question, /六件/);
 
+    // Shopping must not erase a plan that covers the whole game.
+    await appendFile(log, JSON.stringify({ game: 'lol', match: 'open1', kind: 'state', t: at + 80,
+      state: { time: 95, level: 3, items: [{ id: 1052, name: '增幅典籍' }] } }) + '\n');
+    await new Promise((r) => setTimeout(r, 300));
+    assert.match(service.view().advice, /卢登|六件/, 'the plan must survive the first purchase');
+
     // A second loading frame with the same teams must not ask again.
     await appendFile(log, JSON.stringify({ ...loadingEvent(at + 100) }) + '\n');
     await new Promise((r) => setTimeout(r, 400));

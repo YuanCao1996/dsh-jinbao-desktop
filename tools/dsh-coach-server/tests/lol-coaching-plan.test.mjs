@@ -199,3 +199,25 @@ test('auto-picked augments reach the plan facts so the advice can account for th
  assert.equal(plan.stage, 'postAugment');
  assert.deepEqual(plan.facts.autoPickedAugments, ['坦克引擎']);
 });
+
+test('the opening build order survives shopping, changes with the champion, and expires',()=>{
+  const at=1_000_000;
+  const current={
+    game:'lol',match:'m1',phase:'Loading',ended:false,ownedAugments:[],offers:[],bench:[],allies:[],enemies:[],
+    me:{champion:'安妮',level:1,items:[],canShop:false,championAugments:[]},
+  };
+  const validity=createAdviceValidity('opening',current,at);
+  assert.equal(adviceIsValid(validity,current,at+1_000),true);
+  // Buying the first item and an enemy finishing a build do not invalidate a whole-game plan.
+  const shopped={...current,me:{...current.me,items:[{name:'增幅典籍',id:1052},{name:'多兰之戒',id:1056}]},
+    enemies:[{champion:'锐雯',items:[{name:'黑色切割者',id:3071}],dead:false}]};
+  assert.equal(adviceIsValid(validity,shopped,at+60_000),true,'a purchase must not erase the plan');
+  // The phase moves on immediately after loading; the plan must survive that too.
+  assert.equal(adviceIsValid(validity,{...shopped,phase:'InProgress'},at+90_000),true);
+  // Another champion is a different plan.
+  assert.equal(adviceIsValid(validity,{...shopped,me:{...shopped.me,champion:'盖伦'}},at+100_000),false);
+  // A different match belongs to a different plan.
+  assert.equal(adviceIsValid(validity,{...shopped,match:'m2'},at+100_000),false);
+  // The plan is good for ten minutes, not for the whole game.
+  assert.equal(adviceIsValid(validity,shopped,at+600_001),false);
+});

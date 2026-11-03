@@ -1,7 +1,7 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
-import { mkdtemp, mkdir, writeFile, readFile, access, readdir, copyFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, access, readdir, copyFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createUpdater, compareVersions, verifyRelease, extractArchive } from '../update.mjs';
@@ -24,8 +24,18 @@ function zip(files) {
   const table=Buffer.concat(directory),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50);end.writeUInt16LE(Object.keys(files).length,8);end.writeUInt16LE(Object.keys(files).length,10);end.writeUInt32LE(table.length,12);end.writeUInt32LE(offset,16);
   return Buffer.concat([...records,table,end]);
 }
+// Every fixture used to stay in the OS temp directory: a full test run leaked a package-sized
+// directory each time and eventually filled the system drive. Clean them up once per file.
+const createdDirs = [];
+after(async () => {
+  for (const dir of createdDirs) {
+    try { await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
+  }
+});
+
 async function fixture(version='2.0.0') {
   const directory=await mkdtemp(join(tmpdir(),'jinbao-update 中文-'));
+  createdDirs.push(directory);
   const root=join(directory,'original'),stateDir=join(directory,'user');
   await mkdir(root);await mkdir(stateDir);
   await writeFile(join(root,'manifest.json'),JSON.stringify({version:'1.0.0',files:[]}));

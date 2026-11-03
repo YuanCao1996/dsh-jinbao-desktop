@@ -1,6 +1,6 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createGameMemory } from '../lib/game-memory.js';
@@ -8,7 +8,7 @@ import { dispatchGameChat, buildGameChatMessage } from '../lib/chat-bridge.js';
 import { initialOverlayState, createOverlayService } from '../../dsh-onboarding/overlay-state.mjs';
 
 test('full event history paginates beyond the UI window, survives restart and does not cross games', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'jinbao-memory-'));
+  const dir = await mkdtempTracked(join(tmpdir(), 'jinbao-memory-'));
   const memory = createGameMemory(dir), state = { ...initialOverlayState(), game: 'lol', match: 'one', at: 1, me: { champion: '安妮' } };
   for (let i = 0; i < 55; i++) await memory.record(state, { kind: 'chat_events', purchase: [{ item: '装备' + i }], puuid: 'secret-player' }, 'live.jsonl', { key: 'source', offset: i + 1 });
   state.events = [{ time: '03:00', text: '装备购买' }]; state.broadcasts = [{ text: '等队友' }];
@@ -29,7 +29,7 @@ test('full event history paginates beyond the UI window, survives restart and do
 });
 
 test('explicit preferences persist with provenance; tool cannot invent a quote from a log', async () => {
-  const memory = createGameMemory(await mkdtemp(join(tmpdir(), 'jinbao-preference-')));
+  const memory = createGameMemory(await mkdtempTracked(join(tmpdir(), 'jinbao-preference-')));
   await assert.rejects(memory.remember('lol', '喜欢前排', '日志说的', '这局出什么？'), /explicit/);
   await memory.remember('lol', '喜欢前排', '我喜欢前排', '记住，我喜欢前排');
   assert.equal((await memory.context('lol', 'new')).preferences[0].origin, 'user');
@@ -37,7 +37,7 @@ test('explicit preferences persist with provenance; tool cannot invent a quote f
 });
 
 test('pre-upgrade original logs are queryable without traversing paths or mixing explicitly tagged games', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'jinbao-raw-history-')); await mkdir(join(dir, 'logs'));
+  const dir = await mkdtempTracked(join(tmpdir(), 'jinbao-raw-history-')); await mkdir(join(dir, 'logs'));
   await writeFile(join(dir, 'logs', 'old.jsonl'), [
     { game: 'lol', kind: 'event', text: '升级前购买星蚀' }, { game: 'wzry', text: '另一款游戏' },
   ].map(JSON.stringify).join('\n') + '\n');
@@ -62,7 +62,7 @@ test('native chat reuses exactly the same game/match monitor as automatic coachi
 });
 
 test('chat sees persisted critical events, broadcasts and chat history before submitting the native turn', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'jinbao-shared-context-')); await mkdir(join(dir, 'logs'));
+  const dir = await mkdtempTracked(join(tmpdir(), 'jinbao-shared-context-')); await mkdir(join(dir, 'logs'));
   await writeFile(join(dir, 'logs', 'live.jsonl'), [
     { game: 'lol', match: 'live', t: 1000, kind: 'game_start', gameTime: 0 },
     { game: 'lol', match: 'live', t: 2000, kind: 'event', name: 'TurretKilled', time: 30 },
@@ -79,7 +79,7 @@ test('chat sees persisted critical events, broadcasts and chat history before su
 });
 
 test('oversized context remains valid JSON and leaves original history available through tools', async () => {
-  const memory = createGameMemory(await mkdtemp(join(tmpdir(), 'jinbao-context-budget-')));
+  const memory = createGameMemory(await mkdtempTracked(join(tmpdir(), 'jinbao-context-budget-')));
   await memory.snapshot({ ...initialOverlayState(), game: 'lol', match: 'big', at: 1, me: { champion: '安妮', payload: 'x'.repeat(8000) }, broadcasts: Array.from({ length: 100 }, () => ({ text: '大'.repeat(8000) })) });
   const context = await memory.context('lol', 'big');
   assert.ok(JSON.stringify(context).length < 16000);
@@ -87,7 +87,7 @@ test('oversized context remains valid JSON and leaves original history available
 });
 
 test('startup replay cannot overwrite newer facts or erase archived chat summaries', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'jinbao-memory-replay-'));
+  const dir = await mkdtempTracked(join(tmpdir(), 'jinbao-memory-replay-'));
   const original = createGameMemory(dir);
   const state = { ...initialOverlayState(), game: 'lol', match: 'replay', at: 20, gameSeconds: 600,
     chat: [{ role: 'user', text: '上一局要记住的问题' }], events: [{ time: '10:00', text: '已购买装备' }] };
@@ -100,7 +100,7 @@ test('startup replay cannot overwrite newer facts or erase archived chat summari
 });
 
 test('new match carries only explicit preferences, never previous chat, advice or equipment',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'jinbao-new-match-'));const memory=createGameMemory(dir);
+ const dir=await mkdtempTracked(join(tmpdir(),'jinbao-new-match-'));const memory=createGameMemory(dir);
  await memory.remember('lol','偏好前排','我喜欢前排','记住，我喜欢前排');
  await memory.snapshot({...initialOverlayState(),game:'lol',match:'old',at:1,me:{champion:'安妮',items:['旧装备']},chat:[{role:'assistant',text:'旧局建议'}],events:[{text:'旧局事件'}]});
  const fresh={...initialOverlayState(),game:'lol',match:'new',at:2,me:{champion:'布隆'}};await memory.snapshot(fresh);
@@ -116,3 +116,15 @@ test('historical lookup requires explicit user intent; current facts and prefere
  assert.equal((await tools.get('game_memory_query').execute({preferences:true})).preferences[0].fact,'喜欢前排');
  question='帮我复盘上一局';assert.equal((await tools.get('game_memory_query').execute({query:'装备'})).matches[0].match,'old');assert.equal(historyCalls,1);
 });
+
+// Fixtures used to stay in the OS temp directory after the run. Register every created
+// directory and delete them once, so a full suite does not slowly fill the system drive.
+const mkdtempImpl = mkdtemp;
+const tempDirs = [];
+after(async () => {
+  for (const dir of tempDirs) {
+    try { await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
+  }
+});
+const mkdtempTracked = async (prefix) => { const dir = await mkdtempImpl(prefix); tempDirs.push(dir); return dir; };
+

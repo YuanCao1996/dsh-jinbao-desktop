@@ -1,6 +1,6 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp} from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {gameModePrompt} from '../lib/game-mode-prompt.js';
@@ -8,6 +8,18 @@ import {buildGameChatMessage} from '../lib/chat-bridge.js';
 import {LOL_ADAPTER} from '../lib/adapters/lol.js';
 import {createGameMemory} from '../lib/game-memory.js';
 import {initialOverlayState,applyOverlayEvent} from '../../dsh-onboarding/overlay-state.mjs';
+
+// Fixtures used to stay in the OS temp directory after the run. Register every created
+// directory and delete them once, so a full suite does not slowly fill the system drive.
+const mkdtempImpl = mkdtemp;
+const tempDirs = [];
+after(async () => {
+  for (const dir of tempDirs) {
+    try { await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
+  }
+});
+const mkdtempTracked = async (prefix) => { const dir = await mkdtempImpl(prefix); tempDirs.push(dir); return dir; };
+
 
 test('chat receives Mayhem constraints even before any automatic coaching, and corrects prior classic advice',()=>{
   const prompt=buildGameChatMessage('怎么出装？',{current:{game:'lol',mode:'KIWI'}});
@@ -38,7 +50,7 @@ test('collector mode survives shared state, persistent memory, restart and conte
   applyOverlayEvent(state,{game:'lol',kind:'game_start',queue:'KIWI',t:1},'one');
   applyOverlayEvent(state,{game:'lol',kind:'state',state:{time:10},t:2},'one');
   assert.equal(state.mode,'KIWI');
-  const dir=await mkdtemp(join(tmpdir(),'jinbao-game-mode-'));
+  const dir=await mkdtempTracked(join(tmpdir(),'jinbao-game-mode-'));
   await createGameMemory(dir).snapshot({...state,broadcasts:Array.from({length:100},()=>({text:'资料'.repeat(4000)}))});
   const context=await createGameMemory(dir).context('lol','one');assert.equal(context.current.mode,'KIWI');
   applyOverlayEvent(state,{game:'lol',kind:'game_start',queue:'ARAM',t:3},'two');assert.equal(state.mode,'ARAM');

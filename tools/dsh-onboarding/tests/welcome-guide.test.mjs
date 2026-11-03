@@ -1,12 +1,24 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSetupServer } from '../server.mjs';
 
+// Fixtures used to stay in the OS temp directory after the run. Register every created
+// directory and delete them once, so a full suite does not slowly fill the system drive.
+const mkdtempImpl = mkdtemp;
+const tempDirs = [];
+after(async () => {
+  for (const dir of tempDirs) {
+    try { await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {}
+  }
+});
+const mkdtempTracked = async (prefix) => { const dir = await mkdtempImpl(prefix); tempDirs.push(dir); return dir; };
+
+
 async function setup(t){
-  const stateDir = await mkdtemp(join(tmpdir(), 'jinbao-welcome-'));
+  const stateDir = await mkdtempTracked(join(tmpdir(), 'jinbao-welcome-'));
   const values = new Map([['JINBAO_SERVICE_TOKEN', 'jc_' + 'a'.repeat(64)]]);
   const server = await createSetupServer({
     port: 0, stateDir,

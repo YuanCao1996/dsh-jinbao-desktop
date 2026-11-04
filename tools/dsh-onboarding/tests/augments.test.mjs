@@ -207,7 +207,7 @@ test('a panel the OCR never resolves leaves its text behind for diagnosis',()=>{
  const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
   // The real failure read the card's category labels instead of its name; the panel band
   // had text, so the blind snapshot must fire even though no card name resolved.
-  titleLines:[{text:'重 型',slot:0,x:500,y:430},{text:'力 量',slot:1,x:870,y:430},{text:'鞭 挞',slot:2,x:1240,y:430}],
+  titleLines:[{text:'重 型',slot:0,x:500,y:430},{text:'力 量',slot:1,x:870,y:430},{text:'功 能',slot:2,x:1240,y:430}],
   lines:[{text:'看不出的字',x:10,y:10},{text:'另一些字',x:20,y:30}]});
  for(let i=0;i<8;i+=1)observer.observe(frame());
  const blind=output.filter(event=>event.kind==='augment_capture_blind');
@@ -264,4 +264,30 @@ test('a round whose picked card was never read closes so the player can confirm'
  assert.match(view.confirmation.hint,/卡位未识别/);
  // The player knows which card they clicked, so name that position explicitly.
  assert.match(view.confirmation.hint,/第 1 张没认出来/);
+});
+
+test('a card the catalog has not learned yet still fills its slot and is reported',()=>{
+ // 屹立不倒 was on a real panel but missing from the shipped list, so the left card simply
+ // vanished and the pick landed on its neighbour. Unknown-but-plausible titles must count.
+ const output=[],observer=createAugmentObserver(['甲','乙','丙'],event=>output.push(event));
+ const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
+  titleLines:[{text:'屹立不倒',slot:0,x:600,y:430},{text:'甲',slot:1,x:900,y:430},{text:'乙',slot:2,x:1200,y:430}],lines:[]});
+ for(let i=0;i<3;i+=1)observer.observe(frame());
+ const offer=output.filter(event=>event.kind==='augment_offer').at(-1);
+ assert.ok(offer,'the panel must still be recognised');
+ assert.deepEqual(offer.options.map(option=>option.name),['屹立不倒','甲','乙']);
+ assert.deepEqual(offer.missingSlots,[]);
+ const unknown=output.filter(event=>event.kind==='augment_name_unknown');
+ assert.equal(unknown.length,1,'the catalog gap is reported exactly once');
+ assert.equal(unknown[0].name,'屹立不倒');
+ assert.equal(unknown[0].slot,0);
+});
+
+test('category labels never become unverified card names',()=>{
+ const output=[],observer=createAugmentObserver(['甲','乙','丙'],event=>output.push(event));
+ const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
+  titleLines:[{text:'重 型',slot:0,x:600,y:430},{text:'功 能',slot:1,x:900,y:430},{text:'复 原 力',slot:2,x:1200,y:430}],lines:[]});
+ for(let i=0;i<5;i+=1)observer.observe(frame());
+ assert.equal(output.filter(event=>event.kind==='augment_name_unknown').length,0);
+ assert.equal(output.filter(event=>event.kind==='augment_offer').length,0);
 });

@@ -11,13 +11,15 @@ export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4
   let current=[null,null,null],history=[],round=0,misses=0,slots=[[],[],[]],anchors=null;
   let pending=[null,null,null],suspended=null;
   let zeroStreak=0;
+// Catalog gaps are reported once per match so the shipped list can be extended.
+const unknownNames=new Set();
   let lastValidAt=null,lastCapturedAt=null;
   const clearPanel=()=>{current=[null,null,null];history=[];slots=[[],[],[]];anchors=null;pending=[null,null,null];misses=0;};
   const suspendPanel=at=>{suspended={current:[...current],history:[...history],round,slots:slots.map(s=>[...s]),anchors,at};clearPanel();};
   let diagnostic={recognized:0,method:'none'};
   return {
     status(){return {...diagnostic};},
-    reset(){clearPanel();round=0;suspended=null;lastValidAt=null;lastCapturedAt=null;zeroStreak=0;diagnostic={recognized:0,method:'none'};},
+    reset(){clearPanel();round=0;suspended=null;lastValidAt=null;lastCapturedAt=null;zeroStreak=0;unknownNames.clear();diagnostic={recognized:0,method:'none'};},
     observe(frame){
       if(!frame?.foreground || !frame.available || frame.panelOccluded===true){pending=[null,null,null];diagnostic={recognized:0,method:frame?.method??'none',...(frame?.panelOccluded?{reason:'scoreboard_visible'}:{})};return;}
       const at=now();
@@ -46,7 +48,26 @@ export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4
         const band=found.filter(line=>line.source==='full'&&Math.abs(line.y-seed.y)<frame.height*0.07).sort((a,b)=>a.x-b.x).filter((line,i,all)=>!all.slice(0,i).some(old=>old.name===line.name&&Math.abs(old.x-line.x)<frame.width*0.07));
         if(band.length===3&&new Set(band.map(line=>line.name)).size===3&&band[1].x-band[0].x>frame.width*0.12&&band[2].x-band[1].x>frame.width*0.12){anchors=band.map(line=>({x:line.x/frame.width,y:line.y/frame.height}));break;}
       }
-      const titles=found.filter(line=>line.source==='title'&&Number.isInteger(line.slot)&&line.slot>=0&&line.slot<3);
+      // The catalog is hand-maintained, so an augment it has not learned yet used to vanish
+      // from the panel: 屹立不倒 was on a real panel and missing from the list, which showed up
+      // as "the left card was never read" and shifted the pick onto its neighbour. Keep title
+      // text that looks like a card name as an unverified candidate and report the gap once.
+      // Category labels sit under every card name and would otherwise pass as unverified names.
+      const LABELS=new Set(['重型','力量','速度','功能','复原力','伤害','法术','生命','攻击','防御','综合','辅助','护盾','冷却','暴击','移动','韧性','鞭挞','护甲','魔抗','金币','治疗','减速','加速','持续','叠加']);
+      const unverified=[];
+      for(const line of lines){
+       if(line.source!=='title'||!Number.isInteger(line.slot)||line.slot<0||line.slot>2)continue;
+       if(catalog.get(normalize(line.text)))continue;
+       const text=String(line.text??'').replace(/\s+/g,'');
+       if(!/^[\u4e00-\u9fa5]{2,8}$/.test(text)||LABELS.has(text))continue;
+       if(!unverified.some(row=>row.slot===line.slot&&row.name===text))unverified.push({...line,name:text,unverified:true});
+      }
+      for(const row of unverified){
+       if(unknownNames.has(row.name))continue;
+       unknownNames.add(row.name);
+       emit({kind:'augment_name_unknown',t:at,name:row.name,slot:row.slot,method:frame.method??'full'});
+      }
+      const titles=[...found.filter(line=>line.source==='title'&&Number.isInteger(line.slot)&&line.slot>=0&&line.slot<3),...unverified];
       const candidates=[0,1,2].map(slot=>{
         const local=[...new Set(titles.filter(line=>line.slot===slot).map(line=>line.name))];
         if(local.length)return local.length===1?local[0]:null;

@@ -91,7 +91,7 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <TextBlock x:Name="EventTicker" Foreground="#9CAABA" FontSize="11" TextTrimming="CharacterEllipsis" ToolTip="最新一条对局事件，随事件更新"/>
     </Border>
     <Button x:Name="LatestMessageButton" DockPanel.Dock="Bottom" Content="回到最新消息 ↓" FontSize="11" HorizontalAlignment="Center" Visibility="Collapsed" Margin="0,4"/>
-    <Border x:Name="AgentActivityPanel" DockPanel.Dock="Bottom" Visibility="Collapsed" BorderBrush="#34424F" BorderThickness="0,1,0,0" Margin="4,8,4,0" Padding="0,6,0,0">
+    <Border x:Name="AgentActivityPanel" DockPanel.Dock="Top" Visibility="Collapsed" BorderBrush="#34424F" BorderThickness="0,0,0,1" Margin="4,0,4,6" Padding="0,0,0,6">
      <DockPanel MaxHeight="180">
       <TextBlock DockPanel.Dock="Top" Text="智能体动态 · 实时" Foreground="#D6B278" FontSize="11" Margin="0,0,0,4"/>
       <Button x:Name="AgentActivityLatest" DockPanel.Dock="Bottom" Content="回到最新过程 ↓" FontSize="10" Padding="6,2" HorizontalAlignment="Center" Visibility="Collapsed"/>
@@ -106,16 +106,16 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      </StackPanel>
     </ScrollViewer>
     </DockPanel>
-    <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,6,0,0" Visibility="Collapsed">
+    <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,4,0,0" Visibility="Collapsed">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-     <TextBox x:Name="QuestionBox" Grid.Column="0" MaxLength="1000" MinHeight="34" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="7" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
+     <TextBox x:Name="QuestionBox" Grid.Column="0" MaxLength="1000" MinHeight="26" AcceptsReturn="False" TextWrapping="NoWrap" MaxHeight="26" Padding="5,3" FontSize="13" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
      <TextBlock x:Name="ComposerPlaceholder" Grid.Column="0" Text="问问教练 · Enter 发送" Foreground="#8E9DAE" FontSize="12" Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
      <StackPanel x:Name="ComposerActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="5,0,4,0">
       <Button x:Name="TeamModeButton" Content="个人" FontSize="11" Padding="6,2" ToolTip="切换个人与队伍聊天" Visibility="Collapsed"/>
       <Button x:Name="TeamManageButton" Content="队伍" FontSize="11" Padding="6,2" ToolTip="队伍管理" Visibility="Collapsed"/>
       <TextBlock x:Name="ChatStatusText" Foreground="#E7BE79" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="120" Margin="4,0,0,0" Visibility="Collapsed"/>
      </StackPanel>
-     <Button x:Name="SendButton" Grid.Column="2" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="48" FontWeight="SemiBold"/>
+     <Button x:Name="SendButton" Grid.Column="2" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="48" MinHeight="26" Padding="8,2" FontWeight="SemiBold"/>
     </Grid>
     <StackPanel x:Name="Footer" Grid.Row="5" Margin="0,8,0,0">
      <StackPanel x:Name="AppearancePanel" Visibility="Collapsed">

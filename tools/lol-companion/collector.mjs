@@ -69,7 +69,13 @@ const startCardWatch=offer=>{
   // a neighbouring card's name to the pick in a real match (see augment-map.mjs).
   const mapped=mapPickedSlot(options,result.picked);
   if(!mapped||mapped.missing){
-   if(running)log.append({kind:'augment_vision_slot_missing',roll:offer.roll??null,slot:result.picked,options:options.slice(0,3),gameTime:lastLiveState?.gameTime??gameTime??null});
+   // The pick happened but the offer never captured that card, so the name is unknown.
+   // Closing the round is what lets the overlay ask the player instead of losing the
+   // choice silently: an open, unconfirmed round raises no confirmation prompt at all.
+   if(running){
+    log.append({kind:'augment_vision_slot_missing',roll:offer.roll??null,slot:result.picked,options:options.slice(0,3),gameTime:lastLiveState?.gameTime??gameTime??null});
+    log.append({kind:'augment_offer_closed',roll:offer.roll??null,reason:'slot-unread',gameTime:lastLiveState?.gameTime??gameTime??null});
+   }
    return;
   }
   const name=mapped.name;

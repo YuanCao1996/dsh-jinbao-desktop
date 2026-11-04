@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp,mkdir,writeFile,appendFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { initialOverlayState,applyOverlayEvent,overlayView,createOverlayService } from '../overlay-state.mjs';
+import { initialOverlayState,applyOverlayEvent,overlayView,createOverlayService,createOverlayRouter } from '../overlay-state.mjs';
 import { createAugmentObserver } from '../../lol-companion/augment-observer.mjs';
 const row=(name,rank,extra={})=>({_type:'augments',champion:'黑暗之女 安妮',name,rank,tier:'T1',winRate:60,desc:'不能出现的效果详情',...extra});
 test('independent full-frame and title OCR speed a verified single-slot reroll without trusting stray tooltips',()=>{
@@ -244,4 +244,22 @@ test('empty frames with no panel do not raise a blind alarm',()=>{
  const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',titleLines:[],lines:[]});
  for(let i=0;i<12;i+=1)observer.observe(frame());
  assert.equal(output.filter(event=>event.kind==='augment_capture_blind').length,0);
+});
+
+test('a round whose picked card was never read closes so the player can confirm',()=>{
+ // Real match: the offer captured only slots 1 and 2, the player picked slot 0. Without a
+ // closed round the overlay raises no prompt at all, so the choice used to vanish silently.
+ const router=createOverlayRouter();
+ const now=Date.now(),t=now-6000;
+ const emit=e=>router.apply({game:'lol',match:'m1',...e},'replay');
+ emit({kind:'game_start',t,gameTime:120,me:{champion:'封魔剑魂',items:[]}});
+ emit({kind:'augment_offer',t:t+100,roll:3,missingSlots:[0],
+  options:[{slot:1,name:'尖端发明家'},{slot:2,name:'质变：棱彩阶'}]});
+ emit({kind:'augment_offer_closed',t:t+200,roll:3,reason:'slot-unread'});
+ emit({kind:'state',t:now-500,state:{time:600}});
+ const view=overlayView(router.state(),{rows:[]});
+ assert.ok(view.confirmation,'an unresolved round must ask the player');
+ assert.equal(view.confirmation.missing,1,'the prompt says one card was never read');
+ assert.deepEqual(view.confirmation.options.map(option=>option.name),['尖端发明家','质变：棱彩阶']);
+ assert.match(view.confirmation.hint,/卡位未识别/);
 });

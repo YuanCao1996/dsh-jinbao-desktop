@@ -64,6 +64,10 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
     <Grid x:Name="Header" Background="#01000000" Cursor="SizeAll">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock x:Name="TitleText" Text="金宝 · 游戏教练" Foreground="#F1F5F9" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" Margin="2,0,8,0" TextTrimming="CharacterEllipsis"/>
+     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+      <Ellipse x:Name="StatusDot" Width="7" Height="7" Fill="#4B5563" VerticalAlignment="Center"/>
+      <TextBlock x:Name="StatusText" Text="等待对局" Foreground="#94A3B8" FontSize="11" VerticalAlignment="Center" Margin="5,0,0,0" TextTrimming="CharacterEllipsis" MaxWidth="140" ToolTip="采集与模型状态"/>
+     </StackPanel>
      <Button x:Name="SettingsButton" Grid.Column="2" Style="{StaticResource WindowAction}" Content="&#xE713;" ToolTip="设置 · 显示模式、外观与快捷键"/>
      <Button x:Name="CollapseButton" Grid.Column="3" Style="{StaticResource WindowAction}" Content="&#xE921;" ToolTip="收起到屏幕右侧 · Ctrl+Alt+↓"/>
      <Button x:Name="CloseButton" Grid.Column="4" Style="{StaticResource WindowAction}" Content="&#xE8BB;" ToolTip="退出金宝悬浮窗"/>
@@ -102,19 +106,18 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      </StackPanel>
     </ScrollViewer>
     </DockPanel>
-    <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,8,0,0" Visibility="Collapsed">
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-     <StackPanel Grid.Row="0" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,4">
-      <Button x:Name="TeamModeButton" Content="个人" FontSize="11" Padding="8,3" ToolTip="切换个人与队伍聊天" Visibility="Collapsed"/>
-      <Button x:Name="TeamManageButton" Content="队伍管理" FontSize="11" Padding="8,3" Visibility="Collapsed"/>
-      <Button x:Name="SuggestButton" Content="推荐追问" FontSize="11" Padding="8,3" ToolTip="根据本局状态填入一个可回答的问题" Visibility="Collapsed"/>
-      <Button x:Name="ScreenButton" Content="看当前画面" FontSize="11" Padding="8,3" ToolTip="让教练调用画面查看工具后回答"/>
-      <TextBlock x:Name="ChatStatusText" Foreground="#E7BE79" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="280" Margin="8,0,0,0" Visibility="Collapsed"/>
+    <Grid x:Name="ChatPanel" Grid.Row="4" Margin="0,6,0,0" Visibility="Collapsed">
+     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+     <TextBox x:Name="QuestionBox" Grid.Column="0" MaxLength="1000" MinHeight="34" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="7" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
+     <TextBlock x:Name="ComposerPlaceholder" Grid.Column="0" Text="问问教练 · Enter 发送" Foreground="#8E9DAE" FontSize="12" Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="5,0,4,0">
+      <Button x:Name="TeamModeButton" Content="个人" FontSize="11" Padding="6,2" ToolTip="切换个人与队伍聊天" Visibility="Collapsed"/>
+      <Button x:Name="TeamManageButton" Content="队伍" FontSize="11" Padding="6,2" ToolTip="队伍管理" Visibility="Collapsed"/>
+      <Button x:Name="SuggestButton" Content="追问" FontSize="11" Padding="6,2" ToolTip="根据本局状态填入一个可回答的问题" Visibility="Collapsed"/>
+      <Button x:Name="ScreenButton" Content="看画面" FontSize="11" Padding="6,2" ToolTip="让教练调用画面查看工具后回答"/>
+      <TextBlock x:Name="ChatStatusText" Foreground="#E7BE79" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="120" Margin="4,0,0,0" Visibility="Collapsed"/>
      </StackPanel>
-     <TextBox x:Name="QuestionBox" Grid.Row="1" MaxLength="1000" MinHeight="39" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="8" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
-     <TextBlock x:Name="ComposerPlaceholder" Grid.Row="1" Text="问问教练 · Enter 发送" Foreground="#8E9DAE" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
-     <Button x:Name="SendButton" Grid.Row="1" Grid.Column="1" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="52" FontWeight="SemiBold"/>
+     <Button x:Name="SendButton" Grid.Column="2" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="48" FontWeight="SemiBold"/>
     </Grid>
     <StackPanel x:Name="Footer" Grid.Row="5" Margin="0,8,0,0">
      <StackPanel x:Name="AppearancePanel" Visibility="Collapsed">
@@ -335,7 +338,11 @@ function Add-PlayerTableRow($values,[bool]$heading,[int]$index) {
  if(!$heading -and $index % 2 -eq 0){$border.Background='#1829364E'}
  $border.Child=$grid;$controls.PlayersTable.Children.Add($border) | Out-Null
 }
+# 底部那行操作提示只在刚启动时有用，几秒后收起，把高度让给内容。
+function Hide-OverlayHint { if($controls.HintText){$controls.HintText.Visibility='Collapsed'} }
+
 function Update-Page {
+ if(!$script:scrollFollow){$script:scrollFollow=@{}};
  $scroll=$controls.PageScroll
  $samePage=$script:renderedTab -eq $script:tab
  $offset=$scroll.VerticalOffset
@@ -897,7 +904,7 @@ try{
     $script:snapshot=[pscustomobject]@{match='ui-test';suggestedQuestion='这轮海克斯怎么选？';chatRows=@(@{role='user';origin='phone';text='怎么打？'},@{role='assistant';text=$fullAnswer});chat='怎么打？'+$fullAnswer;keywords=@()}
     Set-Tab 'chat';$window.UpdateLayout()
     $script:testResult.chatBubbles=$controls.RichContent.Visibility -eq 'Visible' -and $controls.RichContent.Children.Count -eq 2
-    $script:testResult.phoneMessageSource=$controls.RichContent.Children[0].Child.Children[0].Text -eq '你 · 手机'
+    $script:testResult.phoneMessageSource=(@($controls.RichContent.Children[0].Child.Children[0].Children|Where-Object {$_.Text -eq '你 · 手机'}).Count -eq 1)
     $script:testResult.suggestionVisible=$controls.SuggestButton.Visibility -eq 'Visible' -and $controls.SuggestButton.ToolTip -eq '这轮海克斯怎么选？'
     $controls.SuggestButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.suggestionFillsInput=$controls.QuestionBox.Text -eq '这轮海克斯怎么选？'
@@ -933,8 +940,30 @@ try{
     $script:testResult.modeButtonInSettings=$null -eq $window.FindName('ModeButton') -and $settingsMenu.Items.Contains($modeMenu)
     $script:testExitChoice=$true;$controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.exitConfirmed=$script:exitConfirmations -ge 2
+    # 布局改造：状态点 / 元信息分栏 / 气泡时间 / 输入行内按钮 / 提示可收起 / 强化强调卡
+    $script:testResult.statusDotIdle=(Get-OverlayStatus ([pscustomobject]@{})).state -eq 'idle'
+    $script:testResult.statusDotPlaying=(Get-OverlayStatus ([pscustomobject]@{match='m';phase='InProgress'})).state -eq 'playing'
+    $script:testResult.statusDotBusy=(Get-OverlayStatus ([pscustomobject]@{match='m';phase='InProgress';status='正在生成…'})).state -eq 'busy'
+    $script:testResult.statusDotError=(Get-OverlayStatus ([pscustomobject]@{match='m';phase='InProgress';agentError='登录已失效'})).state -eq 'error'
+    $metaSample='对局 08:32 · 安妮 · Lv11 · 2/3/8 · 金币 1200'
+    $script:testResult.metaSplit=((Get-OverlayMetaHead $metaSample) -eq '对局 08:32 · 安妮 · Lv11') -and ((Get-OverlayMetaBadges $metaSample) -eq '2/3/8 · 金币 1200')
+    $script:testResult.bubbleTime=(Format-OverlayBubbleTime 1793717799000) -match '^\d{2}:\d{2}$'
+    $script:testResult.composerInline=($controls.ChatPanel.RowDefinitions.Count -eq 0) -and ($controls.ScreenButton.Parent.Parent -eq $controls.ChatPanel) -and ($controls.SendButton.Parent -eq $controls.ChatPanel)
+    Hide-OverlayHint;$script:testResult.hintCollapses=$controls.HintText.Visibility -eq 'Collapsed'
+    $threadFixture=[pscustomobject]@{game='lol';advice=$metaSample;thread=@([pscustomobject]@{role='assistant';origin='coach';text='首选珠光护手';at=1793717799000;dimension='augment'});chatRows=@()}
+    $saved=$script:snapshot;$script:snapshot=$threadFixture;Set-Tab 'advice';Update-OverlaySurface $true;$window.UpdateLayout()
+    $cards=@($controls.RichContent.Children|Where-Object {$_ -is [Windows.Controls.Border]})
+    $script:testResult.metaRowSplit=($controls.RichContent.Children.Count -gt 0) -and ($controls.RichContent.Children[0] -is [Windows.Controls.Grid])
+    $script:testResult.augmentAccentCard=($cards.Count -eq 1) -and ([string]$cards[0].BorderThickness -eq '3,1,1,1')
+    $script:snapshot=$saved;Update-OverlaySurface $true
     $script:testResult.closed=$script:closing
    });$testing.Start()
+  }
+  if(!$SelfTest){
+   $hintTimer=New-Object Windows.Threading.DispatcherTimer
+   $hintTimer.Interval=[TimeSpan]::FromSeconds(10)
+   $hintTimer.Add_Tick({$hintTimer.Stop();Hide-OverlayHint})
+   $hintTimer.Start()
   }
   $timer.Start();if(!$SelfTest){$pointerTimer.Start()}
   $window.ShowDialog() | Out-Null

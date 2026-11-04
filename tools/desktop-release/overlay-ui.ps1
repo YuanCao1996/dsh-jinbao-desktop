@@ -39,6 +39,43 @@ function Show-OverlayModeMenu {
  }
  $script:overlayModeMenu=$menu;$menu.PlacementTarget=$controls.SettingsButton;$menu.IsOpen=!$SelfTest
 }
+# 战况页顶部只留稳定信息，KDA 与金币是会变的经济数据，放到右侧小徽章里。
+function Get-OverlayMetaHead([string]$line){
+ if(!$line){return ''}
+ $keep=@($line -split ' · ' | Where-Object {$_ -notmatch '^\d+/\d+/\d+$' -and $_ -notmatch '^金币 '})
+ return ($keep -join ' · ')
+}
+function Get-OverlayMetaBadges([string]$line){
+ if(!$line){return ''}
+ $keep=@($line -split ' · ' | Where-Object {$_ -match '^\d+/\d+/\d+$' -or $_ -match '^金币 '})
+ return ($keep -join ' · ')
+}
+# 时间线里每条消息带上小时:分钟，回看历史时能分清新旧。
+function Format-OverlayBubbleTime($at){
+ try{$n=[int64]$at}catch{return ''}
+ if($n -le 0){return ''}
+ try{return [DateTimeOffset]::FromUnixTimeMilliseconds($n).LocalDateTime.ToString('HH:mm')}catch{return ''}
+}
+# 标题栏状态点：一眼看出在采集、在生成、还是没对局。
+function Get-OverlayStatus($snapshot){
+ if(!$snapshot){return [pscustomobject]@{state='idle';label='等待对局';color='#6B7280'}}
+ if($snapshot.agentError){return [pscustomobject]@{state='error';label='模型异常';color='#F87171'}}
+ if($snapshot.status){return [pscustomobject]@{state='busy';label=[string]$snapshot.status;color='#60A5FA'}}
+ if($snapshot.ended){return [pscustomobject]@{state='ended';label='对局结束';color='#6B7280'}}
+ $phase=[string]$snapshot.phase
+ if($snapshot.match -and $phase -eq 'InProgress'){return [pscustomobject]@{state='playing';label='采集中';color='#34D399'}}
+ if($snapshot.match -and $phase -eq 'ChampSelect'){return [pscustomobject]@{state='select';label='英雄选择';color='#A78BFA'}}
+ if($snapshot.match){return [pscustomobject]@{state='loading';label='加载中';color='#FBBF24'}}
+ return [pscustomobject]@{state='idle';label='等待对局';color='#6B7280'}
+}
+function Update-StatusDot {
+ if(-not $controls.StatusDot){return}
+ $s=Get-OverlayStatus $script:snapshot
+ $script:statusState=$s.state
+ try{$controls.StatusDot.Fill=New-OverlaySurfaceBrush $s.color}catch{}
+ if($controls.StatusText){$controls.StatusText.Text=$s.label;$controls.StatusText.ToolTip=('状态：'+$s.label)}
+}
+
 function Update-ChatJump {
  if(!$controls.LatestMessageButton){return}
  $scroll=$controls.PageScroll
@@ -48,6 +85,7 @@ function Update-ChatJump {
  $controls.LatestMessageButton.Visibility=if(($script:tab -eq 'advice' -or $script:tab -eq 'chat') -and $gap -gt 32){'Visible'}else{'Collapsed'}
 }
 function Update-OverlaySurface([bool]$force=$false){
+ Update-StatusDot
  if(!$controls.RichContent){return}
  Update-OverlayComposer
  $font=[double]$controls.FontSlider.Value
@@ -57,21 +95,49 @@ function Update-OverlaySurface([bool]$force=$false){
  $key=$script:tab+'|'+$font+'|'+$controls.OpacitySlider.Value+'|'+$controls.PageText.Text+'|'+(ConvertTo-Json -InputObject $rows -Compress -Depth 3)+'|'+(ConvertTo-Json -InputObject $thread -Compress -Depth 3)
  if($force -or $script:surfaceKey -ne $key){
   $script:surfaceKey=$key;$controls.RichContent.Children.Clear()
-  $bubbles=if($script:tab -eq 'advice'){ if($thread.Count){$thread}else{$rows} }else{ $rows }
+  # 单条消息时 PowerShell 会把数组摊平成单个对象，.Count 取不到，战况页就会退化成纯文本；强制成数组。
+  $bubbles=@(if($script:tab -eq 'advice'){ if($thread.Count){$thread}else{$rows} }else{ $rows })
   if($bubbles.Count){
    if($script:tab -eq 'advice'){
     $metaLine=([string]$controls.PageText.Text -split "`r?`n" | Where-Object {$_ -match '^对局 '} | Select-Object -First 1)
-    if($metaLine){$meta=New-OverlayLabel $metaLine 11 '#9CAABA';$meta.Margin='2,0,2,10';$controls.RichContent.Children.Add($meta)|Out-Null}
+    if($metaLine){
+     $metaGrid=New-Object Windows.Controls.Grid
+     $metaGrid.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
+     $metaGrid.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
+     $metaGrid.ColumnDefinitions[1].Width='Auto'
+     $metaHead=Get-OverlayMetaHead $metaLine;if(!$metaHead){$metaHead=$metaLine}
+     $metaText=New-OverlayLabel $metaHead 11 '#9CAABA';$metaText.VerticalAlignment='Center'
+     $metaGrid.Children.Add($metaText)|Out-Null
+     $badgeText=Get-OverlayMetaBadges $metaLine
+     if($badgeText){
+      $badge=New-OverlayLabel $badgeText 11 '#C6A46E';$badge.HorizontalAlignment='Right';$badge.VerticalAlignment='Center'
+      $badge.Padding='7,1';$badge.Background=New-OverlaySurfaceBrush '#1F2A36';$badge.Margin='8,0,0,0'
+      [Windows.Controls.Grid]::SetColumn($badge,1);$metaGrid.Children.Add($badge)|Out-Null
+     }
+     $metaGrid.Margin='2,0,2,8'
+     $controls.RichContent.Children.Add($metaGrid)|Out-Null
+    }
    }
    foreach($row in $bubbles){
-    $user=$row.role -eq 'user';$card=New-Object Windows.Controls.Border;$card.CornerRadius=10;$card.Padding='12,10';$card.Margin=if($user){'40,0,0,10'}else{'0,0,20,10'};$card.Background=New-OverlaySurfaceBrush $(if($user){'#3F6278'}else{'#293747'});$card.BorderBrush=if($user){'#354C58'}else{'#2B3642'};$card.BorderThickness=1
+    $user=$row.role -eq 'user'
+    # 强化/出装这类当下就要用的建议用左侧强调条标出来，和普通播报区分开。
+    $highlight=$row.dimension -eq 'augment'
+    $card=New-Object Windows.Controls.Border;$card.CornerRadius=10;$card.Padding='11,8'
+    $card.Margin=if($user){'40,0,0,8'}else{'0,0,20,8'}
+    $card.Background=New-OverlaySurfaceBrush $(if($highlight){'#2C2A22'}elseif($user){'#3F6278'}else{'#293747'})
+    $card.BorderBrush=if($highlight){'#E7BE79'}elseif($user){'#354C58'}else{'#2B3642'}
+    $card.BorderThickness=if($highlight){'3,1,1,1'}else{1}
     $column=New-Object Windows.Controls.StackPanel
     $speakerName=if($row.origin -eq 'team' -and $row.displayName){[string]$row.displayName}elseif($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
-    $speaker=New-OverlayLabel $speakerName 11 $(if($row.failed){'#F5AD91'}elseif($user){'#ACBFCE'}else{'#E7BE79'});$speaker.Margin='0,0,0,5';$speaker.FontWeight='SemiBold';$column.Children.Add($speaker)|Out-Null
+    $speakerColor=if($row.failed){'#F5AD91'}elseif($user){'#ACBFCE'}else{'#E7BE79'}
+    $head=New-Object Windows.Controls.DockPanel
+    $when=Format-OverlayBubbleTime $row.at
+    if($when){$time=New-OverlayLabel $when 10 '#7C8A99';[Windows.Controls.DockPanel]::SetDock($time,'Right');$time.VerticalAlignment='Center';$head.Children.Add($time)|Out-Null}
+    $speaker=New-OverlayLabel $speakerName 11 $speakerColor;$speaker.FontWeight='SemiBold';$head.Children.Add($speaker)|Out-Null
+    $head.Margin='0,0,0,4';$column.Children.Add($head)|Out-Null
     $body=New-OverlayLabel ([string]$row.text) $font '#EBF0F5';Set-HighlightedText $body ([string]$row.text);$column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
     $copyMenu=New-Object Windows.Controls.ContextMenu;$copyMenu.Background='#19212A';$copyMenu.Foreground='#E8EEF5';$copyItem=New-Object Windows.Controls.MenuItem;$copyItem.Header='复制这条消息';$copyItem.Tag=[string]$row.text;$copyItem.Add_Click({param($sender,$eventArgs) try{[Windows.Clipboard]::SetText([string]$sender.Tag)}catch{}});$copyMenu.Items.Add($copyItem)|Out-Null;$card.ContextMenu=$copyMenu
-   }
-  }elseif($script:tab -eq 'events'){
+   }  }elseif($script:tab -eq 'events'){
    foreach($line in ($controls.PageText.Text -split "`r?`n"|Where-Object {$_})){
     $row=New-Object Windows.Controls.Grid;$row.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition));$row.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition));$row.ColumnDefinitions[0].Width=58;$row.ColumnDefinitions[1].Width='*'
     $clock='';$value=$line;if($line -match '^(\d{2,3}:\d{2}|时间未知)\s+(.+)$'){$clock=$matches[1];$value=$matches[2]}

@@ -50,6 +50,7 @@ $script:subtitleIndex = 0
 $script:tab = 'advice'
 $script:renderedTab = $null
 $script:scrollPositions = @{}
+$script:scrollFollow = @{}
 $script:playbackQueue = New-Object 'Collections.Generic.List[object]'
 $script:seenPlayback = New-Object 'Collections.Generic.HashSet[string]'
 $script:seenPlaybackOrder = New-Object 'Collections.Generic.Queue[string]'
@@ -87,22 +88,7 @@ function Save-Frame([string]$name) {
   Write-Host "  saved $path"
 }
 
-$advice = @'
-对局 08:32 · 安妮 · Lv11 · 2/3/8 · 金币 1200
-
-先清完兵线再跟队友进场，保留控制技能，等对面交出关键位移后再接团。
-
-海克斯推荐 · 当前三选一
-1. 珠光护手 · 优先推荐
-2. 炼狱导管
-3. 尤里卡
-
-本局已选海克斯
-珠光护手
-
-装备提醒 · 阵亡后
-先补虚空之杖，对面锐雯有黑色切割者。
-'@
+$advice = '对局 08:32 · 安妮 · Lv11 · 2/3/8 · 金币 1200'
 
 $augments = @'
 英雄 Top10 海克斯 · 安妮
@@ -147,6 +133,13 @@ $script:snapshot = [pscustomobject]@{
   title = '金宝 · 英雄联盟'; summary = '安妮 · Lv11 · 2/3/8'; gameTime = '08:32'
   selfChampion = '安妮'; dead = $false; respawn = $null
   advice = $advice; augments = $augments; players = $players; equipment = ''; chat = ''
+  # 战况页的真实形态是一条时间线：教练播报 + 玩家提问，带时间与类型强调。
+  thread = @(
+    [pscustomobject]@{role='assistant';origin='coach';text='先清完兵线再跟队友进场，保留控制技能，等对面交出关键位移后再接团。';at=(Get-Date).AddMinutes(-3).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension='now'}
+    [pscustomobject]@{role='assistant';origin='coach';text='海克斯首选珠光护手：技能可暴击，和炼狱导管联动最稳。本局已选：珠光护手。';at=(Get-Date).AddMinutes(-2).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension='augment'}
+    [pscustomobject]@{role='user';origin='pc';text='对面锐雯有黑切，我下一件出什么？';at=(Get-Date).AddMinutes(-1).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension=''}
+    [pscustomobject]@{role='assistant';origin='coach';text='先补虚空之杖，锐雯的魔抗会被吃穿；下次回城再做法穿鞋。';at=(Get-Date).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension='build'}
+  )
   knowledgeStatus = ''; teamWinRates = '加权样本 · 我方 4/5｜敌方 5/5'
   playerRows = @(
     [pscustomobject]@{ side = '我'; champion = '安妮'; winRate = 58.4; winRateText = '58.4%'; tierText = 'T1' }
@@ -160,7 +153,7 @@ $script:snapshot = [pscustomobject]@{
     [pscustomobject]@{ side = '敌'; champion = '锤石'; winRate = 55.2; winRateText = '55.2%'; tierText = 'T2' }
     [pscustomobject]@{ side = '敌'; champion = '阿狸'; winRate = 52.1; winRateText = '52.1%'; tierText = 'T3' }
   )
-  confirmation = $null; playback = @(); events = ''; chatRows = @(); thread = @()
+  confirmation = $null; playback = @(); events = ''; chatRows = @()
   keywords = @('安妮'); status = ''; updatedAt = 0
 }
 
@@ -173,6 +166,7 @@ foreach ($entry in @(@('advice', '战况'), @('augments', '海克斯'), @('playe
   $controls.Tabs.Children.Add($button) | Out-Null
 }
 
+Hide-OverlayHint
 $window.Width = 580
 $window.Height = 600
 foreach ($pair in @(@('advice', 'advice'), @('augments', 'augments'), @('players', 'players'))) {

@@ -15,6 +15,7 @@ import {chatFailureMessage} from './chat-errors.mjs';
 import {suggestOverlayQuestion} from './chat-suggestion.mjs';
 import {adviceIsValid,createAdviceValidity} from '../dsh-coach-server/lib/lol-coaching-plan.js';
 import {eventWindow} from '../dsh-coach-server/lib/event-window.mjs';
+import {createCompanion} from '../dsh-coach-server/lib/companion.mjs';
 import {whoKilled,recordMultikill,settlePraise,PRAISE_ROLES} from './multikill-praise.mjs';
 import {champSelectPartnerText} from '../lol-companion/partner-index.mjs';
 import {createKnowledgeSearch} from './knowledge-search.mjs';
@@ -51,7 +52,7 @@ export function applyOverlayEvent(state, event, file, {continueStart=false}={}) 
   const at = eventTimestamp(event);
   if (event.broadcast) {
     if(at<state.matchStartedAt||(event.game&&state.game&&event.game!==state.game)||(event.match&&event.match!==state.match))return;
-    const reply = { at, text: text(event.broadcast), validity:event.validity ?? null,priority:Number.isInteger(event.priority)?Math.max(0,Math.min(2,event.priority)):0 };
+    const reply = { at, text: text(event.broadcast), validity:event.validity ?? null,priority:Number.isInteger(event.priority)?Math.max(0,Math.min(2,event.priority)):0,dimension:typeof event.dimension==='string'?event.dimension:'' };
     if (!state.broadcasts.some(r => r.at === at && r.text === reply.text)) {
       state.broadcasts.push(reply); state.broadcasts.sort((a, b) => a.at - b.at);
       state.broadcasts = state.broadcasts.slice(-12);
@@ -319,6 +320,10 @@ export function overlayView(state, knowledge = {}) {
   const fitting = validBroadcasts.filter(live).sort(byUrgency);
   const current = (fitting[0] ?? [...validBroadcasts].sort(byUrgency)[0])?.text || staleText || state.agentError || state.coachStatus?.label || (state.broadcasts.length?'局势已变化，正在更新针对性建议…':'等待进入游戏，检测到对局后自动生成策略建议。');
   const playbook=!state.ended&&state.augmentPlaybook?.owned===JSON.stringify([...state.ownedAugments].sort())&&state.augmentPlaybook.text!==current?'\n\n强化方案参考 · '+clock(state.augmentPlaybook.gameSeconds)+'\n'+state.augmentPlaybook.text:'';
+  // Only for the opening window of a match: a greeting must not linger all game.
+  const companionLine = state.companionLine && Date.now() - (Number(state.matchStartedAt) || 0) < 120000
+    ? String(state.companionLine)
+    : '';
   const augmentTitle='当前三选一 · '+(me.champion||'等待英雄')+(knowledge.loading?' · 刷新中…':'');
   const augmentBody=candidates.join('\n')+(offered.length<3?'\n已识别 '+offered.length+'/3 个位置，其余卡片继续识别中…':'');
   const equipmentUpdates=state.events.filter(e=>e.topic==='equipment').slice(-12).map(e=>`${e.time} ${e.text}`).join('\n');
@@ -343,7 +348,7 @@ export function overlayView(state, knowledge = {}) {
     // Cheap confirmation signal for the coach's pre-flight guard: it must decide whether
     // a turn is worth a context read without reading the context.
     ownedAugmentCount: state.ownedAugments.length,
-    advice: (state.game==='generic'?[me.genericState?.gameName||'游戏身份待核实',me.genericState?.gameMode,me.genericState?.roundState==='between'?'等待下一局':'当前窗口观察中']:['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:'']).filter(Boolean).join(' · ')+'\n\n'+current+playbook+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):'')+(partnerHint?'\n\n'+partnerHint:''),
+    advice: (state.game==='generic'?[me.genericState?.gameName||'游戏身份待核实',me.genericState?.gameMode,me.genericState?.roundState==='between'?'等待下一局':'当前窗口观察中']:['对局 '+clock(state.gameSeconds),me.champion,me.level!=null?'Lv'+me.level:'',me.k!=null?`${me.k}/${me.d??0}/${me.a??0}`:'',me.gold!=null?'金币 '+me.gold:'']).filter(Boolean).join(' · ')+'\n\n'+(companionLine?companionLine+'\n\n':'')+current+playbook+(state.game==='lol'&&offered.length?'\n\n海克斯推荐 · 当前三选一\n'+candidates.join('\n'):'')+(state.game==='lol'&&state.ownedAugments.length?'\n\n本局已选海克斯\n'+state.ownedAugments.join('、'):'')+(partnerHint?'\n\n'+partnerHint:''),
     equipment: '当前装备\n' + (own || '等待装备日志') + '\n\n推荐出装\n' + (state.equipment || builds.join('\n\n') || knowledge.message || '进入对局后自动检索并结合装备与海克斯更新建议。')+(!state.ended&&state.equipmentStatus?'\n'+state.equipmentStatus:'')+(state.equipmentAssumptions.length?'\n\n待确认的强化推测\n'+state.equipmentAssumptions.map(a=>`第${a.round}轮暂按 ${a.name} 考虑`).join('\n'):'')+(equipmentUpdates?'\n\n装备动态\n'+equipmentUpdates:''),
     augments: state.game==='wzry'?'王者荣耀常规对局没有海克斯强化。可在战况页查看建议，或通过聊天咨询当前局势。':
       (offered.length?augmentTitle+'\n按该英雄适配排名排序\n'+augmentBody+'\n\n':'')+'英雄 Top10 海克斯 · '+(me.champion||'等待英雄')+'\n'+(ranked.slice(0,10).map(augmentLine).join('\n')||knowledge.message||'正在查询英雄适配排名…')+'\n\n资料库推荐组合 · '+(me.champion||'等待英雄')+'\n'+(combinations.join('\n')||'暂无该英雄的组合记录')+
@@ -367,7 +372,7 @@ export function overlayView(state, knowledge = {}) {
    // player exchanged are merged into a single chronological stream, oldest first.
    thread: (() => {
     const turns = state.chat.map(r => ({ role: r.role, origin: r.origin ?? '', text: r.text, failed: r.failed === true, at: Number(r.at) || 0, kind: 'chat' }));
-    const spoken = state.broadcasts.map(b => ({ role: 'assistant', origin: 'coach', text: b.text, at: Number(b.at) || 0, kind: b.topic === 'praise' ? 'praise' : 'advice' }));
+    const spoken = state.broadcasts.map(b => ({ role: 'assistant', origin: 'coach', text: b.text, at: Number(b.at) || 0, kind: b.topic === 'praise' ? 'praise' : 'advice', dimension: b.dimension ?? '' }));
     return [...spoken, ...turns].filter(r => r.text).sort((a, b) => a.at - b.at).slice(-40);
    })(),
    // Events are too long to list here; the page keeps only the newest line and updates it.
@@ -384,6 +389,8 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   await mkdir(logs, { recursive: true });
   const router=createOverlayRouter(), offsets = new Map();
   const memory = createGameMemory(stateDir);
+ // Relationship state survives between matches; it only moves on recorded facts.
+ const companion = createCompanion({ stateDir });
   let state=router.state();
   // Praise tone follows the mentor the player actually picked. That setting lives in
   // the speech settings written by the same process tree, so it is read lazily and
@@ -567,6 +574,11 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
         if (observed) { await memory.record(observed,event,file,position); observedStates.add(observed); }
       }
       for (const observed of observedStates) await memory.snapshot(observed);
+ // One opening line per match, one result per finished match.
+ const startedEvent = pending.map(entry => entry.event).find(e => e?.kind === 'game_start' || e?.kind === 'match_start');
+ const endedEvent = pending.map(entry => entry.event).find(e => e?.kind === 'event' && e.name === 'GameEnd');
+ if (state?.match && startedEvent) state.companionLine = companion.touch({ game: state.game, match: state.match }) ?? null;
+ if (state?.match && endedEvent) companion.recordResult({ win: endedEvent.Result === 'Win', match: state.match });
       await memory.flush();
       state=router.state();
       for(const event of ambiguous)void runTiebreak(event);

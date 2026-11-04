@@ -21,7 +21,7 @@ export function augmentConfirmation(state,rows=[],now=Date.now(),{allowAssumed=f
  const missing=Math.max(0,3-current.length);
  return {id:augmentConfirmationId(state,round),
   round:round.id,title:'刚才选了哪个海克斯？',
-  hint:missing?`按英雄适配排名排列，只列出当前面板上的候选；还有 ${missing} 个卡位未识别，未列出的不计入已选。`:'按英雄适配排名排列，只列出当前面板上的候选；未确认前仅作推测。',
+  hint:missing?`按英雄适配排名排列，只列出当前面板上的候选；还有 ${missing} 个卡位未识别${Number.isInteger(round.unreadSlot)?`（你选的第 ${round.unreadSlot+1} 张没认出来）`:''}，未列出的不计入已选。`:'按英雄适配排名排列，只列出当前面板上的候选；未确认前仅作推测。',
   missing,
   options:names.map((name,i)=>({name,label:(i===0&&ranked.some(r=>r.name===name)?'优先推荐 · ':'')+name}))};
 }

@@ -74,7 +74,7 @@ const startCardWatch=offer=>{
    // choice silently: an open, unconfirmed round raises no confirmation prompt at all.
    if(running){
     log.append({kind:'augment_vision_slot_missing',roll:offer.roll??null,slot:result.picked,options:options.slice(0,3),gameTime:lastLiveState?.gameTime??gameTime??null});
-    log.append({kind:'augment_offer_closed',roll:offer.roll??null,reason:'slot-unread',gameTime:lastLiveState?.gameTime??gameTime??null});
+    log.append({kind:'augment_offer_closed',roll:offer.roll??null,reason:'slot-unread',slot:result.picked,gameTime:lastLiveState?.gameTime??gameTime??null});
    }
    return;
   }

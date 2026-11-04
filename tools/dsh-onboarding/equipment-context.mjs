@@ -10,7 +10,10 @@ export function trackAugmentRound(state,event,previousOwned) {
     state.augmentRounds=state.augmentRounds.slice(-12);
   }
   if(event.kind==='augment_offer_closed'){
-    const round=state.augmentRounds.find(r=>r.id===(event.roll??state.offerRound));if(round){round.closed=true;round.closedAt=Number(event.t)||Date.now();}
+    const round=state.augmentRounds.find(r=>r.id===(event.roll??state.offerRound));if(round){round.closed=true;round.closedAt=Number(event.t)||Date.now();
+     // The player picked a card whose name never got read; remember which position so the
+     // confirmation prompt can say which one is unknown instead of only a count.
+     if(Number.isInteger(event.slot)&&event.slot>=0&&event.slot<3)round.unreadSlot=event.slot;}
   }
   if(event.kind==='augment_confirmation_dismissed'){const round=state.augmentRounds.find(r=>r.id===event.roll);if(round)round.dismissed=true;}
   if(event.kind==='augment_picked'&&event.who==='self'&&event.source==='countdown-default-confirmed'){

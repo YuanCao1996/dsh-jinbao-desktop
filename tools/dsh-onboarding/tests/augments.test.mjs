@@ -255,11 +255,13 @@ test('a round whose picked card was never read closes so the player can confirm'
  emit({kind:'game_start',t,gameTime:120,me:{champion:'封魔剑魂',items:[]}});
  emit({kind:'augment_offer',t:t+100,roll:3,missingSlots:[0],
   options:[{slot:1,name:'尖端发明家'},{slot:2,name:'质变：棱彩阶'}]});
- emit({kind:'augment_offer_closed',t:t+200,roll:3,reason:'slot-unread'});
+ emit({kind:'augment_offer_closed',t:t+200,roll:3,reason:'slot-unread',slot:0});
  emit({kind:'state',t:now-500,state:{time:600}});
  const view=overlayView(router.state(),{rows:[]});
  assert.ok(view.confirmation,'an unresolved round must ask the player');
  assert.equal(view.confirmation.missing,1,'the prompt says one card was never read');
  assert.deepEqual(view.confirmation.options.map(option=>option.name),['尖端发明家','质变：棱彩阶']);
  assert.match(view.confirmation.hint,/卡位未识别/);
+ // The player knows which card they clicked, so name that position explicitly.
+ assert.match(view.confirmation.hint,/第 1 张没认出来/);
 });

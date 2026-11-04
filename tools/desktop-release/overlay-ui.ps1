@@ -193,15 +193,16 @@ function Update-OverlaySurface([bool]$force=$false){
     $card.BorderThickness=if($highlight){'2,0,0,1'}else{'0,0,0,1'}
     $grid=New-Object Windows.Controls.Grid
     $grid.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
-    $grid.ColumnDefinitions[0].Width=48
+    $grid.ColumnDefinitions[0].Width=62
     $grid.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
     # 左列：上面时间、下面两字类别。
     $gutter=New-Object Windows.Controls.StackPanel;$gutter.Margin='0,0,8,0'
     $when=Format-OverlayBubbleTime $row.at
-    $timeText=New-OverlayLabel $(if($when){$when}else{'--:--'}) 10 '#63727F'
+    $timeText=New-OverlayLabel $(if($when){$when}else{'--:--'}) ([Math]::Max(10,$font-3)) '#63727F'
     $gutter.Children.Add($timeText)|Out-Null
     foreach($tagInfo in @($category.tags)){
-     $tag=New-OverlayLabel $tagInfo.label 10 $tagInfo.color;$tag.FontWeight='SemiBold'
+     # 标签比正文还大一点，扫一眼就能看清。
+     $tag=New-OverlayLabel $tagInfo.label ([Math]::Max(13,$font+1)) $tagInfo.color;$tag.FontWeight='SemiBold'
      $gutter.Children.Add($tag)|Out-Null
     }
     $grid.Children.Add($gutter)|Out-Null

@@ -212,6 +212,16 @@ function Set-Interaction([bool]$enabled){
  $controls.HintText.Text=if($enabled){'右下角缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 恢复穿透'}else{'右下角拖动缩放 · Ctrl+滚轮调整正文 · Ctrl+Alt+J 输入问题'}
  Set-PointerMode $false
 }
+# 透明窗口在改尺寸后偶尔保留上一帧（残影、卡顿一下）：改完尺寸立刻重排并强制重绘。
+function Update-OverlayRedraw {
+ try{
+  $window.UpdateLayout()
+  if($controls.MainBorder){$controls.MainBorder.InvalidateVisual();$controls.MainBorder.UpdateLayout()}
+  if($window.Content){$window.Content.InvalidateVisual();$window.Content.UpdateLayout()}
+  $window.InvalidateVisual()
+ }catch{}
+}
+
 function Set-Collapsed([bool]$on,[switch]$PreserveMode){
  if($script:collapsed -eq $on){return}
  if($on){
@@ -234,6 +244,7 @@ function Set-Collapsed([bool]$on,[switch]$PreserveMode){
  if($script:displayMode -and !$PreserveMode){if($on){$script:displayMode='silent'}else{$script:displayMode='large';$controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1;$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';Set-BackgroundOpacity};Save-DisplayMode}
  if(!$on -and $PreserveMode -and $script:displayMode -eq 'narrow'){$controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible';$window.ResizeMode='NoResize';Set-NarrowMetrics}
  Set-PointerMode $true
+ Update-OverlayRedraw
 }
 function Save-Preferences {
  $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value);bodyFontSize=[Math]::Round($controls.FontSlider.Value);showInCapture=[bool]$script:showInCapture;capturePreferenceVersion=2} | ConvertTo-Json -Compress

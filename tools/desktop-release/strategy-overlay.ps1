@@ -904,7 +904,7 @@ try{
     $script:snapshot=[pscustomobject]@{match='ui-test';suggestedQuestion='这轮海克斯怎么选？';chatRows=@(@{role='user';origin='phone';text='怎么打？'},@{role='assistant';text=$fullAnswer});chat='怎么打？'+$fullAnswer;keywords=@()}
     Set-Tab 'chat';$window.UpdateLayout()
     $script:testResult.chatBubbles=$controls.RichContent.Visibility -eq 'Visible' -and $controls.RichContent.Children.Count -eq 2
-    $script:testResult.phoneMessageSource=(@($controls.RichContent.Children[0].Child.Children[0].Children|Where-Object {$_.Text -eq '你 · 手机'}).Count -eq 1)
+    $script:testResult.phoneMessageSource=(@($controls.RichContent.Children[0].Child.Children[1].Children|Where-Object {$_.Text -eq '你 · 手机'}).Count -eq 1)
     # 推荐追问与看图都改成输入框里自动出现的提示问题，不再有按钮。
     Update-OverlayComposer
     $script:testResult.suggestionInPlaceholder=$controls.ComposerPlaceholder.Text -like '*这轮海克斯怎么选？*'
@@ -912,10 +912,10 @@ try{
     $script:snapshot.suggestedQuestion='';Update-OverlayComposer
     $script:testResult.screenQuestionFallback=$controls.ComposerPlaceholder.Text -like '*看看当前画面*'
     $script:snapshot.suggestedQuestion='这轮海克斯怎么选？';Update-OverlayComposer
-    $script:testResult.fullChatMessage=$controls.RichContent.Children[1].Child.Children[1].Text -eq $fullAnswer
+    $script:testResult.fullChatMessage=$controls.RichContent.Children[1].Child.Children[1].Children[1].Text -eq $fullAnswer
     $script:testResult.messageCopyAvailable=$controls.RichContent.Children[1].ContextMenu.Items[0].Tag -eq $fullAnswer
     $controls.FontSlider.Value=18
-    $script:testResult.richFontZoom=$controls.RichContent.Children[1].Child.Children[1].FontSize -eq 18
+    $script:testResult.richFontZoom=$controls.RichContent.Children[1].Child.Children[1].Children[1].FontSize -eq 18
     $controls.FontSlider.Value=14
     $script:job='ui-only';Update-OverlayComposer;$script:testResult.chatSendingFeedback=$controls.SendButton.Content -eq '思考中';$script:job=$null;Update-OverlayComposer
     $controls.PageScroll.ScrollToTop();$window.UpdateLayout();Update-ChatJump
@@ -952,11 +952,11 @@ try{
     $script:testResult.bubbleTime=(Format-OverlayBubbleTime 1793717799000) -match '^\d{2}:\d{2}$'
     $script:testResult.composerInline=($controls.ChatPanel.RowDefinitions.Count -eq 0) -and ($controls.ComposerActions.Parent -eq $controls.ChatPanel) -and ($controls.SendButton.Parent -eq $controls.ChatPanel)
     Hide-OverlayHint;$script:testResult.hintCollapses=$controls.HintText.Visibility -eq 'Collapsed'
-    $threadFixture=[pscustomobject]@{game='lol';advice=$metaSample;thread=@([pscustomobject]@{role='assistant';origin='coach';text='首选珠光护手';at=1793717799000;dimension='augment'});chatRows=@()}
+    $threadFixture=[pscustomobject]@{game='lol';advice=$metaSample;thread=@([pscustomobject]@{role='assistant';origin='coach';text='首选珠光护手';at=1793717799000;dimension='augment';stage='augment'});chatRows=@()}
     $saved=$script:snapshot;$script:snapshot=$threadFixture;Set-Tab 'advice';Update-OverlaySurface $true;$window.UpdateLayout()
     $cards=@($controls.RichContent.Children|Where-Object {$_ -is [Windows.Controls.Border]})
     $script:testResult.metaRowSplit=($controls.RichContent.Children.Count -gt 0) -and ($controls.RichContent.Children[0] -is [Windows.Controls.Grid])
-    $script:testResult.augmentAccentCard=($cards.Count -eq 1) -and ([string]$cards[0].BorderThickness -eq '2,0,0,1') -and ($null -eq $cards[0].Background -or $cards[0].Background.Color.A -eq 0)
+    $script:testResult.augmentAccentCard=($cards.Count -eq 1) -and ([string]$cards[0].BorderThickness -eq '2,0,0,1') -and ([string]$cards[0].Child.Children[0].Children[1].Text -eq '符文')
     # 连续同一说话人：名字只出现一次，正文三条都在。
     $groupFixture=[pscustomobject]@{game='lol';advice='对局 08:32 · 安妮';chatRows=@();thread=@(
      [pscustomobject]@{role='assistant';origin='coach';text='第一条';at=1793717799000;dimension=''},
@@ -965,12 +965,19 @@ try{
     $script:snapshot=$groupFixture;Set-Tab 'advice';Update-OverlaySurface $true;$window.UpdateLayout()
     $entries=@($controls.RichContent.Children|Where-Object {$_ -is [Windows.Controls.Border]})
     $names=0
-    foreach($entry in $entries){foreach($node in @($entry.Child.Children[0].Children)){if([string]$node.Text -eq '金宝'){$names++}}}
+    foreach($entry in $entries){foreach($node in @($entry.Child.Children[1].Children)){if([string]$node.Text -eq '金宝'){$names++}}}
     $script:testResult.consecutiveSpeakerGrouped=($entries.Count -eq 3) -and ($names -eq 1)
+    # 类别标签：优先看阶段，其次按措辞归类，颜色各不相同。
+    $script:testResult.categoryFromStage=((Get-OverlayCategory ([pscustomobject]@{stage='purchase';text='x'})).label -eq '出装') -and ((Get-OverlayCategory ([pscustomobject]@{stage='ace';text='x'})).label -eq '团战') -and ((Get-OverlayCategory ([pscustomobject]@{stage='augment';text='x'})).label -eq '符文')
+    $script:testResult.categoryFromText=(Get-OverlayCategory ([pscustomobject]@{stage='';text='先补一件法穿鞋再打团'})).label -eq '出装' -and (Get-OverlayCategory ([pscustomobject]@{stage='';text='我们阵容要换线'})).label -eq '阵容'
+    $script:testResult.categoryForUser=(Get-OverlayCategory ([pscustomobject]@{stage='';role='user';text='这波怎么打'})).label -eq '提问'
+    $a=(Get-OverlayCategory ([pscustomobject]@{stage='purchase';text='x'})).color;$b=(Get-OverlayCategory ([pscustomobject]@{stage='ace';text='x'})).color;$c=(Get-OverlayCategory ([pscustomobject]@{stage='augment';text='x'})).color
+    $script:testResult.categoryColorsDistinct=($a -ne $b) -and ($b -ne $c) -and ($a -ne $c)
     # 组内消息不再占一行时间：头部折叠，时间贴到正文末尾。
     # TextBlock.Text 不含通过 Inlines 追加的 Run，必须读 Inlines 才能验证时间戳。
-    $inlineText=(@($entries[1].Child.Children[1].Inlines)|ForEach-Object {$_.Text}) -join ''
-    $script:testResult.groupedTimeInline=($entries.Count -eq 3) -and ($entries[1].Child.Children[0].Visibility -eq 'Collapsed') -and ($entries[2].Child.Children[0].Visibility -eq 'Collapsed') -and ($inlineText -match '\d{2}:\d{2}\s*$')
+    # 时间恒在左列第一行；同一组的后续消息右侧只有正文（没有说话人行）。
+    $gutterTime=[string]$entries[1].Child.Children[0].Children[0].Text
+    $script:testResult.groupedTimeInGutter=($entries.Count -eq 3) -and ($gutterTime -match '\d{2}:\d{2}') -and (@($entries[1].Child.Children[1].Children).Count -eq 1)
     $script:snapshot=$saved;Update-OverlaySurface $true
     $script:testResult.closed=$script:closing
    });$testing.Start()

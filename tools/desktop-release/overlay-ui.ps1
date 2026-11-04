@@ -78,6 +78,46 @@ function Update-StatusDot {
  if($controls.StatusText){$controls.StatusText.Text=$s.label;$controls.StatusText.ToolTip=('状态：'+$s.label)}
 }
 
+# 每条消息左侧独立一列：上面时间、下面两字类别标签，颜色区分类别（像语法高亮）。
+# 类别固定两字，颜色区分（像语法高亮）；懒初始化，任何加载方式都能用。
+function Get-OverlayCategoryColor {
+ if(!$script:overlayCategoryColor){
+  $script:overlayCategoryColor=@{
+   '出装'='#E7BE79';'团战'='#F0876B';'符文'='#B79CF0';'进攻'='#7FD1A0';'撤退'='#7FB3D5';
+   '阵容'='#6FC2C9';'技能'='#E0B341';'胜率'='#8FBF7F';'局势'='#93A3B4';'开局'='#CBA86C';
+   '阵亡'='#E07A7A';'威胁'='#EF9C6B';'地图'='#9AA8B8';'夸奖'='#DFA0C8';'提问'='#8FB4D8';'回答'='#93A3B4'
+  }
+ }
+ return $script:overlayCategoryColor
+}
+function Get-OverlayCategory($row){
+ $stages=@{purchase='出装';enemyChange='威胁';augment='符文';postAugment='符文';death='阵亡';ultimate='技能';ace='团战';turret='进攻';inhib='进攻';objective='进攻';opening='开局';situation='局势'}
+ $stage=[string]$row.stage
+ $label=''
+ if($stage -and $stages.ContainsKey($stage)){$label=$stages[$stage]}
+ elseif($row.kind -eq 'praise'){$label='夸奖'}
+ elseif($row.dimension){$dims=@{build='出装';risk='威胁';augment='符文';map='地图';now='局势';plan='局势'};$dim=[string]$row.dimension;if($dims.ContainsKey($dim)){$label=$dims[$dim]}}
+ # 玩家自己的消息统一标"提问"，关键词归类只用于教练的播报。
+ if($row.role -eq 'user'){$label='提问'}
+ if(!$label){
+  $text=[string]$row.text
+  $rules=@(
+   @('出装','出装|装备|成装|出什么|补一件|法穿鞋|虚空之杖|大件'),
+   @('团战','开团|团战|打团|接团|集火|先手'),
+   @('符文','海克斯|强化|质变'),
+   @('撤退','撤退|先退|回城|后撤|别追'),
+   @('进攻','推塔|压线|越塔|推进|进攻'),
+   @('阵容','阵容|对线|换线'),
+   @('技能','技能|大招|连招|闪现|控制'),
+   @('胜率','胜率|强度|T0|T1')
+  )
+  foreach($rule in $rules){if($text -match $rule[1]){$label=$rule[0];break}}
+ }
+ if(!$label){$label=if($row.role -eq 'user'){'提问'}else{'回答'}}
+
+ $colors=Get-OverlayCategoryColor
+ [pscustomobject]@{label=$label;color=$colors[$label]}
+}
 function Update-ChatJump {
  if(!$controls.LatestMessageButton){return}
  $scroll=$controls.PageScroll
@@ -124,40 +164,44 @@ function Update-OverlaySurface([bool]$force=$false){
    $lastSpeaker=''
    foreach($row in $bubbles){
     $user=$row.role -eq 'user'
-    # 战况页是一条时间线，不是聊天气泡墙：去掉填充底色与圆角，只用细分隔线分隔，
-    # 强化相关建议用左侧金色竖线标出来。
-    $highlight=$row.dimension -eq 'augment'
+    $category=Get-OverlayCategory $row
+    # 符文是本局要当场用的，保留金色竖线强调。
+    $highlight=$category.label -eq '符文'
     $card=New-Object Windows.Controls.Border;$card.CornerRadius=0
-    $card.Padding=if($highlight){'9,2,0,10'}elseif($repeatSpeaker){'0,0,0,6'}else{'0,2,0,10'}
-    $card.Margin=if($user){'36,0,0,0'}else{'0,0,0,0'}
+    $card.Padding='0,2,0,8'
     $card.Background='Transparent'
     $card.BorderBrush=if($highlight){'#E7BE79'}else{'#1F2A36'}
-    $card.BorderThickness=if($highlight){'2,0,0,1'}elseif($repeatSpeaker){'0,0,0,0'}else{'0,0,0,1'}
+    $card.BorderThickness=if($highlight){'2,0,0,1'}else{'0,0,0,1'}
+    $grid=New-Object Windows.Controls.Grid
+    $grid.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
+    $grid.ColumnDefinitions[0].Width=48
+    $grid.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
+    # 左列：上面时间、下面两字类别。
+    $gutter=New-Object Windows.Controls.StackPanel;$gutter.Margin='0,0,8,0'
+    $when=Format-OverlayBubbleTime $row.at
+    $timeText=New-OverlayLabel $(if($when){$when}else{'--:--'}) 10 '#63727F'
+    $gutter.Children.Add($timeText)|Out-Null
+    $tag=New-OverlayLabel $category.label 10 $category.color;$tag.FontWeight='SemiBold'
+    $gutter.Children.Add($tag)|Out-Null
+    $grid.Children.Add($gutter)|Out-Null
+    # 右列：说话人（同一个人连续说话时只说一次）+ 正文。
     $column=New-Object Windows.Controls.StackPanel
     $speakerName=if($row.origin -eq 'team' -and $row.displayName){[string]$row.displayName}elseif($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
     $speakerColor=if($row.failed){'#F5AD91'}elseif($highlight){'#E7BE79'}else{'#8FA0B0'}
-    # 同一说话人连续出现时不重复名字；强化那条始终带名字，并且打断连续段。
     $repeatSpeaker=(-not $highlight) -and ($speakerName -eq $lastSpeaker)
     $lastSpeaker=if($highlight){''}else{$speakerName}
-    $head=New-Object Windows.Controls.DockPanel
-    $when=Format-OverlayBubbleTime $row.at
-    if($when){$time=New-OverlayLabel $when 10 '#7C8A99';[Windows.Controls.DockPanel]::SetDock($time,'Right');$time.VerticalAlignment='Center';$head.Children.Add($time)|Out-Null}
-    if(-not $repeatSpeaker){$speaker=New-OverlayLabel $speakerName 11 $speakerColor;$speaker.FontWeight='SemiBold';$head.Children.Add($speaker)|Out-Null}
-    # 同一组的后续消息不再占一行：整行折叠，时间挪到正文末尾。
-    if($repeatSpeaker){$head.Visibility='Collapsed'}
-    $head.Margin=if($repeatSpeaker){'0,0,0,3'}else{'0,0,0,4'};$column.Children.Add($head)|Out-Null
+    if(-not $repeatSpeaker){
+     $speaker=New-OverlayLabel $speakerName 11 $speakerColor;$speaker.FontWeight='SemiBold';$speaker.Margin='0,0,0,2'
+     $column.Children.Add($speaker)|Out-Null
+    }
     $body=New-OverlayLabel ([string]$row.text) $font $(if($user){'#CBD5E1'}elseif($row.failed){'#F5AD91'}else{'#EBF0F5'})
     Set-HighlightedText $body ([string]$row.text)
-    # 高亮会重建 Inlines，所以时间戳必须在它之后再附加。
-    if($repeatSpeaker -and $when){
-     $stamp=New-Object Windows.Documents.Run('  '+$when)
-     try{$stamp.Foreground=[Windows.Media.BrushConverter]::new().ConvertFromString('#66788A')}catch{}
-     try{$stamp.FontSize=[Math]::Max(10,$font-2)}catch{}
-     $body.Inlines.Add($stamp)
-    }
-    $column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
+    $column.Children.Add($body)|Out-Null
+    [Windows.Controls.Grid]::SetColumn($column,1);$grid.Children.Add($column)|Out-Null
+    $card.Child=$grid;$controls.RichContent.Children.Add($card)|Out-Null
     $copyMenu=New-Object Windows.Controls.ContextMenu;$copyMenu.Background='#19212A';$copyMenu.Foreground='#E8EEF5';$copyItem=New-Object Windows.Controls.MenuItem;$copyItem.Header='复制这条消息';$copyItem.Tag=[string]$row.text;$copyItem.Add_Click({param($sender,$eventArgs) try{[Windows.Clipboard]::SetText([string]$sender.Tag)}catch{}});$copyMenu.Items.Add($copyItem)|Out-Null;$card.ContextMenu=$copyMenu
-   }  }elseif($script:tab -eq 'events'){
+   }
+  }elseif($script:tab -eq 'events'){
    foreach($line in ($controls.PageText.Text -split "`r?`n"|Where-Object {$_})){
     $row=New-Object Windows.Controls.Grid;$row.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition));$row.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition));$row.ColumnDefinitions[0].Width=58;$row.ColumnDefinitions[1].Width='*'
     $clock='';$value=$line;if($line -match '^(\d{2,3}:\d{2}|时间未知)\s+(.+)$'){$clock=$matches[1];$value=$matches[2]}

@@ -52,7 +52,7 @@ export function applyOverlayEvent(state, event, file, {continueStart=false}={}) 
   const at = eventTimestamp(event);
   if (event.broadcast) {
     if(at<state.matchStartedAt||(event.game&&state.game&&event.game!==state.game)||(event.match&&event.match!==state.match))return;
-    const reply = { at, text: text(event.broadcast), validity:event.validity ?? null,priority:Number.isInteger(event.priority)?Math.max(0,Math.min(2,event.priority)):0,dimension:typeof event.dimension==='string'?event.dimension:'' };
+    const reply = { at, text: text(event.broadcast), validity:event.validity ?? null,priority:Number.isInteger(event.priority)?Math.max(0,Math.min(2,event.priority)):0,dimension:typeof event.dimension==='string'?event.dimension:'',stage:typeof event.key==='string'?event.key:'' };
     if (!state.broadcasts.some(r => r.at === at && r.text === reply.text)) {
       state.broadcasts.push(reply); state.broadcasts.sort((a, b) => a.at - b.at);
       state.broadcasts = state.broadcasts.slice(-12);
@@ -372,7 +372,7 @@ export function overlayView(state, knowledge = {}) {
    // player exchanged are merged into a single chronological stream, oldest first.
    thread: (() => {
     const turns = state.chat.map(r => ({ role: r.role, origin: r.origin ?? '', text: r.text, failed: r.failed === true, at: Number(r.at) || 0, kind: 'chat' }));
-    const spoken = state.broadcasts.map(b => ({ role: 'assistant', origin: 'coach', text: b.text, at: Number(b.at) || 0, kind: b.topic === 'praise' ? 'praise' : 'advice', dimension: b.dimension ?? '' }));
+    const spoken = state.broadcasts.map(b => ({ role: 'assistant', origin: 'coach', text: b.text, at: Number(b.at) || 0, kind: b.topic === 'praise' ? 'praise' : 'advice', dimension: b.dimension ?? '', stage: b.stage ?? '' }));
     return [...spoken, ...turns].filter(r => r.text).sort((a, b) => a.at - b.at).slice(-40);
    })(),
    // Events are too long to list here; the page keeps only the newest line and updates it.

@@ -128,11 +128,11 @@ function Update-OverlaySurface([bool]$force=$false){
     # 强化相关建议用左侧金色竖线标出来。
     $highlight=$row.dimension -eq 'augment'
     $card=New-Object Windows.Controls.Border;$card.CornerRadius=0
-    $card.Padding=if($highlight){'9,2,0,10'}elseif($repeatSpeaker){'0,0,0,8'}else{'0,2,0,10'}
+    $card.Padding=if($highlight){'9,2,0,10'}elseif($repeatSpeaker){'0,0,0,6'}else{'0,2,0,10'}
     $card.Margin=if($user){'36,0,0,0'}else{'0,0,0,0'}
     $card.Background='Transparent'
     $card.BorderBrush=if($highlight){'#E7BE79'}else{'#1F2A36'}
-    $card.BorderThickness=if($highlight){'2,0,0,1'}else{'0,0,0,1'}
+    $card.BorderThickness=if($highlight){'2,0,0,1'}elseif($repeatSpeaker){'0,0,0,0'}else{'0,0,0,1'}
     $column=New-Object Windows.Controls.StackPanel
     $speakerName=if($row.origin -eq 'team' -and $row.displayName){[string]$row.displayName}elseif($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
     $speakerColor=if($row.failed){'#F5AD91'}elseif($highlight){'#E7BE79'}else{'#8FA0B0'}
@@ -143,8 +143,19 @@ function Update-OverlaySurface([bool]$force=$false){
     $when=Format-OverlayBubbleTime $row.at
     if($when){$time=New-OverlayLabel $when 10 '#7C8A99';[Windows.Controls.DockPanel]::SetDock($time,'Right');$time.VerticalAlignment='Center';$head.Children.Add($time)|Out-Null}
     if(-not $repeatSpeaker){$speaker=New-OverlayLabel $speakerName 11 $speakerColor;$speaker.FontWeight='SemiBold';$head.Children.Add($speaker)|Out-Null}
+    # 同一组的后续消息不再占一行：整行折叠，时间挪到正文末尾。
+    if($repeatSpeaker){$head.Visibility='Collapsed'}
     $head.Margin=if($repeatSpeaker){'0,0,0,3'}else{'0,0,0,4'};$column.Children.Add($head)|Out-Null
-    $body=New-OverlayLabel ([string]$row.text) $font $(if($user){'#CBD5E1'}elseif($row.failed){'#F5AD91'}else{'#EBF0F5'});Set-HighlightedText $body ([string]$row.text);$column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
+    $body=New-OverlayLabel ([string]$row.text) $font $(if($user){'#CBD5E1'}elseif($row.failed){'#F5AD91'}else{'#EBF0F5'})
+    Set-HighlightedText $body ([string]$row.text)
+    # 高亮会重建 Inlines，所以时间戳必须在它之后再附加。
+    if($repeatSpeaker -and $when){
+     $stamp=New-Object Windows.Documents.Run('  '+$when)
+     try{$stamp.Foreground=[Windows.Media.BrushConverter]::new().ConvertFromString('#66788A')}catch{}
+     try{$stamp.FontSize=[Math]::Max(10,$font-2)}catch{}
+     $body.Inlines.Add($stamp)
+    }
+    $column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
     $copyMenu=New-Object Windows.Controls.ContextMenu;$copyMenu.Background='#19212A';$copyMenu.Foreground='#E8EEF5';$copyItem=New-Object Windows.Controls.MenuItem;$copyItem.Header='复制这条消息';$copyItem.Tag=[string]$row.text;$copyItem.Add_Click({param($sender,$eventArgs) try{[Windows.Clipboard]::SetText([string]$sender.Tag)}catch{}});$copyMenu.Items.Add($copyItem)|Out-Null;$card.ContextMenu=$copyMenu
    }  }elseif($script:tab -eq 'events'){
    foreach($line in ($controls.PageText.Text -split "`r?`n"|Where-Object {$_})){

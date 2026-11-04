@@ -967,6 +967,10 @@ try{
     $names=0
     foreach($entry in $entries){foreach($node in @($entry.Child.Children[0].Children)){if([string]$node.Text -eq '金宝'){$names++}}}
     $script:testResult.consecutiveSpeakerGrouped=($entries.Count -eq 3) -and ($names -eq 1)
+    # 组内消息不再占一行时间：头部折叠，时间贴到正文末尾。
+    # TextBlock.Text 不含通过 Inlines 追加的 Run，必须读 Inlines 才能验证时间戳。
+    $inlineText=(@($entries[1].Child.Children[1].Inlines)|ForEach-Object {$_.Text}) -join ''
+    $script:testResult.groupedTimeInline=($entries.Count -eq 3) -and ($entries[1].Child.Children[0].Visibility -eq 'Collapsed') -and ($entries[2].Child.Children[0].Visibility -eq 'Collapsed') -and ($inlineText -match '\d{2}:\d{2}\s*$')
     $script:snapshot=$saved;Update-OverlaySurface $true
     $script:testResult.closed=$script:closing
    });$testing.Start()

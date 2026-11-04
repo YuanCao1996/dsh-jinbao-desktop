@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readdir,utimes,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readdir,utimes,rm,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {pruneEventLogs} from '../eventlog.mjs';
+import {pruneEventLogs,pruneCaptureFrames} from '../eventlog.mjs';
 
 // Ten days of play left 59 match logs and 160MB in the state folder because nothing ever
 // removed them. The collector now prunes at start-up; these pin the rules.
@@ -54,4 +54,26 @@ test('a fresh short log list is left untouched', async (t) => {
 test('a missing folder is not an error', () => {
   const result = pruneEventLogs(join(tmpdir(), 'jinbao-no-such-folder-' + process.pid));
   assert.deepEqual(result.removed, []);
+});
+
+test('old frame folders are pruned but the newest and the archive stay', async (t) => {
+ // Frame evidence folders had the same no-cleanup problem as the match logs.
+ const dir = await mkdtemp(join(tmpdir(), 'jinbao-frames-'));
+ t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
+ const names = [];
+ for (let i = 0; i < 8; i += 1) {
+   const name = 'card-watch-' + (1000 + i) + '-picked-1';
+   await mkdir(join(dir, name));
+   await writeFile(join(dir, name, 'baseline.png'), 'x');
+   const at = new Date(Date.now() - (8 - i) * 60 * 1000);
+   await utimes(join(dir, name), at, at);
+   names.push(name);
+ }
+ await mkdir(join(dir, 'card-watch-archive-match1'));
+ const result = pruneCaptureFrames(dir, { maxDirs: 3 });
+ assert.equal(result.removed.length, 5);
+ const left = (await readdir(dir)).filter((name) => name.startsWith('card-watch-'));
+ assert.ok(left.includes('card-watch-1007-picked-1'), 'the newest folder must survive');
+ assert.ok(left.includes('card-watch-archive-match1'), 'a named archive is never touched');
+ assert.equal(left.length, 4);
 });

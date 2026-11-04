@@ -5,6 +5,27 @@
 // 文件名前缀 lol- 是第二道保险(行内 game 优先)。
 import { appendFileSync, mkdirSync, existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { rmSync } from "node:fs";
+
+// Same story as the match logs: the frame evidence folders (card-watch-*) were written for every
+// uncertain round and never removed. They only matter while debugging the round that just
+// happened, so keep a short window and drop the rest at collector start-up.
+export function pruneCaptureFrames(stateRoot, {maxDirs = 20, maxAgeDays = 7, now = Date.now()} = {}) {
+  let names = [];
+  try { names = readdirSync(stateRoot).filter((name) => name.startsWith("card-watch-") && name !== "card-watch-archive-match1"); } catch { return {kept: 0, removed: []}; }
+  const rows = [];
+  for (const name of names) {
+    try { const info = statSync(join(stateRoot, name)); if (info.isDirectory()) rows.push({name, at: info.mtimeMs}); } catch {}
+  }
+  rows.sort((a, b) => b.at - a.at);
+  const cutoff = now - maxAgeDays * 24 * 60 * 60 * 1000;
+  const removed = [];
+  rows.forEach((row, index) => {
+    if (index < Math.max(1, maxDirs) && row.at >= cutoff) return;
+    try { rmSync(join(stateRoot, row.name), {recursive: true, force: true}); removed.push(row.name); } catch {}
+  });
+  return {kept: rows.length - removed.length, removed};
+}
 
 // Match logs were never pruned: ten days of play left 59 files and 160MB in the state folder.
 // Keep the recent ones (the ones a coach session or a bug report actually needs) and drop the

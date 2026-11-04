@@ -19,12 +19,14 @@ function Update-OverlayComposer {
  }
  $controls.SendButton.Content=if($script:job){'思考中'}else{'发送'}
  $controls.SendButton.ToolTip=if($script:job){'教练正在回复，请稍候'}else{'Enter 发送；Shift+Enter 换行'}
+ # 推荐追问不再做成按钮：直接作为输入框里的提示问题自动出现；没有具体建议时用"看画面"兜底。
  $suggestion=[string]$script:snapshot.suggestedQuestion
- $controls.SuggestButton.Visibility=if($suggestion){'Visible'}else{'Collapsed'}
- $controls.SuggestButton.ToolTip=if($suggestion){$suggestion}else{'当前没有可用建议问题'}
- $controls.ScreenButton.IsEnabled=!!($script:snapshot.match -and !$script:snapshot.ended)
- $controls.ScreenButton.Visibility=if($teamMode){'Collapsed'}else{'Visible'}
- if($teamMode){$controls.SuggestButton.Visibility='Collapsed'}
+ if(!$teamMode -and !$suggestion -and $script:snapshot.match -and !$script:snapshot.ended){$suggestion='看看当前画面，我现在该注意什么？'}
+ $base=if($teamMode){'队伍消息 · @金宝 提问'}else{'问问教练 · Enter 发送'}
+ if($controls.ComposerPlaceholder){
+  $controls.ComposerPlaceholder.Text=if($teamMode -or !$suggestion){$base}else{$base+'　例如：'+$suggestion}
+  $controls.ComposerPlaceholder.ToolTip=$suggestion
+ }
  $progress=if($script:job){if($script:snapshot.status){[string]$script:snapshot.status}else{'教练正在分析…'}}else{''}
  $controls.ChatStatusText.Text=$progress
  if($teamMode){$progress=[string]$script:snapshot.teamChatStatus;$controls.ChatStatusText.Text=$progress}
@@ -168,17 +170,6 @@ function Update-OverlaySurface([bool]$force=$false){
  if($rich){$controls.PageText.Visibility='Collapsed'}
 }
 $controls.QuestionBox.Add_TextChanged({Update-OverlayComposer})
-[Windows.Controls.Grid]::SetRow($mic,1)
-$controls.SuggestButton.Add_Click({
- $suggestion=[string]$script:snapshot.suggestedQuestion
- if(!$suggestion){return}
- $controls.QuestionBox.Text=$suggestion;$controls.QuestionBox.Focus()|Out-Null
-})
-$controls.ScreenButton.Add_Click({
- if($script:job){return}
- $question=$controls.QuestionBox.Text.Trim()
- $controls.QuestionBox.Text=if($question){'请先查看当前游戏画面，再回答：'+$question}else{'请查看当前游戏画面，结合本局日志说出下一步最重要的决策。'}
- Send-Question
-})
+
 $controls.PageScroll.Add_ScrollChanged({Update-ChatJump})
 $controls.LatestMessageButton.Add_Click({$controls.PageScroll.ScrollToEnd()})

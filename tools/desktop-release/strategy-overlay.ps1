@@ -110,11 +110,9 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBox x:Name="QuestionBox" Grid.Column="0" MaxLength="1000" MinHeight="34" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="85" Padding="7" Background="#19212A" Foreground="#F1F5F9" BorderBrush="#394A59" ToolTip="Enter 发送；Shift+Enter 换行"/>
      <TextBlock x:Name="ComposerPlaceholder" Grid.Column="0" Text="问问教练 · Enter 发送" Foreground="#8E9DAE" FontSize="12" Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
-     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="5,0,4,0">
+     <StackPanel x:Name="ComposerActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="5,0,4,0">
       <Button x:Name="TeamModeButton" Content="个人" FontSize="11" Padding="6,2" ToolTip="切换个人与队伍聊天" Visibility="Collapsed"/>
       <Button x:Name="TeamManageButton" Content="队伍" FontSize="11" Padding="6,2" ToolTip="队伍管理" Visibility="Collapsed"/>
-      <Button x:Name="SuggestButton" Content="追问" FontSize="11" Padding="6,2" ToolTip="根据本局状态填入一个可回答的问题" Visibility="Collapsed"/>
-      <Button x:Name="ScreenButton" Content="看画面" FontSize="11" Padding="6,2" ToolTip="让教练调用画面查看工具后回答"/>
       <TextBlock x:Name="ChatStatusText" Foreground="#E7BE79" FontSize="11" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="120" Margin="4,0,0,0" Visibility="Collapsed"/>
      </StackPanel>
      <Button x:Name="SendButton" Grid.Column="2" Content="发送" Background="#CBA86C" Foreground="#151A20" BorderBrush="#E7BE79" MinWidth="48" FontWeight="SemiBold"/>
@@ -161,8 +159,10 @@ if(!$owned){$mutex.Dispose();Write-Output 'Jinbao strategy overlay is already ru
 $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleBall','BubbleBadge','BubbleBadgeText')){$controls[$name]=$window.FindName($name)}
-foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','EventTicker','EventTickerPanel','SuggestButton','ScreenButton','ChatStatusText','TeamModeButton','TeamManageButton')){$controls[$name]=$window.FindName($name)}
+foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','EventTicker','EventTickerPanel','ChatStatusText','TeamModeButton','TeamManageButton')){$controls[$name]=$window.FindName($name)}
 $script:scrollPositions=@{};$script:scrollFollow=@{}
+ # 布局改造新增的控件也必须显式注册，否则运行时拿到的是 $null（状态点会静默不更新）。
+foreach($name in @('StatusDot','StatusText','ComposerActions')){$controls[$name]=$window.FindName($name)}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
 foreach($name in @('ResizeGrip','AppearancePanel','FontSlider','FontText')){$controls[$name]=$window.FindName($name)}
@@ -905,11 +905,13 @@ try{
     Set-Tab 'chat';$window.UpdateLayout()
     $script:testResult.chatBubbles=$controls.RichContent.Visibility -eq 'Visible' -and $controls.RichContent.Children.Count -eq 2
     $script:testResult.phoneMessageSource=(@($controls.RichContent.Children[0].Child.Children[0].Children|Where-Object {$_.Text -eq '你 · 手机'}).Count -eq 1)
-    $script:testResult.suggestionVisible=$controls.SuggestButton.Visibility -eq 'Visible' -and $controls.SuggestButton.ToolTip -eq '这轮海克斯怎么选？'
-    $controls.SuggestButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
-    $script:testResult.suggestionFillsInput=$controls.QuestionBox.Text -eq '这轮海克斯怎么选？'
-    $controls.QuestionBox.Text=''
-    $script:testResult.screenActionReady=$controls.ScreenButton.IsEnabled -and [Windows.Controls.Grid]::GetRow($mic) -eq 1
+    # 推荐追问与看图都改成输入框里自动出现的提示问题，不再有按钮。
+    Update-OverlayComposer
+    $script:testResult.suggestionInPlaceholder=$controls.ComposerPlaceholder.Text -like '*这轮海克斯怎么选？*'
+    $script:testResult.noComposerButtons=($null -eq $window.FindName('SuggestButton')) -and ($null -eq $window.FindName('ScreenButton'))
+    $script:snapshot.suggestedQuestion='';Update-OverlayComposer
+    $script:testResult.screenQuestionFallback=$controls.ComposerPlaceholder.Text -like '*看看当前画面*'
+    $script:snapshot.suggestedQuestion='这轮海克斯怎么选？';Update-OverlayComposer
     $script:testResult.fullChatMessage=$controls.RichContent.Children[1].Child.Children[1].Text -eq $fullAnswer
     $script:testResult.messageCopyAvailable=$controls.RichContent.Children[1].ContextMenu.Items[0].Tag -eq $fullAnswer
     $controls.FontSlider.Value=18
@@ -948,7 +950,7 @@ try{
     $metaSample='对局 08:32 · 安妮 · Lv11 · 2/3/8 · 金币 1200'
     $script:testResult.metaSplit=((Get-OverlayMetaHead $metaSample) -eq '对局 08:32 · 安妮 · Lv11') -and ((Get-OverlayMetaBadges $metaSample) -eq '2/3/8 · 金币 1200')
     $script:testResult.bubbleTime=(Format-OverlayBubbleTime 1793717799000) -match '^\d{2}:\d{2}$'
-    $script:testResult.composerInline=($controls.ChatPanel.RowDefinitions.Count -eq 0) -and ($controls.ScreenButton.Parent.Parent -eq $controls.ChatPanel) -and ($controls.SendButton.Parent -eq $controls.ChatPanel)
+    $script:testResult.composerInline=($controls.ChatPanel.RowDefinitions.Count -eq 0) -and ($controls.ComposerActions.Parent -eq $controls.ChatPanel) -and ($controls.SendButton.Parent -eq $controls.ChatPanel)
     Hide-OverlayHint;$script:testResult.hintCollapses=$controls.HintText.Visibility -eq 'Collapsed'
     $threadFixture=[pscustomobject]@{game='lol';advice=$metaSample;thread=@([pscustomobject]@{role='assistant';origin='coach';text='首选珠光护手';at=1793717799000;dimension='augment'});chatRows=@()}
     $saved=$script:snapshot;$script:snapshot=$threadFixture;Set-Tab 'advice';Update-OverlaySurface $true;$window.UpdateLayout()

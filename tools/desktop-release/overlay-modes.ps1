@@ -141,9 +141,7 @@ $controls.NarrowClose.Add_Click({$window.Close()})
 $controls.NarrowMenu.Add_Click({$settingsMenu.PlacementTarget=$controls.NarrowMenu;$settingsMenu.IsOpen=$true})
 $controls.NarrowPanel.Add_PreviewMouseLeftButtonDown({param($s,$e) Start-Drag $s $e})
 $mic=New-Object Windows.Controls.Button;$mic.Content='语音';$mic.ToolTip='点击开始，最长20秒，识别后可编辑再发送；再次点击取消'
-$controls.ChatPanel.ColumnDefinitions.Add((New-Object Windows.Controls.ColumnDefinition))
-$controls.ChatPanel.ColumnDefinitions[2].Width=[Windows.GridLength]::Auto
-[Windows.Controls.Grid]::SetColumn($controls.SendButton,2);[Windows.Controls.Grid]::SetColumn($mic,1);$controls.ChatPanel.Children.Add($mic)|Out-Null
+[Windows.Controls.Grid]::SetColumn($controls.SendButton,2);$controls.ComposerActions.Children.Add($mic)|Out-Null
 $mic.Add_Click({
  if($script:speechJob){Stop-Job $script:speechJob;Remove-Job $script:speechJob -Force;$script:speechJob=$null;$mic.Content='语音';return}
  $script:speechJob=Start-Job -ScriptBlock {try{Add-Type -AssemblyName System.Speech;$info=[Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers()|Where-Object {$_.Culture.Name -eq 'zh-CN'}|Select-Object -First 1;if(!$info){throw 'Chinese recognizer unavailable'};$recognizer=[Speech.Recognition.SpeechRecognitionEngine]::new($info);try{$recognizer.LoadGrammar((New-Object Speech.Recognition.DictationGrammar));$recognizer.SetInputToDefaultAudioDevice();$result=$recognizer.Recognize([TimeSpan]::FromSeconds(20));@{text=[string]$result.Text}}finally{$recognizer.Dispose()}}catch{@{text=''}}}

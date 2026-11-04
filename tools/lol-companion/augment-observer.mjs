@@ -4,7 +4,9 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 const exec = promisify(execFile);
-const normalize = value => String(value??'').replace(/[\s:：!！·•,，。.]/g,'').replaceAll('亻卜','仆');
+// Punctuation is OCR noise, not part of the name: a real card read as "质变．棱彩阶" while
+// the catalogue wrote "质变：棱彩阶", which silently dropped the card from the panel.
+const normalize = value => String(value??'').replace(/[\s:：!！·•・．.。,，;；、—－-]/g,'').replaceAll('亻卜','仆');
 
 export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4000,maxBlindGapMs=15000}={}) {
   const catalog = new Map(names.map(name=>[normalize(name),name]));
@@ -58,7 +60,7 @@ const unknownNames=new Set();
       for(const line of lines){
        if(line.source!=='title'||!Number.isInteger(line.slot)||line.slot<0||line.slot>2)continue;
        if(catalog.get(normalize(line.text)))continue;
-       const text=String(line.text??'').replace(/\s+/g,'');
+       const text=normalize(line.text);
        if(!/^[\u4e00-\u9fa5]{2,8}$/.test(text)||LABELS.has(text))continue;
        if(!unverified.some(row=>row.slot===line.slot&&row.name===text))unverified.push({...line,name:text,unverified:true});
       }
@@ -69,6 +71,11 @@ const unknownNames=new Set();
       }
       const titles=[...found.filter(line=>line.source==='title'&&Number.isInteger(line.slot)&&line.slot>=0&&line.slot<3),...unverified];
       const candidates=[0,1,2].map(slot=>{
+        // A catalogue name always wins over an unverified guess: a merged label such as
+        // "速度功能" used to sit next to the real name in the same slot, which made the slot
+        // ambiguous and the whole panel unrecognisable. Unverified text only fills empty slots.
+        const verified=[...new Set(titles.filter(line=>line.slot===slot&&!line.unverified).map(line=>line.name))];
+        if(verified.length)return verified.length===1?verified[0]:null;
         const local=[...new Set(titles.filter(line=>line.slot===slot).map(line=>line.name))];
         if(local.length)return local.length===1?local[0]:null;
         if(!anchors)return null;

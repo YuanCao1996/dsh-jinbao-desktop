@@ -291,3 +291,28 @@ test('category labels never become unverified card names',()=>{
  assert.equal(output.filter(event=>event.kind==='augment_name_unknown').length,0);
  assert.equal(output.filter(event=>event.kind==='augment_offer').length,0);
 });
+
+test('OCR punctuation variants still match the catalogue',()=>{
+ // A real frame read "质 变 ． 棱 彩 阶" while the catalogue stores "质变：棱彩阶"; the dot
+ // used to break the lookup and drop that card from the panel.
+ const output=[],observer=createAugmentObserver(['质变：棱彩阶','甲','乙'],event=>output.push(event));
+ const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
+  titleLines:[{text:'质 变 ． 棱 彩 阶',slot:0,x:600,y:430},{text:'甲',slot:1,x:900,y:430},{text:'乙',slot:2,x:1200,y:430}],lines:[]});
+ for(let i=0;i<3;i+=1)observer.observe(frame());
+ const offer=output.filter(event=>event.kind==='augment_offer').at(-1);
+ assert.ok(offer);
+ assert.deepEqual(offer.options.map(option=>option.name),['质变：棱彩阶','甲','乙']);
+ assert.deepEqual(offer.missingSlots,[]);
+});
+
+test('a merged category label cannot make a readable slot ambiguous',()=>{
+ // Slot 1 read both its name and a merged label ("速度功能"). Counting both made the slot
+ // ambiguous and the whole panel unrecognisable, so the verified name must win.
+ const output=[],observer=createAugmentObserver(['尖端发明家','甲','乙'],event=>output.push(event));
+ const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
+  titleLines:[{text:'甲',slot:0,x:600,y:430},{text:'尖 端 发 明 家',slot:1,x:900,y:430},{text:'速 度 功 能',slot:1,x:905,y:465},{text:'乙',slot:2,x:1200,y:430}],lines:[]});
+ for(let i=0;i<3;i+=1)observer.observe(frame());
+ const offer=output.filter(event=>event.kind==='augment_offer').at(-1);
+ assert.ok(offer,'the panel must stay recognisable');
+ assert.deepEqual(offer.options.map(option=>option.name),['甲','尖端发明家','乙']);
+});

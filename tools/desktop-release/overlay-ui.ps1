@@ -42,7 +42,10 @@ function Show-OverlayModeMenu {
 function Update-ChatJump {
  if(!$controls.LatestMessageButton){return}
  $scroll=$controls.PageScroll
- $controls.LatestMessageButton.Visibility=if(($script:tab -eq 'advice' -or $script:tab -eq 'chat') -and $scroll.ScrollableHeight-$scroll.VerticalOffset -gt 32){'Visible'}else{'Collapsed'}
+ $gap=$scroll.ScrollableHeight-$scroll.VerticalOffset
+ # 记住每页是否停在底部：用户一旦上滑就不再自动跟随，回到底部则恢复。
+ if($script:scrollFollow){$script:scrollFollow[$script:tab]=$gap -le 24}
+ $controls.LatestMessageButton.Visibility=if(($script:tab -eq 'advice' -or $script:tab -eq 'chat') -and $gap -gt 32){'Visible'}else{'Collapsed'}
 }
 function Update-OverlaySurface([bool]$force=$false){
  if(!$controls.RichContent){return}

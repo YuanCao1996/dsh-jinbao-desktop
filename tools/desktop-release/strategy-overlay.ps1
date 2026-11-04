@@ -159,7 +159,7 @@ $window=[Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $controls=@{}
 foreach($name in @('MainBorder','OpacitySlider','OpacityText','Expanded','Header','TitleText','TimeText','SummaryText','LauncherText','ActionButton','Tabs','PageScroll','PageText','ChatPanel','QuestionBox','SendButton','Footer','HintText','SettingsButton','CollapseButton','CloseButton','Bubble','BubbleBall','BubbleBadge','BubbleBadgeText')){$controls[$name]=$window.FindName($name)}
 foreach($name in @('RichContent','ComposerPlaceholder','ModeButton','LatestMessageButton','EventTicker','EventTickerPanel','SuggestButton','ScreenButton','ChatStatusText','TeamModeButton','TeamManageButton')){$controls[$name]=$window.FindName($name)}
-$script:scrollPositions=@{}
+$script:scrollPositions=@{};$script:scrollFollow=@{}
 $controls.PlayersTable=$window.FindName('PlayersTable')
 $controls.UpdateText=$window.FindName('UpdateText')
 foreach($name in @('ResizeGrip','AppearancePanel','FontSlider','FontText')){$controls[$name]=$window.FindName($name)}
@@ -339,8 +339,10 @@ function Update-Page {
  $scroll=$controls.PageScroll
  $samePage=$script:renderedTab -eq $script:tab
  $offset=$scroll.VerticalOffset
- $followChat=$samePage -and $script:tab -eq 'chat' -and ($scroll.ScrollableHeight-$offset) -lt 24
- if(!$samePage -and $script:renderedTab){$script:scrollPositions[$script:renderedTab]=$offset}
+ # 聊天与事件都已并入战况页，所以战况页也要跟随新消息。用户向上翻历史时不打扰：
+ # 只有当前停在底部（差值 < 24px）才自动滑到底。
+ $followPage=$samePage -and ($script:tab -eq 'advice' -or $script:tab -eq 'chat') -and ($scroll.ScrollableHeight-$offset) -lt 24
+ if(!$samePage -and $script:renderedTab){$script:scrollPositions[$script:renderedTab]=$offset;$script:scrollFollow[$script:renderedTab]=($scroll.ScrollableHeight-$offset) -lt 24}
  if($script:snapshot){
   $value=[string]$script:snapshot.($script:tab)
   $controls.PageText.Text=if($value){$value}else{'等待此页面的数据…'}
@@ -367,7 +369,12 @@ function Update-Page {
  Update-OverlaySurface
  if(Get-Command Update-AgentActivity -ErrorAction SilentlyContinue){Update-AgentActivity}
  $scroll.UpdateLayout()
- if($followChat -or (!$samePage -and $script:tab -eq 'advice' -and !$script:scrollPositions.ContainsKey('advice'))){$scroll.ScrollToEnd()}
+ $followOnReturn=$false
+ if(!$samePage){
+  if(!$script:scrollPositions.ContainsKey($script:tab)){$followOnReturn=$script:tab -eq 'advice'}
+  elseif($script:tab -eq 'advice' -or $script:tab -eq 'chat'){$followOnReturn=$script:scrollFollow[$script:tab] -eq $true}
+ }
+ if($followPage -or $followOnReturn){$scroll.ScrollToEnd()}
  elseif($samePage){$scroll.ScrollToVerticalOffset($offset)}
  elseif($script:scrollPositions.ContainsKey($script:tab)){$scroll.ScrollToVerticalOffset($script:scrollPositions[$script:tab])}
  else{$scroll.ScrollToTop()}
@@ -414,7 +421,7 @@ function Update-State {
    }
   }catch{}
   if($script:snapshot -and ([string]$next.game -ne [string]$script:snapshot.game -or [string]$next.match -ne [string]$script:snapshot.match)){
-   $script:scrollPositions=@{};$script:renderedTab=$null
+   $script:scrollPositions=@{};$script:scrollFollow=@{};$script:renderedTab=$null
   }
   $changed=(!$script:snapshot -or !$script:renderedTab -or [string]$next.($script:tab) -ne [string]$script:snapshot.($script:tab))
   $enteredSelection=$next.phase -eq 'ChampSelect' -and (!$script:snapshot -or $script:snapshot.phase -ne 'ChampSelect')
@@ -837,6 +844,17 @@ try{
     $offset=$controls.PageScroll.VerticalOffset
     $script:snapshot.advice=$longText+"`n新增策略";Update-Page
     $script:testResult.refreshPreservesScroll=$offset -gt 0 -and [Math]::Abs($controls.PageScroll.VerticalOffset-$offset) -lt 1
+ # 战况页停在底部时，新消息应自动跟到底部（用户上滑后的保持由上一条用例覆盖）。
+ $controls.PageScroll.ScrollToEnd();$controls.PageScroll.UpdateLayout();Update-ChatJump
+ $script:snapshot.advice=$longText+"`n`n又一条策略";Update-Page
+ $script:testResult.adviceFollowsBottom=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
+ # 上滑后出现"最新一条"按钮，点击回到底部并恢复跟随。
+ $controls.PageScroll.ScrollToTop();$controls.PageScroll.UpdateLayout();Update-ChatJump
+ $script:testResult.adviceJumpVisible=$controls.LatestMessageButton.Visibility -eq 'Visible'
+ $controls.LatestMessageButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)));$window.UpdateLayout()
+ $script:testResult.adviceJumpRestoresFollow=($controls.PageScroll.ScrollableHeight-$controls.PageScroll.VerticalOffset) -lt 1
+ # 恢复到"阅读中"的位置，后续 tabRestoresScroll 仍按这个位置校验。
+ $controls.PageScroll.ScrollToVerticalOffset($offset);$controls.PageScroll.UpdateLayout();Update-ChatJump
     Set-Tab 'augments';Set-Tab 'advice'
     $script:testResult.tabRestoresScroll=[Math]::Abs($controls.PageScroll.VerticalOffset-$offset) -lt 1
     Set-Tab 'chat';$controls.PageScroll.ScrollToVerticalOffset(200);$controls.PageScroll.UpdateLayout()

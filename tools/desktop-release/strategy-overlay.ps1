@@ -956,7 +956,7 @@ try{
     $saved=$script:snapshot;$script:snapshot=$threadFixture;Set-Tab 'advice';Update-OverlaySurface $true;$window.UpdateLayout()
     $cards=@($controls.RichContent.Children|Where-Object {$_ -is [Windows.Controls.Border]})
     $script:testResult.metaRowSplit=($controls.RichContent.Children.Count -gt 0) -and ($controls.RichContent.Children[0] -is [Windows.Controls.Grid])
-    $script:testResult.augmentAccentCard=($cards.Count -eq 1) -and ([string]$cards[0].BorderThickness -eq '3,1,1,1')
+    $script:testResult.augmentAccentCard=($cards.Count -eq 1) -and ([string]$cards[0].BorderThickness -eq '2,0,0,1') -and ($null -eq $cards[0].Background -or $cards[0].Background.Color.A -eq 0)
     $script:snapshot=$saved;Update-OverlaySurface $true
     $script:testResult.closed=$script:closing
    });$testing.Start()

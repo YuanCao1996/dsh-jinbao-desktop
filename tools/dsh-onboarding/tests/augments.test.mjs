@@ -205,12 +205,18 @@ test('unchanged candidate rankings stay visible while a refreshed slot is being 
 test('a panel the OCR never resolves leaves its text behind for diagnosis',()=>{
  const output=[],observer=createAugmentObserver(['甲','乙','丙'],event=>output.push(event));
  const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
-  titleLines:[],lines:[{text:'看不出的字',x:10,y:10},{text:'另一些字',x:20,y:30}]});
+  // The real failure read the card's category labels instead of its name; the panel band
+  // had text, so the blind snapshot must fire even though no card name resolved.
+  titleLines:[{text:'重 型',slot:0,x:500,y:430},{text:'力 量',slot:1,x:870,y:430},{text:'鞭 挞',slot:2,x:1240,y:430}],
+  lines:[{text:'看不出的字',x:10,y:10},{text:'另一些字',x:20,y:30}]});
  for(let i=0;i<8;i+=1)observer.observe(frame());
  const blind=output.filter(event=>event.kind==='augment_capture_blind');
  assert.equal(blind.length,1,'one snapshot per blind streak, not one per frame');
- assert.equal(blind[0].lines[0].text,'看不出的字');
- assert.equal(blind[0].titleCount,0);
+ const sampled=blind[0].lines.map(line=>line.text);
+ // Title-band reads and panel-band OCR both stay; nothing from outside the panel band.
+ assert.ok(sampled.includes('看不出的字'),'panel-band OCR is kept: '+JSON.stringify(sampled));
+ assert.ok(sampled.includes('重 型'),'the title rows are kept too: '+JSON.stringify(sampled));
+ assert.equal(blind[0].titleCount,3,'the panel band did have text, just no card names');
  assert.deepEqual(blind[0].size,[1920,1080]);
  observer.observe({...frame(),available:false});
  for(let i=0;i<8;i+=1)observer.observe(frame());
@@ -222,10 +228,20 @@ test('the blind snapshot never carries chat-area text',()=>{
  // which the diagnostics promise never to export.
  const output=[],observer=createAugmentObserver(['甲','乙','丙'],event=>output.push(event));
  const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',
-  titleLines:[],
+  titleLines:[{text:'重 型',slot:0,x:500,y:430}],
   lines:[{text:'面板上方的字',x:600,y:200},{text:'玩家名已质变了',x:40,y:1000},{text:'另一条聊天',x:40,y:1030}]});
  for(let i=0;i<8;i+=1)observer.observe(frame());
  const blind=output.find(event=>event.kind==='augment_capture_blind');
  assert.ok(blind,'a blind streak must still be reported');
- assert.deepEqual(blind.lines.map(line=>line.text),['面板上方的字']);
+ const sampled=blind.lines.map(line=>line.text);
+ assert.ok(sampled.includes('面板上方的字'),'panel band text is kept');
+ assert.equal(sampled.some(text=>text.includes('玩家名')||text.includes('另一条聊天')),false,'chat-area text must never appear: '+JSON.stringify(sampled));
+});
+
+test('empty frames with no panel do not raise a blind alarm',()=>{
+ // Four such alarms fired during one match while no panel was open at all.
+ const output=[],observer=createAugmentObserver(['甲','乙','丙'],event=>output.push(event));
+ const frame=()=>({available:true,foreground:true,width:1920,height:1080,cardLayout:'stacked-title-regions',titleLines:[],lines:[]});
+ for(let i=0;i<12;i+=1)observer.observe(frame());
+ assert.equal(output.filter(event=>event.kind==='augment_capture_blind').length,0);
 });

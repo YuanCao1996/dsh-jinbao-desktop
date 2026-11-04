@@ -134,3 +134,18 @@ test('two players picking the same augment are not merged into one record',()=>{
  assert.equal(events.length,2);
  assert.deepEqual(events.map((event)=>event.who),['self','other']);
 });
+
+test('a merged line carrying two augment names claims no owner', () => {
+  // OCR merged two rows: the player's champion from one announcement and an augment from
+  // the next row's announcement. A real match polluted 本局已选 with 最万用的瞄准镜 that way.
+  const events = observe([{
+    box: poly(20, 700, 460, 22),
+    // Two names from the test catalogue: the point is the ambiguous merge, not the names.
+    text: '虚空女皇 已质变了 台风 双发快射',
+  }]);
+  assert.ok(events.length >= 2, 'both names are still recorded: ' + JSON.stringify(events));
+  for (const event of events) {
+    assert.equal(event.who, 'unknown', 'a merged line may not claim an owner');
+    assert.equal(event.confidence, 'low', 'a merged line may not own the augment');
+  }
+});

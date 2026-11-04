@@ -59,6 +59,13 @@ export function createChatObserver(augmentNames,emit,{now=Date.now}={}){
         // disagree whenever OCR split the verb across boxes, which silently downgraded
         // every such record to low confidence and dropped it from the owned list.
         const told=message.verb===true||AUGMENT_VERB_RE.test(raw);
+        // OCR merges rows: one parsed line can carry the player's champion from one
+        // announcement and another player's augment from the row below it. A real match
+        // showed that producing "封魔剑魂 已质变了 最万用的瞄准镜" for an augment the player
+        // never took, at high confidence, which polluted 本局已选. Only a line with a
+        // single augment name may claim an owner; ambiguous merges stay unattributed.
+        const ambiguousNames=message.kind!=='purchase'&&Array.isArray(names)&&names.filter(Boolean).length>1;
+        const effectiveTold=told&&!ambiguousNames;
         const at=now();
         for(const name of names){
           if(message.kind!=='purchase'&&!augments.has(normalized(name)))continue;
@@ -82,8 +89,8 @@ export function createChatObserver(augmentNames,emit,{now=Date.now}={}){
           if(seen.size>512)seen.delete(seen.keys().next().value);
           if(message.kind==='purchase')emit({kind:'chat_events',gameTime:state.gameTime,events:[{kind:'purchase',champion,time,item:name,itemRaw:message.itemRaw??null,itemId:message.itemId??null,itemUnresolved:!name}]});
           else emit({kind:'augment_mutate',augment:augments.get(normalized(name)).name,champion,
-            who:champion?(champion===ownName?'self':'other'):'unknown',
-            source:'log-confirmed',confidence:told?'high':'low',time,gameTime:state.gameTime});
+            who:ambiguousNames?'unknown':champion?(champion===ownName?'self':'other'):'unknown',
+            source:'log-confirmed',confidence:effectiveTold?'high':'low',time,gameTime:state.gameTime});
         }
       }
     },

@@ -12,9 +12,9 @@ import {createCloudCoach} from '../auto-coach.mjs';
 // service writes the broadcast log, the cloud coach appends to it, the page picks it up.
 
 const waitFor = async (check, label) => {
-  for (let i = 0; i < 900; i += 1) {
+  for (let i = 0; i < 150; i += 1) {
     if (await check()) return;
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 100));
   }
   assert.fail('timed out: ' + label);
 };
@@ -116,7 +116,7 @@ test('a busy voice queue does not swallow the death reminder', async () => {
     await waitFor(() => overlay.view().advice.includes('安妮'), 'state applied');
     await appendFile(file, JSON.stringify({ ...base, kind: 'state', t: at + 100, state: { time: 130 } }) + '\n');
     await waitFor(() => overlay.view().gameTime === '02:10', 'alive frame applied');
-    for (let i = 0; i < 3; i += 1) { await coach.tick(); await new Promise((r) => setTimeout(r, 30)); }
+    for (let i = 0; i < 150; i += 1) { await coach.tick(); await new Promise((r) => setTimeout(r, 30)); }
     await appendFile(file, JSON.stringify({
       ...base, kind: 'state', t: at + 200, state: { time: 140 },
       me: { ...base.me, dead: true, respawn: 12 },

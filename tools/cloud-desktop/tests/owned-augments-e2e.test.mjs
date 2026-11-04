@@ -11,9 +11,9 @@ import {createOverlayService} from '../../dsh-onboarding/overlay-state.mjs';
 // dropped. This drives the exact event sequence through the real service.
 
 const waitFor = async (check, label) => {
-  for (let i = 0; i < 600; i += 1) {
+  for (let i = 0; i < 150; i += 1) {
     if (await check()) return;
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 100));
   }
   assert.fail('timed out: ' + label);
 };

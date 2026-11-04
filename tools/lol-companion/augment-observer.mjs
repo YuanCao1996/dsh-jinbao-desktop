@@ -67,7 +67,10 @@ export function createAugmentObserver(names, emit, {now=Date.now,maxFrameAgeMs=4
       // explain: either the OCR saw nothing at all, or it read text outside the catalog.
       // Keep a small sample of what it did see so the next occurrence is diagnosable.
       if(recognized){zeroStreak=0;}else{zeroStreak+=1;}
-      if(zeroStreak===8)emit({kind:'augment_capture_blind',t:at,method:frame.method??'full',
+      // Only a panel we were already tracking and then lost is a real blind spot. Eight
+      // empty frames during normal play are expected and used to produce false alarms
+      // (4 of them in one match, all while no panel was open).
+      if(zeroStreak===8&&(current.some(Boolean)||(frame.titleLines??[]).length>0))emit({kind:'augment_capture_blind',t:at,method:frame.method??'full',
        size:[frame.width,frame.height],titleCount:(frame.titleLines??[]).length,
        // Only the panel band: chat lives at the bottom of the screen and its lines can carry
        // player names, which the diagnostics promise never to export.

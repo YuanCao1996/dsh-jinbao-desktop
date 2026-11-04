@@ -957,6 +957,16 @@ try{
     $cards=@($controls.RichContent.Children|Where-Object {$_ -is [Windows.Controls.Border]})
     $script:testResult.metaRowSplit=($controls.RichContent.Children.Count -gt 0) -and ($controls.RichContent.Children[0] -is [Windows.Controls.Grid])
     $script:testResult.augmentAccentCard=($cards.Count -eq 1) -and ([string]$cards[0].BorderThickness -eq '2,0,0,1') -and ($null -eq $cards[0].Background -or $cards[0].Background.Color.A -eq 0)
+    # 连续同一说话人：名字只出现一次，正文三条都在。
+    $groupFixture=[pscustomobject]@{game='lol';advice='对局 08:32 · 安妮';chatRows=@();thread=@(
+     [pscustomobject]@{role='assistant';origin='coach';text='第一条';at=1793717799000;dimension=''},
+     [pscustomobject]@{role='assistant';origin='coach';text='第二条';at=1793717800000;dimension=''},
+     [pscustomobject]@{role='assistant';origin='coach';text='第三条';at=1793717801000;dimension=''})}
+    $script:snapshot=$groupFixture;Set-Tab 'advice';Update-OverlaySurface $true;$window.UpdateLayout()
+    $entries=@($controls.RichContent.Children|Where-Object {$_ -is [Windows.Controls.Border]})
+    $names=0
+    foreach($entry in $entries){foreach($node in @($entry.Child.Children[0].Children)){if([string]$node.Text -eq '金宝'){$names++}}}
+    $script:testResult.consecutiveSpeakerGrouped=($entries.Count -eq 3) -and ($names -eq 1)
     $script:snapshot=$saved;Update-OverlaySurface $true
     $script:testResult.closed=$script:closing
    });$testing.Start()

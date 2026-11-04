@@ -136,6 +136,7 @@ $script:snapshot = [pscustomobject]@{
   # 战况页的真实形态是一条时间线：教练播报 + 玩家提问，带时间与类型强调。
   thread = @(
     [pscustomobject]@{role='assistant';origin='coach';text='先清完兵线再跟队友进场，保留控制技能，等对面交出关键位移后再接团。';at=(Get-Date).AddMinutes(-3).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension='now'}
+    [pscustomobject]@{role='assistant';origin='coach';text='他们这波先手交了闪现，等兵线进塔再找机会；不用急着开团。';at=(Get-Date).AddMinutes(-2.5).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension='now'}
     [pscustomobject]@{role='assistant';origin='coach';text='海克斯首选珠光护手：技能可暴击，和炼狱导管联动最稳。本局已选：珠光护手。';at=(Get-Date).AddMinutes(-2).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension='augment'}
     [pscustomobject]@{role='user';origin='pc';text='对面锐雯有黑切，我下一件出什么？';at=(Get-Date).AddMinutes(-1).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension=''}
     [pscustomobject]@{role='assistant';origin='coach';text='先补虚空之杖，锐雯的魔抗会被吃穿；下次回城再做法穿鞋。';at=(Get-Date).ToUniversalTime().Subtract((Get-Date '1970-01-01')).TotalMilliseconds;dimension='build'}

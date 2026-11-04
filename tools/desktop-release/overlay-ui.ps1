@@ -120,13 +120,15 @@ function Update-OverlaySurface([bool]$force=$false){
      $controls.RichContent.Children.Add($metaGrid)|Out-Null
     }
    }
+   # 连续同一说话人只显示一次名字（时间仍然每条都有）。
+   $lastSpeaker=''
    foreach($row in $bubbles){
     $user=$row.role -eq 'user'
     # 战况页是一条时间线，不是聊天气泡墙：去掉填充底色与圆角，只用细分隔线分隔，
     # 强化相关建议用左侧金色竖线标出来。
     $highlight=$row.dimension -eq 'augment'
     $card=New-Object Windows.Controls.Border;$card.CornerRadius=0
-    $card.Padding=if($highlight){'9,2,0,10'}else{'0,2,0,10'}
+    $card.Padding=if($highlight){'9,2,0,10'}elseif($repeatSpeaker){'0,0,0,8'}else{'0,2,0,10'}
     $card.Margin=if($user){'36,0,0,0'}else{'0,0,0,0'}
     $card.Background='Transparent'
     $card.BorderBrush=if($highlight){'#E7BE79'}else{'#1F2A36'}
@@ -134,11 +136,14 @@ function Update-OverlaySurface([bool]$force=$false){
     $column=New-Object Windows.Controls.StackPanel
     $speakerName=if($row.origin -eq 'team' -and $row.displayName){[string]$row.displayName}elseif($user){if($row.origin -eq 'phone'){'你 · 手机'}else{'你 · 电脑'}}elseif($row.failed){'本次未完成'}else{'金宝'}
     $speakerColor=if($row.failed){'#F5AD91'}elseif($highlight){'#E7BE79'}else{'#8FA0B0'}
+    # 同一说话人连续出现时不重复名字；强化那条始终带名字，并且打断连续段。
+    $repeatSpeaker=(-not $highlight) -and ($speakerName -eq $lastSpeaker)
+    $lastSpeaker=if($highlight){''}else{$speakerName}
     $head=New-Object Windows.Controls.DockPanel
     $when=Format-OverlayBubbleTime $row.at
     if($when){$time=New-OverlayLabel $when 10 '#7C8A99';[Windows.Controls.DockPanel]::SetDock($time,'Right');$time.VerticalAlignment='Center';$head.Children.Add($time)|Out-Null}
-    $speaker=New-OverlayLabel $speakerName 11 $speakerColor;$speaker.FontWeight='SemiBold';$head.Children.Add($speaker)|Out-Null
-    $head.Margin='0,0,0,4';$column.Children.Add($head)|Out-Null
+    if(-not $repeatSpeaker){$speaker=New-OverlayLabel $speakerName 11 $speakerColor;$speaker.FontWeight='SemiBold';$head.Children.Add($speaker)|Out-Null}
+    $head.Margin=if($repeatSpeaker){'0,0,0,3'}else{'0,0,0,4'};$column.Children.Add($head)|Out-Null
     $body=New-OverlayLabel ([string]$row.text) $font $(if($user){'#CBD5E1'}elseif($row.failed){'#F5AD91'}else{'#EBF0F5'});Set-HighlightedText $body ([string]$row.text);$column.Children.Add($body)|Out-Null;$card.Child=$column;$controls.RichContent.Children.Add($card)|Out-Null
     $copyMenu=New-Object Windows.Controls.ContextMenu;$copyMenu.Background='#19212A';$copyMenu.Foreground='#E8EEF5';$copyItem=New-Object Windows.Controls.MenuItem;$copyItem.Header='复制这条消息';$copyItem.Tag=[string]$row.text;$copyItem.Add_Click({param($sender,$eventArgs) try{[Windows.Clipboard]::SetText([string]$sender.Tag)}catch{}});$copyMenu.Items.Add($copyItem)|Out-Null;$card.ContextMenu=$copyMenu
    }  }elseif($script:tab -eq 'events'){

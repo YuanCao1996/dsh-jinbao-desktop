@@ -7,6 +7,7 @@ import { stateEvent } from './collector-state.mjs';
 import { createChampionSelectionReader } from './champ-select.mjs';
 import { createChatObserver,createChatCatalogReader } from './chat-observer.mjs';
 import { createAugmentObserver,augmentNames } from './augment-observer.mjs';
+import { mapPickedSlot } from './augment-map.mjs';
 import {createAugmentCaptureWorker} from './capture-worker.mjs';
 import {createCaptureSchedule} from './capture-schedule.mjs';
 import {createItemCatalogue} from './item-policy.mjs';
@@ -64,8 +65,14 @@ const startCardWatch=offer=>{
    return;
   }
   const options=Array.isArray(offer.options)?offer.options:[];
-  const option=options.find(row=>Number(row?.slot)===result.picked)??options[result.picked];
-  const name=typeof option==='string'?option:option?.name;
+  // Only a slot the offer actually captured may be named. A positional fallback attached
+  // a neighbouring card's name to the pick in a real match (see augment-map.mjs).
+  const mapped=mapPickedSlot(options,result.picked);
+  if(!mapped||mapped.missing){
+   if(running)log.append({kind:'augment_vision_slot_missing',roll:offer.roll??null,slot:result.picked,options:options.slice(0,3),gameTime:lastLiveState?.gameTime??gameTime??null});
+   return;
+  }
+  const name=mapped.name;
   if(typeof name!=='string'||!name)return;
   // 判定成功的这一条会把该轮标记为已确认，确认弹窗因此不再出现。
   if(roundKey!==null)decidedRolls.add(roundKey);

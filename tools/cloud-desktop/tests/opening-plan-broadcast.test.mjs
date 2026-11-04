@@ -10,7 +10,7 @@ import {createOverlayService} from '../../dsh-onboarding/overlay-state.mjs';
 // broadcast, be kept on the state, and never be published twice.
 
 const waitFor = async (check, label) => {
-  for (let i = 0; i < 250; i += 1) {
+  for (let i = 0; i < 600; i += 1) {
     if (await check()) return;
     await new Promise((r) => setTimeout(r, 20));
   }

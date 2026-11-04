@@ -214,37 +214,36 @@ function Set-Interaction([bool]$enabled){
 }
 # 透明窗口在改尺寸后偶尔保留上一帧（残影、卡顿一下）：改完尺寸立刻重排并强制重绘。
 function Update-OverlayRedraw {
- try{
-  $window.UpdateLayout()
-  if($controls.MainBorder){$controls.MainBorder.InvalidateVisual();$controls.MainBorder.UpdateLayout()}
-  if($window.Content){$window.Content.InvalidateVisual();$window.Content.UpdateLayout()}
-  $window.InvalidateVisual()
- }catch{}
+ try{$window.UpdateLayout()}catch{}
 }
 
 function Set-Collapsed([bool]$on,[switch]$PreserveMode){
  if($script:collapsed -eq $on){return}
+ # 顺序很重要：先把内容切掉再改尺寸，否则整棵界面树会按 56×56 重新排版一次，就是那一下卡顿。
  if($on){
   if($script:displayMode -eq 'large'){$script:expandedWidth=$window.Width;$script:expandedHeight=$window.Height}
-  $window.MinWidth=0;$window.MinHeight=0;$window.Width=56;$window.Height=56
+  $controls.Expanded.Visibility='Collapsed';$controls.ResizeGrip.Visibility='Collapsed'
+  if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
+  $controls.Bubble.Visibility='Visible'
+  $window.MinWidth=0;$window.MinHeight=0;$window.ResizeMode='NoResize'
+  $window.Width=56;$window.Height=56
   $window.Left=$area.Right-$window.Width
   $window.Top=[Math]::Max($area.Top,[Math]::Min($window.Top,$area.Bottom-$window.Height))
-  $window.ResizeMode='NoResize';$controls.Expanded.Visibility='Collapsed';$controls.Bubble.Visibility='Visible';$controls.ResizeGrip.Visibility='Collapsed';$controls.MainBorder.CornerRadius='28'
-  if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
+  $controls.MainBorder.CornerRadius='28';$controls.MainBorder.Padding='0';$controls.MainBorder.BorderThickness=0
  }else{
+  $window.MinWidth=360;$window.MinHeight=320;$window.ResizeMode='CanResize'
   $window.Width=$script:expandedWidth;$window.Height=$script:expandedHeight
-  $window.MinWidth=360;$window.MinHeight=320;$window.ResizeMode='CanResize';$controls.ResizeGrip.Visibility='Visible';$controls.MainBorder.CornerRadius='14';$controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1
-  $controls.Expanded.Visibility='Visible';$controls.Bubble.Visibility='Collapsed'
-  if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
   $window.Left=[Math]::Min($window.Left,$area.Right-$window.Width)
   $window.Top=[Math]::Min($window.Top,$area.Bottom-$window.Height)
+  $controls.Bubble.Visibility='Collapsed'
+  $controls.Expanded.Visibility='Visible';$controls.ResizeGrip.Visibility='Visible'
+  $controls.MainBorder.CornerRadius='14';$controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1
  }
  $script:collapsed=$on
- if($on){$controls.MainBorder.Padding='0';$controls.MainBorder.BorderThickness=0;Set-BackgroundOpacity}
- if($script:displayMode -and !$PreserveMode){if($on){$script:displayMode='silent'}else{$script:displayMode='large';$controls.MainBorder.Padding='12';$controls.MainBorder.BorderThickness=1;$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';Set-BackgroundOpacity};Save-DisplayMode}
- if(!$on -and $PreserveMode -and $script:displayMode -eq 'narrow'){$controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible';$window.ResizeMode='NoResize';Set-NarrowMetrics}
- Set-PointerMode $true
- Update-OverlayRedraw
+ if($script:displayMode -and !$PreserveMode){if($on){$script:displayMode='silent'}else{$script:displayMode='large'}}
+ if(!$on -and $PreserveMode -and $script:displayMode -eq 'narrow'){$controls.Expanded.Visibility='Collapsed';$controls.NarrowPanel.Visibility='Visible'}
+ # 透明度、指针穿透这些不参与这一帧，放到后台优先级再算。
+ try{$window.Dispatcher.BeginInvoke([Windows.Threading.DispatcherPriority]::Background,[Action]{try{Set-BackgroundOpacity;Set-PointerMode $true;Update-OverlayRedraw}catch{}})|Out-Null}catch{}
 }
 function Save-Preferences {
  $json=@{backgroundOpacity=[Math]::Round($controls.OpacitySlider.Value);bodyFontSize=[Math]::Round($controls.FontSlider.Value);showInCapture=[bool]$script:showInCapture;capturePreferenceVersion=2} | ConvertTo-Json -Compress

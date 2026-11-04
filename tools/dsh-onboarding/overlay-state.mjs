@@ -251,7 +251,13 @@ export function overlayView(state, knowledge = {}) {
   const players = [...state.allies.map(p => ({ ...p, side: '友' })), ...state.enemies.map(p => ({ ...p, side: '敌' })),...state.bench.map(p=>({...p,side:'备选'}))];
   if(!players.length&&me.champion)players.push({...me,side:'我'});
   // 数据里的英雄名带称号（如"虚空女皇 卑尔维斯"），界面只显示名字部分。
-const shortChampion=(name)=>{const s=String(name??'').trim();if(!s)return '';const parts=s.split(/\s+/);return parts.length>1?parts.slice(1).join(' '):s;};
+// 官方名之外，玩家更常用的口语叫法（按需补充）。
+const CHAMPION_NICKNAME={'蒙多医生':'蒙多','赫卡里姆':'人马','沃利贝尔':'狗熊','奥瑞利安·索尔':'龙王',
+ '特朗德尔':'巨魔','卡西奥佩娅':'蛇女','玛尔扎哈':'蚂蚱','伊泽瑞尔':'EZ','亚托克斯':'剑魔','泰达米尔':'蛮王',
+ '贾克斯':'武器','易大师':'剑圣','布里茨':'机器人','阿利斯塔':'牛头','索拉卡':'奶妈','内瑟斯':'狗头','维迦':'小法',
+ '费德提克':'稻草人','辛吉德':'炼金','厄加特':'螃蟹','斯卡纳':'蝎子','约里克':'掘墓','卡兹克':'螳螂','科加斯':'大虫子',
+ '雷克塞':'挖掘机','希瓦娜':'龙女','诺提勒斯':'泰坦','莫甘娜':'莫甘娜','维克兹':'大眼'}
+const shortChampion=(name)=>{const s=String(name??'').trim();if(!s)return '';const parts=s.split(/\s+/);const base=parts.length>1?parts.slice(1).join(' '):s;return CHAMPION_NICKNAME[base]??CHAMPION_NICKNAME[s]??base;};
 const playerRows = players.map(p => {
     const r=rows.find(row=>row._viewKind==='hero'&&heroStatMatches(row,p.champion));
     const rate=r?.winRate!=null&&r.winRate!==''?Number(r.winRate):NaN;

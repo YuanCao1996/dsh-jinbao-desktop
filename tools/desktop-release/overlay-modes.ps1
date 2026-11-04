@@ -64,8 +64,13 @@ function Set-HighlightedText($view,[string]$value){
  foreach($hit in [regex]::Matches($value,$pattern)){
   if($count++ -ge 16){break}
   if($hit.Index -gt $position){$view.Inlines.Add((New-Object Windows.Documents.Run($value.Substring($position,$hit.Index-$position))))}
-  $heroPrefix=([string]$script:snapshot.summary).Split('·')[0].Trim()
-  $run=New-Object Windows.Documents.Run($hit.Value);$run.Foreground=if($hit.Value -eq $heroPrefix){'#C8A6FF'}else{'#FFD166'}
+  # 高亮颜色与左侧类别标签取自同一份配色：英雄=阵容色、装备=出装色、强化=符文色。
+  $palette=Get-OverlayCategoryColor
+  $runColor=if(@($script:snapshot.championKeywords) -contains $hit.Value){$palette['阵容']}
+   elseif(@($script:snapshot.augmentKeywords) -contains $hit.Value){$palette['符文']}
+   elseif(@($script:snapshot.itemKeywords) -contains $hit.Value){$palette['出装']}
+   else{$palette['出装']}
+  $run=New-Object Windows.Documents.Run($hit.Value);$run.Foreground=$runColor
   $view.Inlines.Add($run);$position=$hit.Index+$hit.Length
  }
  if($position -lt $value.Length){$view.Inlines.Add((New-Object Windows.Documents.Run($value.Substring($position))))}

@@ -973,6 +973,20 @@ try{
     $script:testResult.categoryForUser=(Get-OverlayCategory ([pscustomobject]@{stage='';role='user';text='这波怎么打'})).label -eq '提问'
     $a=(Get-OverlayCategory ([pscustomobject]@{stage='purchase';text='x'})).color;$b=(Get-OverlayCategory ([pscustomobject]@{stage='ace';text='x'})).color;$c=(Get-OverlayCategory ([pscustomobject]@{stage='augment';text='x'})).color
     $script:testResult.categoryColorsDistinct=($a -ne $b) -and ($b -ne $c) -and ($a -ne $c)
+    # 一个标签不够时可以有两个；标签色与正文高亮色必须来自同一份配色。
+    $dual=Get-OverlayCategory ([pscustomobject]@{stage='purchase';text='这波先手开团，然后补一件法穿鞋'})
+    $script:testResult.dualTags=(@($dual.labels).Count -eq 2) -and (@($dual.labels) -contains '出装') -and (@($dual.labels) -contains '团战')
+    $pal=Get-OverlayCategoryColor
+    $hlFixture=[pscustomobject]@{game='lol';advice='对局 08:32 · 安妮';chatRows=@();keywords=@('虚空之杖');itemKeywords=@('虚空之杖');augmentKeywords=@();championKeywords=@('安妮');thread=@([pscustomobject]@{role='assistant';origin='coach';text='下一件直接补虚空之杖';at=1793717799000;dimension='';stage='purchase'})}
+    $savedHl=$script:snapshot;$script:snapshot=$hlFixture;Set-Tab 'advice';Update-OverlaySurface $true;$window.UpdateLayout()
+    $hlEntry=@($controls.RichContent.Children|Where-Object {$_ -is [Windows.Controls.Border]})[0]
+    $hlBody=$hlEntry.Child.Children[1].Children[1]
+    $hlRun=@($hlBody.Inlines|Where-Object {$_.Text -eq '虚空之杖'})
+    $hlTag=[string]$hlEntry.Child.Children[0].Children[1].Text
+    # 画笔的字符串形式带 alpha（#FFFFD166），要按颜色值比较。
+    $wantColor=[Windows.Media.ColorConverter]::ConvertFromString([string]$pal['出装'])
+    $script:testResult.tagColorMatchesText=($hlRun.Count -eq 1) -and ($hlRun[0].Foreground.Color -eq $wantColor) -and ($hlTag -eq '出装') -and ($hlEntry.Child.Children[0].Children[1].Foreground.Color -eq $wantColor)
+    $script:snapshot=$savedHl;Update-OverlaySurface $true
     # 组内消息不再占一行时间：头部折叠，时间贴到正文末尾。
     # TextBlock.Text 不含通过 Inlines 追加的 Run，必须读 Inlines 才能验证时间戳。
     # 时间恒在左列第一行；同一组的后续消息右侧只有正文（没有说话人行）。

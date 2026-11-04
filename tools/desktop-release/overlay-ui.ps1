@@ -83,8 +83,8 @@ function Update-StatusDot {
 function Get-OverlayCategoryColor {
  if(!$script:overlayCategoryColor){
   $script:overlayCategoryColor=@{
-   '出装'='#E7BE79';'团战'='#F0876B';'符文'='#B79CF0';'进攻'='#7FD1A0';'撤退'='#7FB3D5';
-   '阵容'='#6FC2C9';'技能'='#E0B341';'胜率'='#8FBF7F';'局势'='#93A3B4';'开局'='#CBA86C';
+   '出装'='#FFD166';'团战'='#F0876B';'符文'='#B79CF0';'进攻'='#7FD1A0';'撤退'='#7FB3D5';
+   '阵容'='#C8A6FF';'技能'='#E0B341';'胜率'='#8FBF7F';'局势'='#93A3B4';'开局'='#CBA86C';
    '阵亡'='#E07A7A';'威胁'='#EF9C6B';'地图'='#9AA8B8';'夸奖'='#DFA0C8';'提问'='#8FB4D8';'回答'='#93A3B4'
   }
  }
@@ -116,7 +116,26 @@ function Get-OverlayCategory($row){
  if(!$label){$label=if($row.role -eq 'user'){'提问'}else{'回答'}}
 
  $colors=Get-OverlayCategoryColor
- [pscustomobject]@{label=$label;color=$colors[$label]}
+ # 一个标签不够时补第二个（例如"出装 + 符文"），最多两个。
+ $labels=@($label)
+ if($row.role -ne 'user' -and $label -ne '回答' -and $label -ne '夸奖'){
+  $text=[string]$row.text
+  foreach($rule in @(
+   @('出装','出装|装备|成装|出什么|补一件|法穿鞋|虚空之杖|大件'),
+   @('团战','开团|团战|打团|接团|集火|先手'),
+   @('符文','海克斯|强化|质变'),
+   @('撤退','撤退|先退|回城|后撤|别追'),
+   @('进攻','推塔|压线|越塔|推进|进攻'),
+   @('阵容','阵容|对线|换线'),
+   @('技能','技能|大招|连招|闪现|控制'),
+   @('胜率','胜率|强度|T0|T1')
+  )){
+   if($labels.Count -ge 2){break}
+   if($labels -notcontains $rule[0] -and $text -match $rule[1]){$labels+=$rule[0]}
+  }
+ }
+ $tags=@($labels|ForEach-Object {[pscustomobject]@{label=$_;color=$colors[$_]}})
+ [pscustomobject]@{label=$labels[0];labels=$labels;tags=$tags;color=$colors[$labels[0]]}
 }
 function Update-ChatJump {
  if(!$controls.LatestMessageButton){return}
@@ -166,7 +185,7 @@ function Update-OverlaySurface([bool]$force=$false){
     $user=$row.role -eq 'user'
     $category=Get-OverlayCategory $row
     # 符文是本局要当场用的，保留金色竖线强调。
-    $highlight=$category.label -eq '符文'
+    $highlight=(@($category.labels) -contains '符文')
     $card=New-Object Windows.Controls.Border;$card.CornerRadius=0
     $card.Padding='0,2,0,8'
     $card.Background='Transparent'
@@ -181,8 +200,10 @@ function Update-OverlaySurface([bool]$force=$false){
     $when=Format-OverlayBubbleTime $row.at
     $timeText=New-OverlayLabel $(if($when){$when}else{'--:--'}) 10 '#63727F'
     $gutter.Children.Add($timeText)|Out-Null
-    $tag=New-OverlayLabel $category.label 10 $category.color;$tag.FontWeight='SemiBold'
-    $gutter.Children.Add($tag)|Out-Null
+    foreach($tagInfo in @($category.tags)){
+     $tag=New-OverlayLabel $tagInfo.label 10 $tagInfo.color;$tag.FontWeight='SemiBold'
+     $gutter.Children.Add($tag)|Out-Null
+    }
     $grid.Children.Add($gutter)|Out-Null
     # 右列：说话人（同一个人连续说话时只说一次）+ 正文。
     $column=New-Object Windows.Controls.StackPanel

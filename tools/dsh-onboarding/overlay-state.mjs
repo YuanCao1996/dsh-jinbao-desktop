@@ -343,6 +343,10 @@ export function overlayView(state, knowledge = {}) {
     playback:validBroadcasts.map(r=>({id:String(r.at)+':'+r.text,at:r.at,text:r.text,priority:r.priority??0,...(r.praise?{topic:'praise'}:{}),expiresAt:r.expiresAt??r.validity?.expiresAt??null})),
     revokedPlayback:state.broadcasts.filter(r=>r.revoked).map(r=>String(r.at)+':'+r.text),
     keywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion),...list(me.items).map(i=>typeof i==='string'?i:i.name),...state.ownedAugments,...offerNames(state.offers)].filter(Boolean))].slice(0,64),
+    // 关键词按类型分开，界面才能用同一套配色给正文高亮与左侧类别标签上色。
+    championKeywords:[...new Set([me.champion,...state.allies.map(p=>p.champion),...state.enemies.map(p=>p.champion)].filter(Boolean))].slice(0,24),
+    itemKeywords:[...new Set(list(me.items).map(i=>typeof i==='string'?i:i.name).filter(Boolean))].slice(0,24),
+    augmentKeywords:[...new Set([...state.ownedAugments,...offerNames(state.offers)]).filter(Boolean)].slice(0,24),
     title: '金宝 · ' + (state.game === 'lol' ? '英雄联盟' : state.game === 'wzry' ? '王者荣耀' : me.genericState?.gameName??'游戏教练'),
     summary: state.game==='generic'?'所选窗口 · '+(me.genericState?.windowTitle??'等待观察'):[me.champion, me.level != null ? 'Lv' + me.level : '', me.k != null ? `${me.k}/${me.d ?? 0}/${me.a ?? 0}` : '', me.gold != null ? '金币 ' + me.gold : ''].filter(Boolean).join(' · '),
     // Cheap confirmation signal for the coach's pre-flight guard: it must decide whether

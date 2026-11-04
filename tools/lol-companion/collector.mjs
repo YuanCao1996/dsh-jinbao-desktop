@@ -112,7 +112,7 @@ const captureTimer=setInterval(async()=>{
    if(!frame.available)nextCaptureAt=Date.now()+60000;
    if(frame.focus!=='titles'&&!frame.panelOccluded)chatObserver.observe(frame,lastLiveState);
   }
- }catch{if(running){void captureReport({available:false,reason:'capture_failed',elapsedMs:Date.now()-captureStarted});if(lastCaptureAvailable!=='capture-error'){lastCaptureAvailable='capture-error';log.append({kind:'augment_capture_status',available:true,reason:'capture_failed'});}}}finally{capturing=false;}
+ }catch(error){if(running){void captureReport({available:false,reason:'capture_failed',elapsedMs:Date.now()-captureStarted,message:String(error?.message??'')});if(lastCaptureAvailable!=='capture-error'){lastCaptureAvailable='capture-error';log.append({kind:'augment_capture_status',available:true,reason:'capture_failed'});}}}finally{capturing=false;}
 },250);captureTimer.unref();
 while(running){
  try{

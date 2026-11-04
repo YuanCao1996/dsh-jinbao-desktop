@@ -12,6 +12,9 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
 
  // another on the battle page.
 
+ // Stages whose advice is still useful when it lands late; everything else is tied to a
+ // window that closes (death, champion select, live offers, objectives).
+ const LATE_ACTIONABLE=new Set(['postAugment','ultimate','situation','enemyChange','purchase']);
  const DIMENSION={ace:'map',turret:'map',inhib:'map',objective:'map',purchase:'build',enemyChange:'risk',augment:'augment',postAugment:'augment',death:'now',situation:'now',ultimate:'plan',opening:'plan',loading:'plan',selection:'plan',ended:'now'};
  const live=v=>v&&['lol','wzry','generic'].includes(v.game)&&v.match&&!v.ended&&v.phase!=='CapturePaused'&&Number.isFinite(v.updatedAt)&&now()-v.updatedAt<=30000&&v.updatedAt<=now()+500;
  const stillCurrent=v=>{const latest=view();return !closed&&live(latest)&&latest.game===v.game&&latest.match===v.match;};
@@ -87,7 +90,9 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
    nextStore.seenEventKeys=seenNow;store.seenEventKeys=seenNow;
    if(!events.length){note(v,'skip','no_trigger');return;}
 
-   const plan=buildLolCoachingPlan(events,c),validity=createAdviceValidity(plan.stage,c,now());
+   const plan=buildLolCoachingPlan(events,c);
+   // Stamped before the turn starts; re-stamped below when the reply lands late.
+   let validity=createAdviceValidity(plan.stage,c,now());
   const scheduled=scheduler.submit({stage:plan.stage,at:now(),coalesceKey:plan.keyEvent?plan.stage+':'+plan.keyEvent.time:undefined});
   const decision=scheduler.take();
   // A turn that cannot finish inside its own window would only produce advice that is
@@ -104,7 +109,16 @@ const actionable=message+'\n'+workflow+'这是战况即时播报：用2至3句�
   if(decision&&decision.lane==='fast')note(v,'scheduled','fast_lane',{stage:plan.stage,reason:decision.reason});
    const current=(await getContext(v.game,v.match)).current;
    if(!stillCurrent(v)||!current){note(v,'reply_discarded','context_changed');return;}
-   if(!adviceIsValid(validity,current,now())){await status(v,'stale','关键局势已变化，等待下一次有效分析…',{stage:plan.stage});retryAt=now()+1000;return;}
+   if(!adviceIsValid(validity,current,now())){
+    // A turn takes 13–58 seconds in a real match (median ~40s), so the enemy inventory almost
+    // always moves before the reply lands. That alone does not make a general plan wrong, and
+    // dropping it left the player with 2 published turns out of 19. Re-stamp the validity from
+    // the facts at publish time for plan-shaped stages; anything tied to a window (a death, a
+    // champion select, a live offer card, an objective window) still drops instead of arriving late.
+    if(!LATE_ACTIONABLE.has(plan.stage)){await status(v,'stale','关键局势已变化，等待下一次有效分析…',{stage:plan.stage});retryAt=now()+1000;return;}
+    validity=createAdviceValidity(plan.stage,current,now());
+    note(v,'coach_late_published',undefined,{stage:plan.stage});
+   }
    if(typeof answer!=='string'||!answer.trim())throw Error('Empty automatic reply');
    await publish({at:new Date(now()).toISOString(),source:v.match,game:v.game,match:v.match,kind:'cloud-advice',key:plan.stage,priority:['ace','inhib','augment','death','purchase','enemyChange','objective','turret'].includes(plan.stage)?2:1,dimension:DIMENSION[plan.stage]??'now',broadcast:answer,validity});
    await published(v,{stage:plan.stage});

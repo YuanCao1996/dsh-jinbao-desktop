@@ -25,3 +25,46 @@ test('failed automatic task retries its stage after backoff instead of consuming
  time+=15001;await coach.tick();assert.equal(calls,2);assert.equal(entries.length,1);
  await coach.tick();assert.equal(calls,2);coach.close();
 });
+
+test('a late plan-shaped reply is published with fresh validity instead of dropped',async()=>{
+ // Real match: 19 turns completed, each taking 13–58s, and 7 were thrown away because the
+ // enemy inventory moved during the turn. That left 2 published advices in a whole game.
+ let time=10000;const entries=[];const notes=[];
+ let current={game:'lol',match:'one',phase:'InProgress',gameSeconds:180,
+  me:{champion:'安妮',level:6,items:[],dead:false},enemies:[{champion:'锐雯',items:[]}],offers:[],ownedAugments:[],
+  completedEquipmentEvents:[{at:1,hero:'锐雯',items:['黑色切割者']}]};
+ const coach=createCloudCoach({
+  view:()=>({game:'lol',match:'one',updatedAt:time}),
+  getContext:async()=>({current}),
+  now:()=>time,
+  trace:event=>{if(event.action)notes.push(event);},
+  agent:{ask:async()=>{
+   // The enemy finishes another item while the model is still working.
+   current={...current,enemies:[{champion:'锐雯',items:[{name:'死亡之舞'}]}]};time+=40000;return '先做中娅沙漏，等锐雯先手';
+  }},
+  publish:async entry=>entries.push(entry)});
+ await coach.tick();
+ assert.equal(entries.length,1,'a late but still useful plan must reach the player');
+ assert.equal(entries[0].key,'enemyChange');
+ assert.ok(entries[0].validity.expiresAt>time,'validity must be re-stamped at publish time');
+ assert.ok(notes.some(note=>note.action==='coach_late_published'),'the late publish must be traceable');
+ coach.close();
+});
+
+test('a late reply tied to a closed window is still dropped',async()=>{
+ let time=10000;const entries=[];
+ let current={game:'lol',match:'one',phase:'InProgress',gameSeconds:180,
+  me:{champion:'安妮',level:6,items:[],dead:false},enemies:[],offers:['甲','乙','丙'],ownedAugments:[]};
+ const coach=createCloudCoach({
+  view:()=>({game:'lol',match:'one',updatedAt:time}),
+  getContext:async()=>({current}),
+  now:()=>time,
+  agent:{ask:async()=>{
+   // The panel rerolled while the model was deciding: recommending 甲 is now wrong.
+   current={...current,offers:['丁','戊','己']};time+=40000;return '选甲';
+  }},
+  publish:async entry=>entries.push(entry)});
+ await coach.tick();
+ assert.equal(entries.length,0,'a recommendation for an offer that no longer exists must not ship');
+ coach.close();
+});

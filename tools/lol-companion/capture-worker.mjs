@@ -1,7 +1,9 @@
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
-export function createAugmentCaptureWorker({spawnImpl=spawn,timeoutMs=8000}={}){
+// A hung OCR cycle must not stall the whole capture loop: one failed attempt already
+// blocked 12 seconds of a real match (no augment or chat reads during that window).
+export function createAugmentCaptureWorker({spawnImpl=spawn,timeoutMs=6000}={}){
  let child=null,pending=null,buffer='',closed=false;
  const reset=error=>{const owned=child;child=null;buffer='';if(pending){const request=pending;pending=null;clearTimeout(request.timer);request.signal?.removeEventListener('abort',request.abort);request.reject(error);}owned?.kill();};
  function start(){

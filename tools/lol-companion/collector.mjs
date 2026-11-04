@@ -2,7 +2,7 @@
 import { readCredentials } from './lockfile.mjs';
 import { lcuRequest } from './lcu.mjs';
 import { getAllGameData,compactState,diffEvents } from './live.mjs';
-import { createEventLog } from './eventlog.mjs';
+import { createEventLog, pruneEventLogs } from './eventlog.mjs';
 import { stateEvent } from './collector-state.mjs';
 import { createChampionSelectionReader } from './champ-select.mjs';
 import { createChatObserver,createChatCatalogReader } from './chat-observer.mjs';
@@ -20,6 +20,8 @@ import {writeFile,rename} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 const folder=process.env.JINBAO_LOG_DIR??join(homedir(),'.dsh','jinbao','logs');
+// Old match logs filled 160MB over ten days; keep the recent ones only.
+try{const pruned=pruneEventLogs(folder);if(pruned.removed.length)console.log('pruned old logs: '+pruned.removed.length+', kept '+pruned.kept);}catch{}
 let log=createEventLog(folder,'client-'+Date.now()),phase=null,lastEvent=-1,gameTime=null;
 let nextMatch=true;
 const readSelection=createChampionSelectionReader(lcuRequest);

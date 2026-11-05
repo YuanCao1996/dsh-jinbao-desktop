@@ -32,7 +32,7 @@ async function readJson(req, maxBody) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY, authorize = null, allowRead = false, identify = null, allowPending = false } = {}) {
+export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY, authorize = null, allowRead = false, identify = null, allowPending = false, requireWriteAuth = true } = {}) {
   if (!dir) throw new Error('public experience handler needs a data directory');
   const library = createPublicLibrary({ dir });
 
@@ -43,7 +43,7 @@ export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY,
       send(res, 405, { error: 'method-not-allowed' });
       return true;
     }
-    // 读默认可匿名；写可以通过 authorize 钩子要求令牌（由调用方决定策略，这里不猜）。
+    // 读默认被禁；写与编辑一律要求登录——匿名客户端没有任何写入理由。
     if (authorize && action === 'upsert') {
       let allowed = false;
       try { allowed = await authorize(req); } catch { allowed = false; }
@@ -56,6 +56,12 @@ export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY,
       let readAllowed = true;
       if (authorize) { try { readAllowed = await authorize(req); } catch { readAllowed = false; } }
       if (!readAllowed) { send(res, 401, { error: 'unauthorized' }); return true; }
+    }
+    if (action === 'upsert') {
+      let allowed = false;
+      if (requireWriteAuth) { try { allowed = authorize ? await authorize(req) : false; } catch { allowed = false; } }
+      else { allowed = true; }
+      if (!allowed) { send(res, 401, { error: 'unauthorized' }); return true; }
     }
     try {
       if (action === 'query') {

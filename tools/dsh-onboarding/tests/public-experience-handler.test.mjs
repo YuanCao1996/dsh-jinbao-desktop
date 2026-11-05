@@ -17,7 +17,7 @@ function fakeRes() {
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-handler-'));
-  const handler = createPublicExperienceHandler({ dir, allowRead: true, allowPending: true });
+  const handler = createPublicExperienceHandler({ dir, allowRead: true, allowPending: true, authorize: async () => true });
   return { dir, handler };
 }
 
@@ -106,7 +106,7 @@ test('malformed bodies and wrong methods are answered, not thrown', async () => 
 test('read is disabled by default so experience text never leaves the server', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-noread-'));
   try {
-    const handler = createPublicExperienceHandler({ dir });
+    const handler = createPublicExperienceHandler({ dir, authorize: async () => true });
     const res = fakeRes();
     assert.equal(await handler(fakeReq('GET', '/api/public/experience?game=lol'), res), true);
     assert.equal(res.state.status, 403);
@@ -122,7 +122,7 @@ test('read is disabled by default so experience text never leaves the server', a
 test('uploads are attributed so three independent accounts can promote a lesson', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-attr-'));
   try {
-    const handler = createPublicExperienceHandler({ dir, allowRead: true, identify: async (req) => req.headers?.['x-account'] ?? null });
+    const handler = createPublicExperienceHandler({ dir, allowRead: true, authorize: async () => true, identify: async (req) => req.headers?.['x-account'] ?? null });
     const lesson = { kind: 'recognition', claim: '高光遮挡时先取前后两帧比对再判定', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } };
     const upload = async (account) => {
       const req = fakeReq('POST', '/api/public/experience', { lessons: [lesson] });
@@ -142,5 +142,25 @@ test('uploads are attributed so three independent accounts can promote a lesson'
     const promoted = fakeRes();
     await handler(fakeReq('GET', '/api/public/experience?game=lol'), promoted);
     assert.equal(JSON.parse(promoted.state.body).lessons.length, 1, 'three distinct accounts promote it');
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+});
+
+test('anonymous writes are refused, authenticated ones are stored', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-writeauth-'));
+  try {
+    const lesson = { kind: 'recognition', claim: '高光遮挡时先取前后两帧比对', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } };
+    const closed = createPublicExperienceHandler({ dir, authorize: async () => false });
+    const denied = fakeRes();
+    await closed(fakeReq('POST', '/api/public/experience', { lessons: [lesson] }), denied);
+    assert.equal(denied.status ?? denied.state.status, 401);
+    const noHook = createPublicExperienceHandler({ dir });
+    const denied2 = fakeRes();
+    await noHook(fakeReq('POST', '/api/public/experience', { lessons: [lesson] }), denied2);
+    assert.equal(denied2.state.status, 401, 'without an authorize hook nothing may be written');
+    const open = createPublicExperienceHandler({ dir, authorize: async () => true, allowRead: true, allowPending: true });
+    const allowed = fakeRes();
+    await open(fakeReq('POST', '/api/public/experience', { lessons: [lesson] }), allowed);
+    assert.equal(allowed.state.status, 200);
+    assert.equal(JSON.parse(allowed.state.body).added, 1);
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
 });

@@ -109,3 +109,17 @@ test('the guide documents exactly the tabs the overlay defines', async () => {
     assert.ok(steps.includes(tab + '.png'), 'missing screenshot for tab ' + tab);
   }
 });
+
+test('the inline script parses, so the guide cannot render as a blank page', async () => {
+  // 之前这里多了个 }，整段脚本解析失败：页面只剩静态标题，内容卡片一张都不出现。
+  // 浏览器不会报错给用户，只会静默空白，所以必须由测试盯住。
+  const fs = await import('node:fs/promises');
+  const vm = await import('node:vm');
+  const { fileURLToPath } = await import('node:url');
+  const here = fileURLToPath(new URL('.', import.meta.url));
+  const html = await fs.readFile(join(here, '..', 'welcome.html'), 'utf8');
+  const script = /<script>([\s\S]*?)<\/script>/.exec(html);
+  assert.ok(script, 'the guide must keep its inline script');
+  assert.doesNotThrow(() => new vm.Script(script[1]), 'the inline script must parse');
+  assert.match(script[1], /const STEPS/, 'the step list must live in that script');
+});

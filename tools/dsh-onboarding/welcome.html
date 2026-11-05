@@ -163,7 +163,7 @@ function reportSeen(){
   window.__welcomeSeenReported = true;
   try{
     const nonce = location.hash.replace(/^#/, '');
-    fetch('/api/welcome/seen', {method:'POST', headers:{'Content-Type':'application/json', ...(nonce ? {'X-Jinbao-Setup':nonce} : {})}, body:'{}}').catch(() => {});
+    fetch('/api/welcome/seen', {method:'POST', headers:{'Content-Type':'application/json', ...(nonce ? {'X-Jinbao-Setup':nonce} : {})}, body:'{}'}).catch(() => {});
   }catch(_){}
 }
 

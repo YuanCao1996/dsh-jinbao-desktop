@@ -2139,7 +2139,11 @@ export function createMonitor(ctx, cfg, resolveGame) {
         const presets = agentCtx.get("agentPresets");
         if (presets) await presets.mount(agentCtx, cfg.coachPreset);
         configureGameAgent(agentCtx, cfg.coachPreset);
-          const experienceEditor = createExperienceEditor({ store: createExperienceStore({ dir: join(cfg.stateDir ?? process.env.HOME ?? '.', 'experience') }) });
+          // 经验库是可选能力：初始化失败（无状态目录等）不能让教练整体不可用。
+  let experienceEditor = null;
+  try {
+    experienceEditor = createExperienceEditor({ store: createExperienceStore({ dir: join(cfg.stateDir ?? process.env.HOME ?? '.', 'experience') }) });
+  } catch { experienceEditor = null; }
 registerGameMemoryTools(agentCtx, memory, cfg.defaultGame, cfg.monitorMatch, () => liveReplyState?.question ?? '');
   // 私有经验的读取与修订（只能改玩家自己的，必须带理由）。
   registerExperienceTools(agentCtx, experienceEditor);

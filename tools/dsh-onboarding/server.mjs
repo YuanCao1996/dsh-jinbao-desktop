@@ -1,4 +1,6 @@
 import http from 'node:http';
+import { createExperienceStore } from "../dsh-coach-server/lib/experience-store.js";
+import { createExperienceRuntime } from "../dsh-coach-server/lib/experience-runtime.mjs";
 import { randomBytes,timingSafeEqual,randomUUID } from 'node:crypto';
 import { mkdir,readFile,writeFile,rename,readdir,stat,open,rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -153,7 +155,10 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
   return {logsDir:join(stateDir,'logs'),logCount:files.length,recent,validTail,coachReady,
    activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000,updateBlocked:!!snapshot.match&&!snapshot.ended&&(snapshot.gameTime!=='等待对局'||snapshot.phase==='ChampSelect')&&Date.now()-snapshot.updatedAt<30000};
  }
- const overlay=await createOverlayService({stateDir,activity,canAutoRequest,
+ // 经验库：每局结束自动沉淀（JINBAO_EXPERIENCE=off 可关闭）。目录跟状态目录走，不新增配置。
+const experienceStore=createExperienceStore({dir:join(stateDir,'experience')});
+const experienceRuntime=createExperienceRuntime({store:experienceStore,enabled:String(process.env.JINBAO_EXPERIENCE??'on').toLowerCase()!=='off'});
+const overlay=await createOverlayService({stateDir,activity,canAutoRequest,experience:experienceRuntime,
   agentChat:async request=>{
    if(config.mode==='demo')throw error(409);
    if(config.mode==='cloud'&&cloudAgent)return cloudAgent.ask(request);

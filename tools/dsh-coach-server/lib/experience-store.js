@@ -151,8 +151,10 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
       return { action: 'dispute', id: existing.id, status: existing.status };
     }
     // Same lesson seen again: strengthen the evidence, never duplicate the line.
+    // A sighting with an explicit zero hit (a loss) must stay a miss instead of defaulting to 1.
+    const addHits = candidate.evidence?.hits === undefined ? 1 : Math.max(0, Number(candidate.evidence.hits) || 0);
     existing.evidence.games += Math.max(1, Number(candidate.evidence?.games) || 1);
-    existing.evidence.hits += Math.max(1, Number(candidate.evidence?.hits) || 1);
+    existing.evidence.hits += addHits;
     existing.scope = [...new Set([...existing.scope, ...record.scope])].slice(0, 8);
     if (record.patch) existing.patch = record.patch;
     existing.updatedAt = stamp();

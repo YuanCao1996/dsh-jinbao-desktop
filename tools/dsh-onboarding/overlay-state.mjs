@@ -383,6 +383,7 @@ const playerRows = players.map(p => {
     players: (teamWinRates?teamWinRates+'\n\n':'')+'英雄胜率 ↓\n'+(roster.join('\n') || '等待双方英雄数据。'),
     teamWinRates,
     knowledgeStatus:knowledge.failed?knowledge.message:'',
+    leaderboard:knowledge.leaderboard??null,
     teamWinRatesNote:liveEstimate?LIVE_ESTIMATE_NOTE:TEAM_STRENGTH_NOTE,
     liveTeamEstimate:liveEstimate,
     confirmation:augmentConfirmation(state,rows),
@@ -520,6 +521,22 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
         cache.rows=[...fresh,...cache.rows.filter(row=>!refreshedTypes.has(row?._type))];
         cache.baseLoaded=results.every(r=>r.status==='fulfilled'&&r.value.results?.length>0);
       };
+      // 等待态（没有当前英雄）时取两份总榜，避免海克斯页/胜率页空着；
+      // 数据是每日快照，缓存 10 分钟即可，进入对局后不再请求。
+      // 只在真正空闲时取总榜：选人阶段（有备选席英雄）继续走既有的按英雄查询，
+      // 否则会多打两次请求并和备选席数据重复。
+      const idleWait=game==='lol'&&!champion&&!rosterChampions(state).length;
+      if(idleWait&&(force||!cache.leaderboard||Date.now()-(cache.leaderboardAt??0)>600000)){
+        const [hexRes,heroRes]=await Promise.allSettled([
+          search({game,query:'大乱斗',dataset:'leaderboard',board:'hextech',limit:10}),
+          search({game,query:'大乱斗',dataset:'leaderboard',board:'heroes',limit:10}),
+        ]);
+        const pick=res=>res.status==='fulfilled'?(res.value.results??[]).map(item=>item.data):[];
+        const hexRows=pick(hexRes),heroRows=pick(heroRes);
+        if(hexRows.length||heroRows.length){cache.leaderboard={hextech:hexRows,heroes:heroRows};cache.leaderboardAt=Date.now();}
+        if(hexRes.status==='rejected')failed(hexRes.reason);
+        if(heroRes.status==='rejected')failed(heroRes.reason);
+      }
       await Promise.all([base(),...rosterChampions(state).filter(name=>game==='lol'&&(force||!cache.heroes.has(name))).map(async name=>{
         try{
           const result=await search({game,query:name,dataset:'aram-ranking',limit:1});
@@ -532,7 +549,7 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
         const rows=(result.results??[]).map(item=>item.data);if(rows.length)cache.candidates.set(name,rows);
         if(cache.candidates.size>100)cache.candidates.delete(cache.candidates.keys().next().value);
         if(stillCurrent()){
-          knowledge={...knowledge,rows:[...offered.flatMap(option=>cache.candidates.get(option)??[]),...cache.rows,...[...cache.heroes.values()].flat()]};
+          knowledge={...knowledge,rows:[...offered.flatMap(option=>cache.candidates.get(option)??[]),...cache.rows,...[...cache.heroes.values()].flat()],leaderboard:cache.leaderboard};
           updateAugmentRecommendations(state,knowledge.rows);await flush();
         }
         }catch(e){failed(e); /* Keep successful candidates and retry this slot later. */ }

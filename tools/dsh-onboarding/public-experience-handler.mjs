@@ -32,7 +32,7 @@ async function readJson(req, maxBody) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY } = {}) {
+export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY, authorize = null } = {}) {
   if (!dir) throw new Error('public experience handler needs a data directory');
   const library = createPublicLibrary({ dir });
 
@@ -42,6 +42,12 @@ export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY 
     if (action === 'method-not-allowed') {
       send(res, 405, { error: 'method-not-allowed' });
       return true;
+    }
+    // 读默认可匿名；写可以通过 authorize 钩子要求令牌（由调用方决定策略，这里不猜）。
+    if (authorize && action === 'upsert') {
+      let allowed = false;
+      try { allowed = await authorize(req); } catch { allowed = false; }
+      if (!allowed) { send(res, 401, { error: 'unauthorized' }); return true; }
     }
     try {
       if (action === 'query') {

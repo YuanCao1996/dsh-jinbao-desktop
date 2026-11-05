@@ -3,6 +3,7 @@ import { experienceRoute, experienceListPayload, correctRequest, publicLibraryRo
 import { createPublicLibrary } from "../dsh-coach-server/lib/public-library.mjs";
 import { createExperienceStore } from "../dsh-coach-server/lib/experience-store.js";
 import { createExperienceRuntime } from "../dsh-coach-server/lib/experience-runtime.mjs";
+import { syncPublicMemory } from "../dsh-coach-server/lib/public-remote.mjs";
 import { randomBytes,timingSafeEqual,randomUUID } from 'node:crypto';
 import { mkdir,readFile,writeFile,rename,readdir,stat,open,rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -161,6 +162,14 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
 const experienceStore=createExperienceStore({dir:join(stateDir,'experience')});
 const publicLibrary=createPublicLibrary({dir:join(stateDir,'experience','community')});
 const experienceRuntime=createExperienceRuntime({store:experienceStore,enabled:String(process.env.JINBAO_EXPERIENCE??'on').toLowerCase()!=='off'});
+// 社区经验同步：只有配置了地址才启动；默认完全静默，离线也不影响任何本地功能。
+const publicExperienceUrl=String(process.env.JINBAO_PUBLIC_EXPERIENCE_URL??'').trim();
+if(publicExperienceUrl){
+ const syncOnce=()=>{syncPublicMemory({store:experienceStore,dir:join(stateDir,'experience'),baseUrl:publicExperienceUrl,patch:String(process.env.JINBAO_GAME_PATCH??'')||null}).catch(()=>{});};
+ const syncTimer=setInterval(syncOnce,30*60*1000);
+ syncTimer.unref?.();
+ setTimeout(syncOnce,5000).unref?.();
+}
 const overlay=await createOverlayService({stateDir,activity,canAutoRequest,experience:experienceRuntime,
   agentChat:async request=>{
    if(config.mode==='demo')throw error(409);

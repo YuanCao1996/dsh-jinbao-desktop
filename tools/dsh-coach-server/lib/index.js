@@ -1,4 +1,6 @@
 ﻿import {loadRecoverySession,saveRecoverySession} from './recovery-session.js';
+import { createExperienceStore } from "./experience-store.js";
+import { createExperienceEditor } from "./agent-experience-edit.mjs";
 import { guardCoachRequest } from './local-http-auth.js';
 import {turnContext} from './turn-context.js';
 import {createTurnHealth,recoverySessionId,canRetryContext} from './turn-health.js';
@@ -40,6 +42,7 @@ import { projectWzryFacts } from "./adapters/wzry-facts.js";
 import { openCoachSession } from "./session-runtime.js";
 import { createGameMemory } from './game-memory.js';
 import { registerGameMemoryTools } from './game-memory-tools.js';
+import { registerExperienceTools } from "./experience-tools.js";
 import { dispatchGameChat, buildGameChatMessage } from './chat-bridge.js';
 import { gameModePrompt } from './game-mode-prompt.js';
 import { buildLolCoachingPlan, coachingStillCurrent, createAdviceValidity, adviceIsValid } from './lol-coaching-plan.js';
@@ -2136,7 +2139,10 @@ export function createMonitor(ctx, cfg, resolveGame) {
         const presets = agentCtx.get("agentPresets");
         if (presets) await presets.mount(agentCtx, cfg.coachPreset);
         configureGameAgent(agentCtx, cfg.coachPreset);
-        registerGameMemoryTools(agentCtx, memory, cfg.defaultGame, cfg.monitorMatch, () => liveReplyState?.question ?? '');
+          const experienceEditor = createExperienceEditor({ store: createExperienceStore({ dir: join(cfg.stateDir ?? process.env.HOME ?? '.', 'experience') }) });
+registerGameMemoryTools(agentCtx, memory, cfg.defaultGame, cfg.monitorMatch, () => liveReplyState?.question ?? '');
+  // 私有经验的读取与修订（只能改玩家自己的，必须带理由）。
+  registerExperienceTools(agentCtx, experienceEditor);
         registerScreenTool(agentCtx,{stateDir:cfg.sessionCwd,game:cfg.defaultGame,match:cfg.monitorMatch});
         // 修复 #2:coach_reply 提交后拒绝同回合的收尾 step(省一次 LLM 往返)
         installReplyStepGuard(agentCtx, liveReplyGuard);

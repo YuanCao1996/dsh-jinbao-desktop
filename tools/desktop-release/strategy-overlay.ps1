@@ -976,6 +976,17 @@ try{
     [IO.File]::WriteAllText($stateFile,($selectionFixture|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false));Update-State
     $script:testResult.toolProgressVisible=$controls.ChatStatusText.Text -eq '已联网搜索，继续分析…' -and $controls.ChatStatusText.Visibility -eq 'Visible'
     $script:job=$null
+    # 单行刷新 + 学习行短暂优先：最近学到的经验不能被紧随其后的工具调用顶掉。
+    $nowMs=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $toolRow=[pscustomobject]@{id='t1';topic='自动教练';clock='06:12';label='读取当前对局';phase='running';at=$nowMs}
+    $learnRow=[pscustomobject]@{id='n1';topic='经验学习';clock='';label='记下一条经验：对面双坦先补重伤';phase='done';at=$nowMs-1000}
+    $picked=@(Select-AgentActivityRow @($learnRow,$toolRow) 5000)
+    $script:testResult.stickyLearningRow=($picked.Count -eq 1) -and ([string]$picked[0].topic -eq '经验学习')
+    $oldLearn=[pscustomobject]@{id='n2';topic='经验学习';clock='';label='旧的学习行';phase='done';at=$nowMs-9000}
+    $pickedOld=@(Select-AgentActivityRow @($oldLearn,$toolRow) 5000)
+    $script:testResult.stickyLearningExpires=($pickedOld.Count -eq 1) -and ([string]$pickedOld[0].topic -eq '自动教练')
+    $onlyTool=@(Select-AgentActivityRow @($toolRow) 5000)
+    $script:testResult.singleLineRefresh=($onlyTool.Count -eq 1) -and ([string]$onlyTool[0].label -eq '读取当前对局')
     Test-AgentActivitySurface
     $script:testExitChoice=$false;$controls.CloseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
     $script:testResult.exitCancelKeepsWindow=!$script:closing -and !$script:exitApproved

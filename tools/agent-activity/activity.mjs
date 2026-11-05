@@ -35,7 +35,7 @@ export async function createAgentActivity({stateDir,getView=()=>null,now=Date.no
    if(closed)return false;
    const text=sanitizeActivityText(label);
    if(!String(text).trim())return false;
-   row('note-'+randomUUID(),{id:task,topic,clock},text,'done');
+   row('note-'+randomUUID(),{id:task,topic,clock},text,'done',{at:Number(now())});
    return true;
   },
   isEnabled:()=>enabled&&!closed,

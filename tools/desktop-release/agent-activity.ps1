@@ -1,4 +1,16 @@
 ﻿# Display-only trace. No arguments, credentials or private reasoning are rendered.
+# 单行持续刷新：默认显示最新一步；刚学到经验时让那条学习行短暂优先显示，
+# 否则它会被紧随其后的工具调用顶掉，玩家看不到“学到了什么”。
+function Select-AgentActivityRow($rows,[int]$stickyMs=5000){
+ $all=@($rows|Where-Object {$_ -and $_.id})
+ if(!$all.Count){return @()}
+ $last=$all | Select-Object -Last 1
+ $learn=$all | Where-Object {[string]$_.topic -eq '经验学习'} | Select-Object -Last 1
+ if($learn -and [string]$last.topic -ne '经验学习' -and $null -ne $learn.at){
+  try{$age=([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-[double]$learn.at;if($age -ge 0 -and $age -lt $stickyMs){return @($learn)}}catch{}
+ }
+ return @($last)
+}
 foreach($name in @('AgentActivityPanel','AgentActivityScroll','AgentActivityRows','AgentActivityLatest')){$controls[$name]=$window.FindName($name)}
 $script:activityRevision=-1;$script:activityScope='';$script:activityNodes=@{};$script:activityFollow=$true;$script:activityRendering=$false;$script:activityJob=$null
 $controls.ActivityMenuItem=New-Object Windows.Controls.MenuItem
@@ -46,7 +58,7 @@ function Update-AgentActivity {
  $script:activityRevision=$activity.revision;$scroll=$controls.AgentActivityScroll;$offset=$scroll.VerticalOffset
  $script:activityRendering=$true
  try{
-  $rows=@($activity.rows|Where-Object {$_ -and $_.id}|Select-Object -Last 1);$ids=@{}
+  $rows=@(Select-AgentActivityRow $activity.rows 5000);$ids=@{}
   foreach($row in $rows){
    $id=[string]$row.id;$ids[$id]=$true
    if(!$script:activityNodes.ContainsKey($id)){

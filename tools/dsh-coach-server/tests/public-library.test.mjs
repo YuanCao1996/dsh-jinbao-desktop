@@ -94,3 +94,21 @@ test('pruning drops never-confirmed knowledge that nobody added to for half a ye
     assert.equal((await later.stats()).total, 0);
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
 });
+
+test('one account cannot promote its own lesson, three independent accounts can', async () => {
+  const { dir, library } = await fixture();
+  try {
+    await library.upsert([lesson({ fingerprint: 'x', claim: '对面双坦先补重伤' })], { account: 'a' });
+    await library.upsert([lesson({ fingerprint: 'x', claim: '对面双坦先补重伤' })], { account: 'a' });
+    let rows = await library.query({ game: 'lol', patch: '14.21', includePending: false });
+    assert.equal(rows.length, 0, 'a single account stays in the pending pool');
+    await library.upsert([lesson({ fingerprint: 'x', claim: '对面双坦先补重伤' })], { account: 'b' });
+    rows = await library.query({ game: 'lol', patch: '14.21', includePending: false });
+    assert.equal(rows.length, 0, 'two accounts are still pending');
+    await library.upsert([lesson({ fingerprint: 'x', claim: '对面双坦先补重伤' })], { account: 'c' });
+    rows = await library.query({ game: 'lol', patch: '14.21', includePending: false });
+    assert.equal(rows.length, 1, 'three independent accounts promote it');
+    const pending = await library.query({ game: 'lol', patch: '14.21', includePending: true });
+    assert.equal(pending.length, 1);
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+});

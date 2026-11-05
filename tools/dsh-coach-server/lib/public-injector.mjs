@@ -59,6 +59,8 @@ export function buildInjection({ lessons = [], context = {}, patch = null, budge
   const specific = (lesson) => (lesson.scope ?? []).some((tag) => /^(champ|aug|comp):/.test(String(tag)));
   const ranked = (Array.isArray(lessons) ? lessons : [])
     .filter((lesson) => lesson && lesson.claim)
+    // 只有被至少 3 个独立账号验证过的经验才能进提示词；待验证池不对外。
+    .filter((lesson) => (lesson.status ?? 'public') === 'public')
     .filter((lesson) => !specific(lesson) || (lesson.scope ?? []).some((tag) => /^(champ|aug|comp):/.test(String(tag)) && wanted.has(String(tag))))
     // 版本不符的旧经验不进提示词；没有版本标注的保留（判不出年代的别静默丢）
     .filter((lesson) => !lesson.patch || !patch || lesson.patch === patch)

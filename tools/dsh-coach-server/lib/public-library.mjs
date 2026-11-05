@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { toPublicLesson } from './public-lessons.mjs';
 
 // Server-side storage for shared lessons.
@@ -58,7 +59,11 @@ export function createPublicLibrary({ dir, now = Date.now } = {}) {
 
   // Upsert, not append: the same fingerprint for the same patch is the same knowledge, so its
   // evidence accumulates. A refutation keeps the highest counter instead of being averaged away.
-  async function upsert(incoming = []) {
+  // 贡献者只以哈希形式记录：既能在服务端做独立账号计数，又不留下账号明文。
+  const contributorHash = (account) => createHash('sha1').update(String(account ?? 'anonymous')).digest('hex').slice(0, 12);
+  const PROMOTE_AT = 3;
+
+  async function upsert(incoming = [], { account = null } = {}) {
     await load();
     const accepted = [];
     const rejected = [];
@@ -70,9 +75,12 @@ export function createPublicLibrary({ dir, now = Date.now } = {}) {
       if (!checked.ok) { rejected.push({ fingerprint: candidate?.fingerprint ?? null, reason: checked.reason }); continue; }
       const lesson = checked.lesson;
       const same = lessons.find((row) => row.fingerprint === lesson.fingerprint && (row.patch ?? null) === (lesson.patch ?? null));
+      const who = contributorHash(account);
       if (!same) {
         lessons.push({
           ...lesson,
+          contributors: [who],
+          status: PROMOTE_AT <= 1 ? 'public' : 'pending',
           firstSeen: day(stamp),
           lastSeen: day(stamp),
         });
@@ -84,6 +92,9 @@ export function createPublicLibrary({ dir, now = Date.now } = {}) {
       same.evidence.hits = (Number(same.evidence.hits) || 0) + (Number(lesson.evidence.hits) || 0);
       same.evidence.counter = Math.max(Number(same.evidence.counter) || 0, Number(lesson.evidence.counter) || 0);
       same.scope = [...new Set([...(same.scope ?? []), ...(lesson.scope ?? [])])].slice(0, 8);
+      // 只有不同的账号才算一次新的独立确认：同一个账号重复提交不会把经验推成“公共”。
+      same.contributors = [...new Set([...(same.contributors ?? []), who])].slice(0, 50);
+      same.status = (same.contributors.length >= PROMOTE_AT) ? 'public' : 'pending';
       same.lastSeen = day(stamp);
       updated += 1;
       accepted.push(lesson.fingerprint);
@@ -92,7 +103,7 @@ export function createPublicLibrary({ dir, now = Date.now } = {}) {
     return { accepted, rejected, added, updated, total: lessons.length };
   }
 
-  async function query({ game = 'lol', patch = null, kind = null, limit = 50, minGames = 1 } = {}) {
+  async function query({ game = 'lol', patch = null, kind = null, limit = 50, minGames = 1, includePending = true } = {}) {
     await load();
     const wanted = `game:${game}`;
     return lessons
@@ -101,6 +112,8 @@ export function createPublicLibrary({ dir, now = Date.now } = {}) {
       // Undated knowledge is still useful; dated knowledge from another patch is not.
       .filter((lesson) => !lesson.patch || !patch || lesson.patch === patch)
       .filter((lesson) => (Number(lesson.evidence?.games) || 0) >= minGames)
+      // 待验证池不对外提供：一条经验要至少 3 个独立账号命中才算公共知识。
+      .filter((lesson) => includePending || (lesson.status ?? 'public') === 'public')
       .map((lesson) => ({ lesson, score: confidenceOf(lesson) * 2 + Math.log1p(Number(lesson.evidence?.games) || 0) }))
       .sort((left, right) => right.score - left.score)
       .slice(0, limit)

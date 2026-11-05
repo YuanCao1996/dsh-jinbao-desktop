@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { diffMd, editNote } from './md-edit.mjs';
 import { join } from 'node:path';
 
 // Experience store: the "learn from every match" layer.
@@ -52,6 +53,8 @@ function confidenceOf(record) {
 }
 
 function statusOf(record) {
+  // 退役是终态：md 里删掉的条目不能被一次重新计算又"复活"，否则用户改了也不生效。
+  if (record.status === 'retired') return 'retired';
   const games = Number(record.evidence?.games) || 0;
   const counter = Number(record.evidence?.counter) || 0;
   const hits = Number(record.evidence?.hits) || 0;
@@ -214,6 +217,38 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
     return { lines: picked.map((item) => item.line), ids: picked.map((item) => item.id), chars: used };
   }
 
+  // md 编辑写回：玩家改自己的私有 md、agent 修订过期条目，都从这里落地。
+  // 规则：删掉/改写的旧条目退役（保留历史），新增行从 1 局起算，未改动的证据不受影响。
+  async function applyMdEdit({ kind, player = null, mdText, by = 'player', reason = '' } = {}) {
+    await load();
+    const scope = records.filter((record) => record.kind === kind
+      && (record.private ? record.player === player : true)
+      && !(record.status === 'retired')
+      && !(record.status === 'stale'));
+    const { retired, added } = diffMd({ mdText, records: scope });
+    const note = editNote({ by, reason });
+    for (const record of retired) {
+      record.status = 'retired';
+      record.retiredAt = stamp();
+      record.editNote = note;
+    }
+    for (const entry of added) {
+      const games = 1;
+      records.push({
+        id: `xp-${String(stamp()).slice(-6)}-${Math.random().toString(36).slice(2, 6)}`,
+        kind, claim: entry.claim, scope: [],
+        private: PRIVATE_KINDS.has(kind), player: PRIVATE_KINDS.has(kind) ? player : null,
+        patch: null,
+        evidence: { games, hits: games, counter: 0 },
+        validFrom: stamp(), updatedAt: stamp(),
+        status: 'candidate',
+        editNote: note,
+      });
+    }
+    await flush();
+    return { retired: retired.length, added: added.length, note };
+  }
+
   // The player saying "that is wrong" is the strongest signal the system ever gets.
   async function correct(id, reason = '') {
     await load();
@@ -238,5 +273,5 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
     evidence: record.evidence,
   }));
 
-  return { load, remember, retrieve, correct, snapshot, indexFile: indexPath };
+  return { load, remember, retrieve, correct, applyMdEdit, snapshot, indexFile: indexPath };
 }

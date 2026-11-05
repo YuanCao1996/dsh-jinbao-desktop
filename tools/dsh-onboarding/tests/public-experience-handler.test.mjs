@@ -17,7 +17,7 @@ function fakeRes() {
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-handler-'));
-  const handler = createPublicExperienceHandler({ dir, allowRead: true });
+  const handler = createPublicExperienceHandler({ dir, allowRead: true, allowPending: true });
   return { dir, handler };
 }
 
@@ -65,7 +65,7 @@ test('private lessons are refused and the gateway keeps serving', async () => {
 test('a token policy gates both write and read', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-auth-'));
   try {
-    const handler = createPublicExperienceHandler({ dir, allowRead: true, authorize: (req) => req.headers?.authorization === 'Bearer good' });
+    const handler = createPublicExperienceHandler({ dir, allowRead: true, allowPending: true, authorize: (req) => req.headers?.authorization === 'Bearer good' });
     const lesson = { kind: 'recognition', claim: '高光遮挡时先取前后两帧比对再判定', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } };
     const request = (method, authorization) => {
       const req = fakeReq(method, '/api/public/experience' + (method === 'GET' ? '?game=lol' : ''), method === 'POST' ? { lessons: [lesson] } : undefined);
@@ -116,5 +116,31 @@ test('read is disabled by default so experience text never leaves the server', a
     await handler(fakeReq('POST', '/api/public/experience', { lessons: [{ kind: 'recognition', claim: '高光遮挡时先取前后两帧比对', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } }] }), write);
     assert.equal(write.state.status, 200);
     assert.equal(JSON.parse(write.state.body).added, 1);
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+});
+
+test('uploads are attributed so three independent accounts can promote a lesson', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-attr-'));
+  try {
+    const handler = createPublicExperienceHandler({ dir, allowRead: true, identify: async (req) => req.headers?.['x-account'] ?? null });
+    const lesson = { kind: 'recognition', claim: '高光遮挡时先取前后两帧比对再判定', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } };
+    const upload = async (account) => {
+      const req = fakeReq('POST', '/api/public/experience', { lessons: [lesson] });
+      req.headers = account ? { 'x-account': account } : {};
+      const res = fakeRes();
+      await handler(req, res);
+      return JSON.parse(res.state.body);
+    };
+    assert.equal((await upload('a')).added, 1);
+    await upload('a');
+    await upload('a');
+    const pendingOnly = fakeRes();
+    await handler(fakeReq('GET', '/api/public/experience?game=lol'), pendingOnly);
+    assert.equal((JSON.parse(pendingOnly.state.body).lessons ?? []).length, 0, 'one account cannot promote its own lesson');
+    await upload('b');
+    await upload('c');
+    const promoted = fakeRes();
+    await handler(fakeReq('GET', '/api/public/experience?game=lol'), promoted);
+    assert.equal(JSON.parse(promoted.state.body).lessons.length, 1, 'three distinct accounts promote it');
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
 });

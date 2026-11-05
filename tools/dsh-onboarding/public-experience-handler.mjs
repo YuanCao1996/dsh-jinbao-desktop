@@ -32,7 +32,7 @@ async function readJson(req, maxBody) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY, authorize = null, allowRead = false } = {}) {
+export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY, authorize = null, allowRead = false, identify = null, allowPending = false } = {}) {
   if (!dir) throw new Error('public experience handler needs a data directory');
   const library = createPublicLibrary({ dir });
 
@@ -59,11 +59,15 @@ export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY,
     }
     try {
       if (action === 'query') {
-        send(res, 200, { lessons: await library.query(publicQueryParams(req.url)) });
+        send(res, 200, { lessons: await library.query({ ...publicQueryParams(req.url), includePending: allowPending }) });
         return true;
       }
       const payload = publicUpsertBody(await readJson(req, maxBody));
-      send(res, 200, await library.upsert(payload.lessons));
+      // 账号只用于独立账号计数与每日配额，库内只保存哈希。
+      let account = null;
+      if (identify) { try { account = await identify(req); } catch { account = null; } }
+      const result = await library.upsert(payload.lessons, { account });
+      send(res, 200, result);return true;
       return true;
     } catch (error) {
       // A malformed upload must not take the gateway down or leak internals.

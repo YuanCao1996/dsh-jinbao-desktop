@@ -403,6 +403,9 @@ const playerRows = players.map(p => {
    eventTicker: (() => { const last = state.events.at(-1); return last ? `${last.time ?? ''} ${last.text ?? ''}`.trim() : ''; })(),
     chatRows: state.chat.slice(-40).map(r => ({role:r.role,origin:r.origin??'',text:r.text,failed:r.failed===true})),
     suggestedQuestion: suggestOverlayQuestion(state),
+    // 经验库给出的历史段落（已带标题与实际字节预算）；教练消息里包含整份 context，
+    // 因此把它放进视图就等于放进提示词，无需再改消息构造。
+    experience: typeof state.experienceSection==='string' ? state.experienceSection : '',
     status: state.agentStatus|| (knowledge.loading ? '正在检索推荐…' : ''), updatedAt: state.at,
   };
 }
@@ -439,6 +442,17 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   async function save() {
     if (closed) return;
     // 局结束时把这一局交给经验库（同一局只会提炼一次；未成交给胜负事实，因此只沉淀与胜负无关的教训）。
+  if(experience && experience.pack){
+   try{
+    const tags=['game:'+(state.game||'lol')];
+    if(state.me?.champion)tags.push('champ:'+state.me.champion);
+    for(const name of state.ownedAugments??[])if(name)tags.push('aug:'+name);
+    if(state.phase)tags.push('phase:'+String(state.phase).toLowerCase());
+    if(state.me?.dead===true)tags.push('event:death');
+    const packed=await experience.pack({tags});
+    if(packed && packed.section!==state.experienceSection)state.experienceSection=packed.section;
+   }catch{}
+  }
   if(experience && state.ended){
    const facts={game:state.game,match:state.match,champion:state.me?.champion??'',ended:true,
     deaths:(state.events??[]).filter(e=>/阵亡|死亡|被击杀/.test(String(e?.text??''))).length,

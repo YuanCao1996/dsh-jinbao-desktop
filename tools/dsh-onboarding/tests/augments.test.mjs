@@ -1,6 +1,8 @@
+import { createExperienceStore } from "../../dsh-coach-server/lib/experience-store.js";
+import { createExperienceRuntime } from "../../dsh-coach-server/lib/experience-runtime.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp,mkdir,writeFile,appendFile } from 'node:fs/promises';
+import { mkdtemp,mkdir,writeFile,appendFile,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initialOverlayState,applyOverlayEvent,overlayView,createOverlayService,createOverlayRouter } from '../overlay-state.mjs';
@@ -315,4 +317,21 @@ test('a merged category label cannot make a readable slot ambiguous',()=>{
  const offer=output.filter(event=>event.kind==='augment_offer').at(-1);
  assert.ok(offer,'the panel must stay recognisable');
  assert.deepEqual(offer.options.map(option=>option.name),['甲','尖端发明家','乙']);
+});
+
+test('the experience pack reaches the shared context the coach already receives', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-xp-view-'));
+ await mkdir(join(dir,'logs'));
+ await writeFile(join(dir,'logs/live.jsonl'),JSON.stringify({game:'lol',kind:'game_start',t:Date.now(),me:{champion:'安妮',items:[]},allies:[],enemies:[]})+'\n');
+ const store=createExperienceStore({dir:join(dir,'experience')});
+ await store.remember({kind:'build',claim:'安妮前两件先做残疫',scope:['game:lol','champ:安妮']});
+ const runtime=createExperienceRuntime({store,patch:null});
+ const service=await createOverlayService({stateDir:dir,pollMs:10,search:async()=>({results:[]}),experience:runtime});
+ try{
+  for(let i=0;i<80&&!service.view().experience;i+=1)await new Promise(r=>setTimeout(r,20));
+  const text=service.view().experience;
+  assert.match(text,/历史经验/);
+  assert.match(text,/残疫/);
+  assert.ok(text.length<600,'the pack stays small enough for the overlay');
+ }finally{await service.close();await rm(dir,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
 });

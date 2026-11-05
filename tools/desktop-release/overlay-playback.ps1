@@ -181,11 +181,10 @@ function Playback-Tick {
     else{$script:playbackPhase='linger';$script:lineElapsed=0}
    }
   }else{
-   # 长句不再恒速滚十几秒：目标滚动时长按字数估（60ms/字，限制 2.4–9 秒），再按积压加速。
-   $chars=[Math]::Max(1,([string]$script:scrollText).Length)
-   $target=[Math]::Max(2.4,[Math]::Min(9.0,$chars*0.06))/$script:paceFactor
+   # 长句必须留够阅读时间（回归用例明确要求 600 字的滚动不能被"抢进度"冲完），
+   # 所以速度只跟积压走：基础 52px/s，按积压因子加速。
    $delay=if($script:paceFactor -gt 1){180}else{400}
-   $speed=if($script:scrollEnd -gt 0){[Math]::Max(40,$script:scrollEnd/$target)}else{52}
+   $speed=52*$script:paceFactor
    $travel=[Math]::Max(0,$script:lineElapsed-$delay)-[Math]::Max(0,$previousElapsed-$delay)
    $script:scrollOffset=[Math]::Min($script:scrollEnd,$script:scrollOffset+$travel/1000*$speed)
    $controls.NarrowText.RenderTransform.X=-$script:scrollOffset

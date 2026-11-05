@@ -290,7 +290,17 @@ const overlay=await createOverlayService({stateDir,activity,canAutoRequest,exper
    if(req.url==='/api/speech'&&req.method==='GET'){send(res,200,speech?{...speech.status(),keyConfigured:!!await resolve('speech')}:{supported:false});return;}
    if(req.url==='/api/speech'&&req.method==='POST'&&speech){await locked(async()=>{const value=await body(req,2048),key=value.apiKey;delete value.apiKey;if(key!==undefined&&(typeof key!=='string'||key.length>512||/[\r\n]/.test(key)))throw error(400);const result=await speech.configure(value);if(key!==undefined){if(key.trim())await credentials.set(refs.speech,key.trim());else await credentials.unset(refs.speech);}send(res,200,{...result,keyConfigured:!!await resolve('speech')});});return;}
    if(req.url==='/api/speech/preview'&&req.method==='POST'&&speech){await body(req,1024);send(res,200,speech.preview());return;}
-   if(req.url==='/api/diagnostics'&&req.method==='GET'){send(res,200,diagnostics?.status()??{recording:false,supported:false});return;}
+   // 经验库：列出当前会注入的教训，以及一键否决。
+  if(req.url==='/api/experience'&&req.method==='GET'){
+   const rows=experienceStore?await experienceStore.load():[];
+   send(res,200,{rows:rows.map(row=>({id:row.id,kind:row.kind,claim:row.claim,scope:row.scope,private:!!row.private,status:row.status??'candidate',evidence:row.evidence}))});return;
+  }
+  if(req.url==='/api/experience/correct'&&req.method==='POST'){
+   const value=await body(req,1024);
+   const result=experienceStore&&value?.id?await experienceStore.correct(String(value.id),String(value.reason??'')):{ok:false,reason:'missing-id'};
+   send(res,200,result);return;
+  }
+  if(req.url==='/api/diagnostics'&&req.method==='GET'){send(res,200,diagnostics?.status()??{recording:false,supported:false});return;}
    if(req.url==='/api/diagnostics/mark'&&req.method==='POST'&&diagnostics){const value=await body(req,1024);send(res,200,diagnostics.mark(value.kind));return;}
    if(req.url==='/api/diagnostics/export'&&req.method==='GET'&&diagnostics){res.setHeader('Content-Disposition','attachment; filename="jinbao-diagnostics.json"');send(res,200,await diagnostics.export());return;}
    const memoryPage=/^\/api\/memory\/(lol|wzry|generic)$/.exec(req.url);

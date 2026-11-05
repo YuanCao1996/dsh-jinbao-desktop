@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { experienceRoute, experienceListPayload, correctRequest } from "./experience-routes.mjs";
 import { createExperienceStore } from "../dsh-coach-server/lib/experience-store.js";
 import { createExperienceRuntime } from "../dsh-coach-server/lib/experience-runtime.mjs";
 import { randomBytes,timingSafeEqual,randomUUID } from 'node:crypto';
@@ -291,13 +292,13 @@ const overlay=await createOverlayService({stateDir,activity,canAutoRequest,exper
    if(req.url==='/api/speech'&&req.method==='POST'&&speech){await locked(async()=>{const value=await body(req,2048),key=value.apiKey;delete value.apiKey;if(key!==undefined&&(typeof key!=='string'||key.length>512||/[\r\n]/.test(key)))throw error(400);const result=await speech.configure(value);if(key!==undefined){if(key.trim())await credentials.set(refs.speech,key.trim());else await credentials.unset(refs.speech);}send(res,200,{...result,keyConfigured:!!await resolve('speech')});});return;}
    if(req.url==='/api/speech/preview'&&req.method==='POST'&&speech){await body(req,1024);send(res,200,speech.preview());return;}
    // 经验库：列出当前会注入的教训，以及一键否决。
-  if(req.url==='/api/experience'&&req.method==='GET'){
+  if(experienceRoute(req.method,req.url).action==='list'){
    const rows=experienceStore?await experienceStore.load():[];
-   send(res,200,{rows:rows.map(row=>({id:row.id,kind:row.kind,claim:row.claim,scope:row.scope,private:!!row.private,status:row.status??'candidate',evidence:row.evidence}))});return;
+   send(res,200,experienceListPayload(rows));return;
   }
-  if(req.url==='/api/experience/correct'&&req.method==='POST'){
-   const value=await body(req,1024);
-   const result=experienceStore&&value?.id?await experienceStore.correct(String(value.id),String(value.reason??'')):{ok:false,reason:'missing-id'};
+  if(experienceRoute(req.method,req.url).action==='correct'){
+   const value=correctRequest(await body(req,1024));
+   const result=value.ok&&experienceStore?await experienceStore.correct(value.id,value.reason):value;
    send(res,200,result);return;
   }
   if(req.url==='/api/diagnostics'&&req.method==='GET'){send(res,200,diagnostics?.status()??{recording:false,supported:false});return;}

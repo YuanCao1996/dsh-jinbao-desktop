@@ -1,4 +1,4 @@
-import {loadRecoverySession,saveRecoverySession} from './recovery-session.js';
+﻿import {loadRecoverySession,saveRecoverySession} from './recovery-session.js';
 import { guardCoachRequest } from './local-http-auth.js';
 import {turnContext} from './turn-context.js';
 import {createTurnHealth,recoverySessionId,canRetryContext} from './turn-health.js';
@@ -246,7 +246,7 @@ function buildCoachMessage(body, adapter) {
     "结合请求内容与已有对局记忆,决定是否需要查询数据(site_query 查英雄/胜率/梯度等本地真实数据,web_search 查版本/新套路/冷知识),然后给出最终播报文本。",
     "",
     "## 硬性规则",
-    adapter?.id === 'lol' ? '- 按本轮阶段任务输出2—4条短句，总计80—180字；紧急提醒1—2句。口语化，不提工具/联网/DSH，无新信息可静默。' : `- 保持传入人设的口吻,≤${maxReplyTokens}字,单句,口语化,无markdown,不提工具/联网/DSH`,
+    adapter?.id === 'lol' ? '- 按本轮阶段任务输出：最多两句、总计不超过60字、单段不换行；紧急提醒仅一句。口语化，不提工具/联网/DSH，无新信息可静默。' : `- 保持传入人设的口吻,≤${maxReplyTokens}字,单句,口语化,无markdown,不提工具/联网/DSH`,
     "- 纯系统噪音消息(如“互动内容由AI生成”)→ 输出空字符串",
     "- 结论只能来自输入事实、对局记忆或查询到的数据,不得凭空编造数值",
     "- 调用 coach_reply 一次性输出最终播报文本:调用即结束,调用后立即停止,不要再输出文字、不要再调其他工具、不要再次调用 coach_reply"

@@ -1,4 +1,4 @@
-import test from 'node:test';
+﻿import test from 'node:test';
 import assert from 'node:assert/strict';
 import {buildLolCoachingPlan, coachingStillCurrent,createAdviceValidity,adviceIsValid} from '../lib/lol-coaching-plan.js';
 import {initialOverlayState,applyOverlayEvent,overlayView} from '../../dsh-onboarding/overlay-state.mjs';
@@ -138,7 +138,8 @@ test('adapter passes stage events into native Agent route and removes conflictin
   assert.deepEqual(body._coachEvents,[e]);
   assert.match(body.prompt,/出门装备/);
   assert.doesNotMatch(body.prompt,/≤50字/);
-  assert.match(adapter.prompt.eventToBody(e).prompt,/80—180字/);
+  // 口径统一：不再要求 80—180 字，改为最多两句、总计不超过 60 字
+  assert.match(adapter.prompt.eventToBody(e).prompt,/不超过60字/);
 });
 
 test('native monitor rebuilds stage context and suppresses a reply when options change during inference', async t => {

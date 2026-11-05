@@ -1,4 +1,4 @@
-// Phase policy is independent of the Agent transport. Polls only wake the Agent
+﻿// Phase policy is independent of the Agent transport. Polls only wake the Agent
 // for a milestone or a material change; dispatch rebuilds facts from live memory.
 import {isCompletedItem} from '../../lol-companion/item-policy.mjs';
 import {eventWindow} from './event-window.mjs';
@@ -116,7 +116,7 @@ export function buildLolCoachingPlan(events = [], current = null) {
   return { stage, facts, prompt: [
     '【本轮阶段任务】' + TASKS[stage],
     '【本轮筛选事实 JSON】' + JSON.stringify(facts),
-    '优先执行本轮阶段任务，不沿用历史阶段。输出2—4条短句，总计80—180字；紧急局势仅1—2句。先结论再具体依据，每句对应本局英雄、强化、装备或事件。不复述面板，不输出泛泛口号，不显示玩家名。',
+    '优先执行本轮阶段任务，不沿用历史阶段。输出最多两句、总计不超过60字、单段不换行；紧急局势仅一句。先结论再依据，每句对应本局英雄、强化、装备或事件。不复述面板，不输出泛泛口号，不显示玩家名。',
     '事实与资料分开：缺少决定结论的英雄技能、强化效果、装备或胜率资料时，使用现有DSH资料查询/联网工具，限定本局模式与版本；查不到就明确缺口，不编造数据。大招、金钱、装备和候选以最新事实为准。历史建议不是事实；不重复最近已播报且没有变化的建议。',
   ].join('\n') };
 }

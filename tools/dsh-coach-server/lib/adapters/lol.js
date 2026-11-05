@@ -1,4 +1,4 @@
-import { gameModePrompt, normalizeLolMode } from '../game-mode-prompt.js';
+﻿import { gameModePrompt, normalizeLolMode } from '../game-mode-prompt.js';
 import { buildLolCoachingPlan, stateCoachingTrigger } from '../lol-coaching-plan.js';
 // adapters/lol.js — 英雄联盟(端游)adapter
 // ----------
@@ -723,7 +723,7 @@ export const LOL_ADAPTER = {
   persona: {
     systemPrompt: PERSONA_SYSTEM_PROMPT,
     maxReplyTokens: 180,
-    replyDescription: "输出本轮阶段建议，2—4条短句、80—180字；紧急提醒1—2句，无新信息可静默。调用后本次请求即完成。",
+    replyDescription: "输出本轮阶段建议：最多两句、总计不超过60字、单段不换行；紧急提醒仅一句。无新信息可静默。调用后本次请求即完成。",
     replyParamDescription: "最终播报文本,可为空字符串(表示静音)",
   },
   deepKeywords: ["出装", "天赋", "符文", "对线", "团战", "开团", "海克斯", "强化", "阵容", "克制", "强度", "胜率", "连招", "复盘", "节奏"],

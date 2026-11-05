@@ -407,7 +407,7 @@ const playerRows = players.map(p => {
   };
 }
 
-export async function createOverlayService({ stateDir, agentChat, agentImage, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, equipmentOpeningRetryMs=15000, knowledgeRetryMs=15000,activity,canAutoRequest }) {
+export async function createOverlayService({ stateDir, agentChat, agentImage, search, pollMs = 500, equipmentDebounceMs=2000, equipmentCooldownMs=30000, equipmentOpeningRetryMs=15000, knowledgeRetryMs=15000,activity,canAutoRequest,experience=null }) {
   search=createKnowledgeSearch(search);
   const logs = join(stateDir, 'logs'), output = join(stateDir, 'overlay-state.json');
   await mkdir(logs, { recursive: true });
@@ -438,7 +438,14 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   const view=()=>({...overlayView(state,knowledge),agentActivity:activity?.snapshot(state)??{supported:false,enabled:false,revision:0,rows:[]}});
   async function save() {
     if (closed) return;
-    await writeFile(output + '.tmp', JSON.stringify(view()), { mode: 0o600 });
+    // 局结束时把这一局交给经验库（同一局只会提炼一次；未成交给胜负事实，因此只沉淀与胜负无关的教训）。
+  if(experience && state.ended){
+   const facts={game:state.game,match:state.match,champion:state.me?.champion??'',ended:true,
+    deaths:(state.events??[]).filter(e=>/阵亡|死亡|被击杀/.test(String(e?.text??''))).length,
+    recognition:{blindFrames:(state.events??[]).filter(e=>e?.kind==='augment_capture_blind').length}};
+   Promise.resolve().then(()=>experience.finish?.(facts)).catch(()=>{});
+  }
+  await writeFile(output + '.tmp', JSON.stringify(view()), { mode: 0o600 });
     await rename(output + '.tmp', output);
     await writeFile(join(stateDir,'overlay-chat.json'),JSON.stringify({game:state.game,match:state.match,matchStartedAt:state.matchStartedAt,chat:state.chat}),{mode:0o600});
     await memory.snapshot(state, knowledge.rows ?? []);

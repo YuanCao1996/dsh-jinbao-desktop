@@ -56,9 +56,10 @@ function Update-AgentActivity {
    $line=$script:activityNodes[$id]
    $phase=switch([string]$row.phase){'running'{'进行中'}'queued'{'等待'}'done'{'完成'}'failed'{'失败'}'unavailable'{'不可用'}'cancelled'{'已取消'}'draft'{'草稿'}default{''}}
    $duration=if($null -ne $row.elapsedMs){' · '+([Math]::Round([double]$row.elapsedMs/1000,1))+'秒'}else{''}
-   $line.Text=([string]$row.clock)+'  '+([string]$row.topic)+' · '+([string]$row.label)+' · '+$phase+$duration
+   $learn=([string]$row.topic -eq '经验学习')
+   $line.Text=if($learn){'✔ '+([string]$row.label)}else{([string]$row.clock)+'  '+([string]$row.topic)+' · '+([string]$row.label)+' · '+$phase+$duration}
    # row.text is deliberately not rendered: it is what made each entry several lines.
-   $line.Foreground=switch([string]$row.phase){'running'{'#E7BE79'}'failed'{'#F5AD91'}'draft'{'#AEBECE'}default{'#94A3B8'}}
+   $line.Foreground=if($learn){'#7FD1A0'}else{switch([string]$row.phase){'running'{'#E7BE79'}'failed'{'#F5AD91'}'draft'{'#AEBECE'}default{'#94A3B8'}}}
   }
   foreach($id in @($script:activityNodes.Keys)){if(!$ids.ContainsKey($id)){$controls.AgentActivityRows.Children.Remove($script:activityNodes[$id]);$script:activityNodes.Remove($id)}}
   if(!$rows.Count){$line=New-Object Windows.Controls.TextBlock;$line.Text='等待下一次分析；完成后的建议仍显示在上方。';$line.Foreground='#94A3B8';$line.FontSize=11;$line.TextWrapping='NoWrap';$line.TextTrimming='CharacterEllipsis';$controls.AgentActivityRows.Children.Clear();$controls.AgentActivityRows.Children.Add($line)|Out-Null}

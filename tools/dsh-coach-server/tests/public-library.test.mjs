@@ -112,3 +112,22 @@ test('one account cannot promote its own lesson, three independent accounts can'
     assert.equal(pending.length, 1);
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
 });
+
+test('a single account cannot flood the library, and the quota resets daily', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jinbao-quota-'));
+  try {
+    const library = createPublicLibrary({ dir, now: () => Date.parse('2026-11-05T03:00:00Z') });
+    let seq = 0;
+    const one = () => lesson({ fingerprint: 'q' + (seq += 1), claim: '这是用来测试配额的经验结论' + seq });
+    const first = await library.upsert([one(), one()], { account: 'a', dailyLimit: 2 });
+    assert.equal(first.added, 2);
+    const second = await library.upsert([one()], { account: 'a', dailyLimit: 2 });
+    assert.equal(second.added, 0);
+    assert.equal(second.rejected[0].reason, 'quota-exceeded');
+    const other = await library.upsert([one()], { account: 'b', dailyLimit: 2 });
+    assert.equal(other.added, 1, 'another account has its own quota');
+    const tomorrow = createPublicLibrary({ dir, now: () => Date.parse('2026-11-06T03:00:00Z') });
+    const nextDay = await tomorrow.upsert([one()], { account: 'a', dailyLimit: 2 });
+    assert.equal(nextDay.added, 1, 'the quota resets on a new day');
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+});

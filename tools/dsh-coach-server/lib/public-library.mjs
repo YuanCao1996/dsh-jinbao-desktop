@@ -60,10 +60,32 @@ export function createPublicLibrary({ dir, now = Date.now } = {}) {
   // Upsert, not append: the same fingerprint for the same patch is the same knowledge, so its
   // evidence accumulates. A refutation keeps the highest counter instead of being averaged away.
   // 贡献者只以哈希形式记录：既能在服务端做独立账号计数，又不留下账号明文。
+  const quotaPath = join(dir, 'quota.json');
+  async function readQuota() {
+    try { return JSON.parse(await readFile(quotaPath, 'utf8')); } catch { return null; }
+  }
+  // 单账号每日写入上限：防止一个客户端把公共库灌满，也防止被当成免费的存储接口。
+  async function takeQuota(who, count, limit, today) {
+    const state = await readQuota();
+    const fresh = !state || state.day !== today ? { day: today, counts: {} } : state;
+    const used = Number(fresh.counts[who]) || 0;
+    if (count > 0 && used + count > limit) return { ok: false, used, limit };
+    fresh.counts[who] = used + count;
+    await mkdir(dir, { recursive: true });
+    await writeFile(quotaPath, JSON.stringify(fresh), 'utf8');
+    return { ok: true, used: fresh.counts[who], limit };
+  }
   const contributorHash = (account) => createHash('sha1').update(String(account ?? 'anonymous')).digest('hex').slice(0, 12);
   const PROMOTE_AT = 3;
 
-  async function upsert(incoming = [], { account = null } = {}) {
+  async function upsert(incoming = [], { account = null, dailyLimit = 30 } = {}) {
+    await load();
+    const stampNow = Number(now());
+    const who = contributorHash(account);
+    const quota = await takeQuota(who, Array.isArray(incoming) ? incoming.length : 0, dailyLimit, day(stampNow));
+    if (!quota.ok) {
+      return { accepted: [], rejected: [{ fingerprint: null, reason: 'quota-exceeded' }], added: 0, updated: 0, total: lessons.length, quota };
+    }
     await load();
     const accepted = [];
     const rejected = [];
@@ -75,7 +97,6 @@ export function createPublicLibrary({ dir, now = Date.now } = {}) {
       if (!checked.ok) { rejected.push({ fingerprint: candidate?.fingerprint ?? null, reason: checked.reason }); continue; }
       const lesson = checked.lesson;
       const same = lessons.find((row) => row.fingerprint === lesson.fingerprint && (row.patch ?? null) === (lesson.patch ?? null));
-      const who = contributorHash(account);
       if (!same) {
         lessons.push({
           ...lesson,

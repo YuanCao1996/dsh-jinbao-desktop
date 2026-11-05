@@ -51,7 +51,7 @@ function Set-DisplayMode([string]$mode){
   if(!$script:activePlayback -and !$script:playbackQueue.Count -and !$script:snapshot.ended){$latest=@($script:snapshot.playback)|Select-Object -Last 1;if($latest -and (Get-PlaybackNow)-[double]$latest.at -lt 30000 -and (!$latest.expiresAt -or (Get-PlaybackNow) -lt [double]$latest.expiresAt)){$script:playbackQueue.Add($latest)}}
   $modeClock.Start()
  }elseif($mode -eq 'silent'){Set-Collapsed $true -PreserveMode}
- else{$controls.ResizeGrip.Visibility='Visible';$controls.ResizeGrip.Cursor='SizeNWSE';$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';$window.ResizeMode='CanResize';$script:unread=0;$controls.BubbleLabel.Text='金宝'}
+ else{$controls.ResizeGrip.Visibility='Visible';$controls.ResizeGrip.Cursor='SizeNWSE';$controls.ResizeGrip.Width=26;$controls.ResizeGrip.Height=26;$controls.ResizeGrip.Margin='0,0,-8,-8';$window.ResizeMode='CanResize';$script:unread=0;$controls.BubbleLabel.Text=[char]0x25C9}
  $window.Left=[Math]::Max($area.Left,[Math]::Min($window.Left,$area.Right-$window.Width))
  Save-DisplayMode
  if(Get-Command Update-AgentActivity -ErrorAction SilentlyContinue){Update-AgentActivity}

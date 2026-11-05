@@ -29,7 +29,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
   'tools/cloud-desktop/protect.ps1','tools/cloud-desktop/instance.ps1','tools/cloud-desktop/audio-player.ps1','tools/cloud-desktop/synthesize-speech.ps1','tools/dsh-onboarding/settings.html',
   // First-run guide is read at runtime, so the module walk above cannot see it.
   'tools/dsh-onboarding/welcome.html',
-  ...['advice','augments','players','settings'].map(n=>'tools/dsh-onboarding/welcome/'+n+'.png'),
+  ...['advice','augments','players','settings','collapsed'].map(n=>'tools/dsh-onboarding/welcome/'+n+'.png'),
   // The exploration page and its two assets were never packaged, so /exploration 404'd
   // in the standalone build even though the settings page links to it.
   'tools/dsh-onboarding/exploration.html','tools/dsh-onboarding/exploration-icon.png','tools/dsh-onboarding/exploration-poster.jpg',

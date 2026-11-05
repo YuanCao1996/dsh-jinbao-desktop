@@ -263,7 +263,7 @@ const overlay=await createOverlayService({stateDir,activity,canAutoRequest,exper
    }
    if(req.method==='GET'&&req.url.startsWith('/welcome/')&&req.url.endsWith('.png')){
     const name=req.url.slice('/welcome/'.length);
-    if(!['advice','augments','players','settings'].includes(name.slice(0,-4)))throw error(404);
+    if(!['advice','augments','players','settings','collapsed'].includes(name.slice(0,-4)))throw error(404);
     res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});
     res.end(await readFile(new URL('./welcome/'+name,import.meta.url)));return;
    }

@@ -1,5 +1,6 @@
 ﻿param(
   [string]$OutDir = '',
+  [switch]$Frames,
   [string]$StateDir = ''
 )
 # Renders the real overlay XAML headless and saves the welcome-guide screenshots.
@@ -15,7 +16,7 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 if (-not $OutDir) { $OutDir = Join-Path $root '..\dsh-onboarding\welcome' }
 $main = Join-Path $root 'strategy-overlay.ps1'
 $module = Join-Path $root 'overlay-modes.ps1'
-foreach ($file in @($main, $module, (Join-Path $root 'overlay-ui.ps1'), (Join-Path $root 'confirmation-countdown.ps1'))) {
+foreach ($file in @($main, $module, (Join-Path $root 'overlay-ui.ps1'), (Join-Path $root 'confirmation-countdown.ps1'), (Join-Path $root 'overlay-categories.ps1'))) {
   $tokens = $null; $errors = $null
   $ast = [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
   if ($errors.Count) { throw "Invalid production PowerShell: $file" }
@@ -160,6 +161,32 @@ $script:snapshot = [pscustomobject]@{
 
 # The tab buttons are created in the production main body (not a function), so mirror it
 # here or the rendered window would have an empty tab strip.
+# 收起态：把窗口缩成 56×56 只留小球，整窗渲染后按 3 倍放大贴到深色画布上。
+try {
+ $controls.Expanded.Visibility='Collapsed'
+ if($controls.NarrowPanel){$controls.NarrowPanel.Visibility='Collapsed'}
+ $controls.Bubble.Visibility='Visible'
+ $window.Width=56; $window.Height=56
+ $window.UpdateLayout()
+ $ball=New-Object Windows.Media.Imaging.RenderTargetBitmap(168,168,288,288,[Windows.Media.PixelFormats]::Pbgra32)
+ $ball.Render($window)
+ $dv=New-Object Windows.Media.DrawingVisual
+ $dc=$dv.RenderOpen()
+ $dc.DrawRectangle((New-Object Windows.Media.SolidColorBrush([Windows.Media.Color]::FromRgb(0x11,0x16,0x1d))),$null,(New-Object Windows.Rect(0,0,480,480)))
+ $dc.DrawImage($ball,(New-Object Windows.Rect(156,156,168,168)))
+ $dc.Close()
+ $canvas=New-Object Windows.Media.Imaging.RenderTargetBitmap(480,480,192,192,[Windows.Media.PixelFormats]::Pbgra32)
+ $canvas.Render($dv)
+ $encoder=New-Object Windows.Media.Imaging.PngBitmapEncoder
+ $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($canvas))
+ if (-not (Test-Path $OutDir)) { [IO.Directory]::CreateDirectory($OutDir) | Out-Null }
+ $stream=[IO.File]::Create((Join-Path $OutDir 'collapsed.png'))
+ $encoder.Save($stream); $stream.Dispose()
+ Write-Host ('saved ' + (Join-Path $OutDir 'collapsed.png'))
+ # 复原，后面的页面截图仍按大框渲染
+ $controls.Expanded.Visibility='Visible'; $controls.Bubble.Visibility='Collapsed'
+ $window.Width=580; $window.Height=600; $window.UpdateLayout()
+} catch { Write-Host ('collapsed shot failed: ' + $_.Exception.Message) }
 foreach ($entry in @(@('advice', '战况'), @('augments', '海克斯'), @('players', '胜率'))) {
   $button = New-Object Windows.Controls.Button
   $button.Tag = $entry[0]; $button.Content = $entry[1]; $button.FontSize = 12; $button.Padding = '4,6'; $button.ToolTip = '切换到' + $entry[1]
@@ -175,6 +202,51 @@ foreach ($pair in @(@('advice', 'advice'), @('augments', 'augments'), @('players
   Update-Page
   Layout
   Save-Frame $pair[1]
+}
+# 动图帧：把同页面按“操作前后”渲染成多帧，交给 build 步骤合成 GIF。
+function Save-FrameTo([string]$path) {
+  Layout
+  $bitmap = New-Object Windows.Media.Imaging.RenderTargetBitmap([int]$window.Width, [int]$window.Height, 96, 96, [Windows.Media.PixelFormats]::Pbgra32)
+  $bitmap.Render($window.Content)
+  $encoder = New-Object Windows.Media.Imaging.PngBitmapEncoder
+  $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+  $stream = [IO.File]::Create($path)
+  try { $encoder.Save($stream) } finally { $stream.Dispose() }
+}
+if ($Frames) {
+  $framesDir = Join-Path $OutDir 'frames'
+  [IO.Directory]::CreateDirectory($framesDir) | Out-Null
+  # 战况：时间线逐条出现，最后一条是教练的实时建议
+  $full = @($script:snapshot.thread)
+  $counts = @(2, 3, 4, 5)
+  for ($i = 0; $i -lt $counts.Count; $i++) {
+    $script:snapshot.thread = @($full[0..([Math]::Min($counts[$i], $full.Count) - 1)])
+    Set-Tab 'advice'; Update-Page
+    Save-FrameTo (Join-Path $framesDir ('advice-f' + ($i + 1) + '.png'))
+  }
+  $script:snapshot.thread = $full
+  # 海克斯：从“等待识别”到“已确认并写入本局已选”
+  $augFull = $script:snapshot.augments
+  $variants = @(
+    ($augFull -replace '本局已选\s*\r?\n珠光护手', '待确认：珠光护手（点一下卡片确认）'),
+    ($augFull -replace '本局已选\s*\r?\n珠光护手', '已确认，正在写入本局已选'),
+    $augFull
+  )
+  for ($i = 0; $i -lt $variants.Count; $i++) {
+    $script:snapshot.augments = $variants[$i]
+    Set-Tab 'augments'; Update-Page
+    Save-FrameTo (Join-Path $framesDir ('augments-f' + ($i + 1) + '.png'))
+  }
+  $script:snapshot.augments = $augFull
+  # 胜率：双方样本逐步加载
+  $rowsFull = @($script:snapshot.playerRows)
+  foreach ($n in @(4, 7, 10)) {
+    $script:snapshot.playerRows = @($rowsFull[0..([Math]::Min($n, $rowsFull.Count) - 1)])
+    Set-Tab 'players'; Update-Page
+    Save-FrameTo (Join-Path $framesDir ('players-f' + $n + '.png'))
+  }
+  $script:snapshot.playerRows = $rowsFull
+  Write-Host ('frames saved to ' + $framesDir)
 }
 $window.Close()
 Write-Host 'done'

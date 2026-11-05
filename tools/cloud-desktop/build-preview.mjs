@@ -30,6 +30,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
   // First-run guide is read at runtime, so the module walk above cannot see it.
   'tools/dsh-onboarding/welcome.html',
   ...['advice','augments','players','settings','collapsed','overlay-settings','overlay-modes'].map(n=>'tools/dsh-onboarding/welcome/'+n+'.png'),
+  ...['advice','augments','players'].map(n=>'tools/dsh-onboarding/welcome/'+n+'.gif'),
   // The exploration page and its two assets were never packaged, so /exploration 404'd
   // in the standalone build even though the settings page links to it.
   'tools/dsh-onboarding/exploration.html','tools/dsh-onboarding/exploration-icon.png','tools/dsh-onboarding/exploration-poster.jpg',

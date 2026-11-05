@@ -40,12 +40,12 @@ test('the welcome guide is served with real screenshots behind a filename allowl
   assert.match(html, /新手引导/);
   // Every step image referenced must be one of the shipped screenshots. The page keeps
   // them in its STEPS array and interpolates /welcome/<name> at render time.
-  const refs = [...html.matchAll(/image:'([a-z]+\.png)'/g)].map(match => match[1]);
+  const refs = [...html.matchAll(/image:'([a-z-]+\.(?:png|gif))'/g)].map(match => match[1]);
   // The guide must only document the tabs the overlay actually has: the equipment page
   // was removed and the events/chat pages were merged into the battle page.
   // 三个页面截图必须都在；设置页等额外步骤允许存在，但不能出现已删页面的旧图。
   const uniqueRefs = [...new Set(refs)].sort();
-  for (const name of ['advice.png', 'augments.png', 'players.png']) {
+  for (const name of ['advice.gif', 'augments.gif', 'players.gif']) {
     assert.ok(uniqueRefs.includes(name), 'missing screenshot for ' + name);
   }
   assert.equal(uniqueRefs.some((name) => name === 'equipment.png' || name === 'events.png' || name === 'chat.png'), false);
@@ -108,13 +108,13 @@ test('the guide documents exactly the tabs the overlay defines', async () => {
   const tabs = [...tabLine[1].matchAll(/\(\s*'([a-z]+)'\s*,\s*'([^']+)'\s*\)/g)].map((match) => match[1]);
   assert.ok(tabs.length >= 3, 'unexpected tab definition: ' + tabLine[1].slice(0, 120));
   const page = await fs.readFile(join(here, '..', 'welcome.html'), 'utf8');
-  const steps = [...page.matchAll(/image:'([a-z]+\.png)'/g)].map((match) => match[1]);
+  const steps = [...page.matchAll(/image:'([a-z-]+\.(?:png|gif))'/g)].map((match) => match[1]);
   // 三个页签的截图必须都在；另外允许“设置”等额外步骤，因此不再要求数量相等。
-  for (const tab of tabs) assert.ok(steps.includes(tab + '.png'), 'missing screenshot for tab ' + tab);
+  for (const tab of tabs) assert.ok(steps.includes(tab + '.gif'), 'missing screenshot for tab ' + tab);
   // 声明的每一张图都必须真实存在，避免文案加了、图没打包。
   for (const name of steps) await fs.access(join(here, '..', 'welcome', name));
   for (const tab of tabs) {
-    assert.ok(steps.includes(tab + '.png'), 'missing screenshot for tab ' + tab);
+    assert.ok(steps.includes(tab + '.gif'), 'missing screenshot for tab ' + tab);
   }
 });
 

@@ -261,10 +261,10 @@ const overlay=await createOverlayService({stateDir,activity,canAutoRequest,exper
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
     res.end(await readFile(new URL('./welcome.html',import.meta.url)));return;
    }
-   if(req.method==='GET'&&req.url.startsWith('/welcome/')&&req.url.endsWith('.png')){
+   if(req.method==='GET'&&req.url.startsWith('/welcome/')&&/\.(png|gif)$/.test(req.url)){
     const name=req.url.slice('/welcome/'.length);
-    if(!['advice','augments','players','settings','collapsed','overlay-settings'].includes(name.slice(0,-4)))throw error(404);
-    res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});
+    if(!['advice','augments','players','settings','collapsed','overlay-settings','overlay-modes'].includes(name.slice(0,-4)))throw error(404);
+    res.writeHead(200,{'Content-Type':req.url.endsWith('.gif')?'image/gif':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});
     res.end(await readFile(new URL('./welcome/'+name,import.meta.url)));return;
    }
    if(req.method==='GET'&&(req.url==='/'||req.url==='/?page=voice')){

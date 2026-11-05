@@ -586,8 +586,17 @@ $controls.ActionButton.Add_Click({
 })
 $controls.SettingsButton.Add_Click({
  if($SelfTest){$script:testResult.settings=$controls.SettingsButton.ContextMenu.Items.Count -ge 2;return}
+ # 菜单属于本窗口：窗口不可激活时，弹出后点菜单项会落空（实测：点“窄条/字幕”完全没反应）。
+ # 打开菜单前先允许激活并置前，菜单关闭后再回到原来的穿透状态。
+ $script:interactionBeforeMenu=$script:interactiveMode
+ if(!$script:interactiveMode){Set-Interaction $true}
+ try{$window.Activate() | Out-Null}catch{}
  $controls.SettingsButton.ContextMenu.PlacementTarget=$controls.SettingsButton
  $controls.SettingsButton.ContextMenu.IsOpen=$true
+ if($script:menuCloseHandler -ne $true -and $controls.SettingsButton.ContextMenu -and !$SelfTest){
+  $script:menuCloseHandler=$true
+  $controls.SettingsButton.ContextMenu.Add_Closed({if($script:interactionBeforeMenu -eq $false){Set-Interaction $false};$script:interactionBeforeMenu=$false})
+ }
 })
 $controls.AccountMenuItem.Add_Click({
  try{

@@ -45,7 +45,7 @@ export async function buildPreview({root,out,runtime=process.execPath}) {
   'tools/jinbao-launcher/update-public.pem','tools/jinbao-launcher/extract-update.ps1',
   'tools/jinbao-launcher/install-host.ps1',
   'tools/game-observation/windows/worker.ps1','tools/game-observation/windows/WindowCapture.cs',
-  ...['start-overlay','strategy-overlay','confirmation-countdown','overlay-modes','overlay-ui','overlay-playback','capture-coordination','window-pixels','agent-activity'].map(n=>'tools/desktop-release/'+n+'.ps1'),
+  ...['start-overlay','strategy-overlay','confirmation-countdown','overlay-modes','overlay-ui','overlay-playback','overlay-categories','capture-coordination','window-pixels','agent-activity'].map(n=>'tools/desktop-release/'+n+'.ps1'),
   'LICENSE','third-party/node-LICENSE.txt','tools/cloud-desktop/Launcher.cs'
  ])await include(name);
  await mkdir(out); // Deliberately refuses to overwrite an existing artifact.

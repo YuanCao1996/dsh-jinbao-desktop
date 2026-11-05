@@ -62,31 +62,32 @@ test('private lessons are refused and the gateway keeps serving', async () => {
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
 });
 
-test('a write policy can require a token without blocking anonymous reads', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-auth-'));
-  try {
-    const handler = createPublicExperienceHandler({ dir, allowRead: true, authorize: (req) => req.headers?.authorization === 'Bearer good' });
-    const lesson = { kind: 'recognition', claim: '高光遮挡时先取前后两帧比对再判定', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } };
-    const write = (authorization) => {
-      const req = fakeReq('POST', '/api/public/experience', { lessons: [lesson] });
-      req.headers = authorization ? { authorization } : {};
-      return req;
-    };
-    const denied = fakeRes();
-    assert.equal(await handler(write(null), denied), true);
-    assert.equal(denied.state.status, 401);
-    const readWhileEmpty = fakeRes();
-    await handler(fakeReq('GET', '/api/public/experience?game=lol'), readWhileEmpty);
-    assert.equal(JSON.parse(readWhileEmpty.state.body).lessons.length, 0, 'nothing was written by the rejected call');
-    const allowed = fakeRes();
-    await handler(write('Bearer good'), allowed);
-    assert.equal(allowed.state.status, 200);
-    assert.equal(JSON.parse(allowed.state.body).added, 1);
-    const read = fakeRes();
-    await handler(fakeReq('GET', '/api/public/experience?game=lol'), read);
-    assert.equal(JSON.parse(read.state.body).lessons.length, 1, 'anonymous read still works');
-  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
-});
+test('a token policy gates both write and read', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-auth-'));
+  try {
+    const handler = createPublicExperienceHandler({ dir, allowRead: true, authorize: (req) => req.headers?.authorization === 'Bearer good' });
+    const lesson = { kind: 'recognition', claim: '高光遮挡时先取前后两帧比对再判定', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } };
+    const request = (method, authorization) => {
+      const req = fakeReq(method, '/api/public/experience' + (method === 'GET' ? '?game=lol' : ''), method === 'POST' ? { lessons: [lesson] } : undefined);
+      req.headers = authorization ? { authorization } : {};
+      return req;
+    };
+    const deniedWrite = fakeRes();
+    await handler(request('POST', null), deniedWrite);
+    assert.equal(deniedWrite.state.status, 401, 'writes need the token');
+    const deniedRead = fakeRes();
+    await handler(request('GET', null), deniedRead);
+    assert.equal(deniedRead.state.status, 401, 'reads need the token too');
+    const allowedWrite = fakeRes();
+    await handler(request('POST', 'Bearer good'), allowedWrite);
+    assert.equal(allowedWrite.state.status, 200);
+    assert.equal(JSON.parse(allowedWrite.state.body).added, 1);
+    const allowedRead = fakeRes();
+    await handler(request('GET', 'Bearer good'), allowedRead);
+    assert.equal(allowedRead.state.status, 200);
+    assert.equal(JSON.parse(allowedRead.state.body).lessons.length, 1);
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+});
 
 test('malformed bodies and wrong methods are answered, not thrown', async () => {
   const { dir, handler } = await fixture();

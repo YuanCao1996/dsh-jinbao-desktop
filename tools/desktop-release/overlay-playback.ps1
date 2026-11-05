@@ -167,18 +167,25 @@ function Playback-Tick {
   if(!$script:collapsed){Set-Collapsed $true -PreserveMode}
   return
  }
+ # 按积压条数分级加速：一条积压略快，多积压明显缩短，避免长句把整队拖住。
+ $backlog=$script:playbackQueue.Count
+ $script:paceFactor=if($backlog -ge 3){1.9}elseif($backlog -eq 2){1.55}elseif($backlog -eq 1){1.25}else{1.0}
  $previousElapsed=$script:lineElapsed;$script:lineElapsed+=$delta
  if($script:playbackPhase -eq 'playing'){
   if($script:subtitleMode){
    if(!$script:subtitleLines.Count){$script:playbackPhase='linger';$script:lineElapsed=0;return}
    $line=$script:subtitleLines[$script:subtitleIndex]
-   $hold=$script:subtitleBaseHold;if($script:playbackAccelerated){$hold=[Math]::Max(1200,$hold/1.3)}
+   $hold=[Math]::Max(900,[double]$script:subtitleBaseHold/$script:paceFactor)
    if($script:lineElapsed -ge $hold){
     if($script:subtitleIndex+1 -lt $script:subtitleLines.Count){$script:subtitleIndex++;Push-Subtitle $script:subtitleLines[$script:subtitleIndex];$script:lineElapsed=0}
     else{$script:playbackPhase='linger';$script:lineElapsed=0}
    }
   }else{
-   $delay=if($script:playbackAccelerated){180}else{400};$speed=if($script:playbackAccelerated){104}else{52}
+   # 长句不再恒速滚十几秒：目标滚动时长按字数估（60ms/字，限制 2.4–9 秒），再按积压加速。
+   $chars=[Math]::Max(1,([string]$script:scrollText).Length)
+   $target=[Math]::Max(2.4,[Math]::Min(9.0,$chars*0.06))/$script:paceFactor
+   $delay=if($script:paceFactor -gt 1){180}else{400}
+   $speed=if($script:scrollEnd -gt 0){[Math]::Max(40,$script:scrollEnd/$target)}else{52}
    $travel=[Math]::Max(0,$script:lineElapsed-$delay)-[Math]::Max(0,$previousElapsed-$delay)
    $script:scrollOffset=[Math]::Min($script:scrollEnd,$script:scrollOffset+$travel/1000*$speed)
    $controls.NarrowText.RenderTransform.X=-$script:scrollOffset

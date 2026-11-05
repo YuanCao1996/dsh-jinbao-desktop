@@ -60,6 +60,14 @@ function statusOf(record) {
   return games >= 5 ? 'public' : 'candidate';
 }
 
+// Prompt block for one turn. The heading matters: the model must treat these as history and
+// never as a description of the current match, otherwise an old habit can overwrite live facts.
+export function experienceSection(pack) {
+  const lines = (pack?.lines ?? []).filter(Boolean);
+  if (!lines.length) return '';
+  return ['【历史经验｜仅作参考，不覆盖本局事实】', ...lines].join('\n');
+}
+
 export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budgetChars = 400 } = {}) {
   if (!dir) throw new Error('experience store needs a directory');
   const indexPath = join(dir, 'index.jsonl');

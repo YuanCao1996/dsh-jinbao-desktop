@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createExperienceStore, claimSimilarity } from '../lib/experience-store.js';
+import { createExperienceStore, claimSimilarity, experienceSection } from '../lib/experience-store.js';
+import { buildGameChatMessage } from '../lib/chat-bridge.js';
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-experience-'));
@@ -89,4 +90,23 @@ test('a balance patch retires stale advice and the pack stays inside its budget'
 test('bigram similarity is what decides "same lesson"', () => {
   assert.ok(claimSimilarity('先补虚空之杖再做法穿鞋', '先补虚空之杖再做法穿鞋') === 1);
   assert.ok(claimSimilarity('先补虚空之杖再做法穿鞋', '先做重伤再补魔抗') < 0.4);
+});
+
+test('an empty pack adds nothing to the prompt, a real one is clearly labelled as history', () => {
+  assert.equal(experienceSection({ lines: [] }), '');
+  assert.equal(experienceSection(null), '');
+  const block = experienceSection({ lines: ['[build|0.7|3局] 对面双坦先补重伤'] });
+  assert.match(block, /历史经验/);
+  assert.match(block, /不覆盖本局事实/);
+  assert.match(block, /重伤/);
+});
+
+test('the turn message only carries experience when one is supplied', () => {
+  const context = { current: { game: 'lol', mode: 'KIWI' } };
+  const plain = buildGameChatMessage('这波怎么打？', context);
+  assert.equal(plain.includes('历史经验'), false, 'existing callers keep their exact message');
+  const withXp = buildGameChatMessage('这波怎么打？', context, 'lol', experienceSection({ lines: ['[strategy|0.6|2局] 首团前先换线'] }));
+  assert.match(withXp, /历史经验/);
+  assert.match(withXp, /首团前先换线/);
+  assert.ok(withXp.includes('【对局与历史数据 JSON】'), 'live facts still come after the history block');
 });

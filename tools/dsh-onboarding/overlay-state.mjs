@@ -48,6 +48,8 @@ export function initialOverlayState() {
 // Pure projection shared by live polling and log replay tests. Epoch time only orders
 // records; the displayed clock always comes from the game's elapsed seconds.
 export function applyOverlayEvent(state, event, file, {continueStart=false}={}) {
+ // 识别盲区是诊断事件，不进入事件页，但它是经验提炼要用的真事实，这里自己计数。
+ if(event&&event.kind==='augment_capture_blind'){state.captureBlind=(Number(state.captureBlind)||0)+1;return state;}
   if (!event || typeof event !== 'object') return;
   const at = eventTimestamp(event);
   if (event.broadcast) {
@@ -456,7 +458,7 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   if(experience && state.ended){
    const facts={game:state.game,match:state.match,champion:state.me?.champion??'',ended:true,
     deaths:(state.events??[]).filter(e=>/阵亡|死亡|被击杀/.test(String(e?.text??''))).length,
-    recognition:{blindFrames:(state.events??[]).filter(e=>e?.kind==='augment_capture_blind').length}};
+    recognition:{blindFrames:Number(state.captureBlind)||0}};
    Promise.resolve().then(()=>experience.finish?.(facts)).catch(()=>{});
   }
   await writeFile(output + '.tmp', JSON.stringify(view()), { mode: 0o600 });

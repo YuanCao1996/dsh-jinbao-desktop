@@ -17,7 +17,7 @@ function fakeRes() {
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-handler-'));
-  const handler = createPublicExperienceHandler({ dir });
+  const handler = createPublicExperienceHandler({ dir, allowRead: true });
   return { dir, handler };
 }
 
@@ -65,7 +65,7 @@ test('private lessons are refused and the gateway keeps serving', async () => {
 test('a write policy can require a token without blocking anonymous reads', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-auth-'));
   try {
-    const handler = createPublicExperienceHandler({ dir, authorize: (req) => req.headers?.authorization === 'Bearer good' });
+    const handler = createPublicExperienceHandler({ dir, allowRead: true, authorize: (req) => req.headers?.authorization === 'Bearer good' });
     const lesson = { kind: 'recognition', claim: '高光遮挡时先取前后两帧比对再判定', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } };
     const write = (authorization) => {
       const req = fakeReq('POST', '/api/public/experience', { lessons: [lesson] });
@@ -99,5 +99,21 @@ test('malformed bodies and wrong methods are answered, not thrown', async () => 
     assert.equal(await handler(broken, bad), true);
     assert.equal(bad.state.status, 400);
     assert.equal(JSON.parse(bad.state.body).error, 'bad-request');
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+});
+
+test('read is disabled by default so experience text never leaves the server', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jinbao-pub-noread-'));
+  try {
+    const handler = createPublicExperienceHandler({ dir });
+    const res = fakeRes();
+    assert.equal(await handler(fakeReq('GET', '/api/public/experience?game=lol'), res), true);
+    assert.equal(res.state.status, 403);
+    assert.equal(JSON.parse(res.state.body).error, 'read-disabled');
+    // 写入仍然允许（客户端需要贡献），只是读不到原文
+    const write = fakeRes();
+    await handler(fakeReq('POST', '/api/public/experience', { lessons: [{ kind: 'recognition', claim: '高光遮挡时先取前后两帧比对', scope: ['game:lol'], evidence: { games: 1, hits: 1, counter: 0 } }] }), write);
+    assert.equal(write.state.status, 200);
+    assert.equal(JSON.parse(write.state.body).added, 1);
   } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
 });

@@ -32,7 +32,7 @@ async function readJson(req, maxBody) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY, authorize = null } = {}) {
+export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY, authorize = null, allowRead = false } = {}) {
   if (!dir) throw new Error('public experience handler needs a data directory');
   const library = createPublicLibrary({ dir });
 
@@ -48,6 +48,14 @@ export function createPublicExperienceHandler({ dir, maxBody = DEFAULT_MAX_BODY,
       let allowed = false;
       try { allowed = await authorize(req); } catch { allowed = false; }
       if (!allowed) { send(res, 401, { error: 'unauthorized' }); return true; }
+    }
+    // 经验原文默认不下发：服务端注入模式下，客户端没有任何理由需要它。
+    // 只有显式 allowRead（本地调试/迁移期）并且通过 authorize 才允许读。
+    if (action === 'query') {
+      if (!allowRead) { send(res, 403, { error: 'read-disabled' }); return true; }
+      let readAllowed = true;
+      if (authorize) { try { readAllowed = await authorize(req); } catch { readAllowed = false; } }
+      if (!readAllowed) { send(res, 401, { error: 'unauthorized' }); return true; }
     }
     try {
       if (action === 'query') {

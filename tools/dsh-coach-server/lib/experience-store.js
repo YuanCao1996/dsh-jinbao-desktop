@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { diffMd, editNote } from './md-edit.mjs';
+import { formatLearningNotice } from './learning-notice.mjs';
 import { join } from 'node:path';
 
 // Experience store: the "learn from every match" layer.
@@ -72,13 +73,21 @@ export function experienceSection(pack) {
   return ['【历史经验｜仅作参考，不覆盖本局事实】', ...lines].join('\n');
 }
 
-export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budgetChars = 400 } = {}) {
+export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budgetChars = 400, onLearn = null } = {}) {
   if (!dir) throw new Error('experience store needs a directory');
   const indexPath = join(dir, 'index.jsonl');
   const records = [];
   let loaded = false;
 
   const stamp = () => Number(now());
+  // 学习动作对外广播：悬浮窗据此告诉玩家“系统刚学到了什么”，失败绝不影响入库。
+  const announce = (event) => {
+    if (!onLearn) return;
+    try {
+      const text = formatLearningNotice(event);
+      if (text) onLearn({ ...event, text });
+    } catch {}
+  };
 
   async function load() {
     if (loaded) return records;
@@ -152,6 +161,7 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
       record.status = statusOf(record);
       records.push(record);
       await flush();
+      announce({ action: 'add', claim: record.claim, evidence: record.evidence, by: 'system' });
       return { action: 'add', id: record.id };
     }
     if (candidate.disputes === existing.id || candidate.counter === true) {
@@ -160,6 +170,7 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
       existing.updatedAt = stamp();
       existing.status = statusOf(existing);
       await flush();
+      announce({ action: 'dispute', claim: existing.claim, evidence: existing.evidence, by: 'system' });
       return { action: 'dispute', id: existing.id, status: existing.status };
     }
     // Same lesson seen again: strengthen the evidence, never duplicate the line.
@@ -172,6 +183,7 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
     existing.updatedAt = stamp();
     existing.status = statusOf(existing);
     await flush();
+    announce({ action: 'update', claim: existing.claim, evidence: existing.evidence, by: 'system' });
     return { action: 'update', id: existing.id };
   }
 
@@ -246,6 +258,8 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
       });
     }
     await flush();
+    for (const record of retired) announce({ action: 'retire', claim: record.claim, by, reason });
+    for (const record of added) announce({ action: 'add', claim: record.claim, evidence: record.evidence, by });
     return { retired: retired.length, added: added.length, note };
   }
 
@@ -259,6 +273,7 @@ export function createExperienceStore({ dir, now = Date.now, maxItems = 8, budge
     record.status = statusOf(record);
     record.correction = String(reason).slice(0, 120);
     await flush();
+    announce({ action: 'correct', claim: record.claim, evidence: record.evidence, by: 'player', reason: String(reason ?? '') });
     return { ok: true, status: record.status };
   }
 

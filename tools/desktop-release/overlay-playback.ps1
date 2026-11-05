@@ -15,6 +15,15 @@ function Clear-PlaybackRows {
  }
  $controls.NarrowCanvas.BeginAnimation([Windows.UIElement]::OpacityProperty,$null);$controls.NarrowCanvas.Opacity=1
 }
+# 字幕/滚动都按这个宽度排版。面板刚展开时 ActualWidth 仍是 0，用 120 兜底会把一句话
+# 切成很多碎行、滚动终点也算成 0；先强制一次布局，再退回按窗口宽度推算。
+function Get-NarrowWidth {
+  $width=0
+  try{$width=[double]$controls.NarrowCanvas.ActualWidth}catch{}
+  if($width -lt 160){try{$window.UpdateLayout()}catch{};try{$width=[double]$controls.NarrowCanvas.ActualWidth}catch{}}
+  if($width -lt 160){try{$width=[double]$window.Width-40}catch{$width=0}}
+  return [Math]::Max(160,$width)
+}
 function Set-NarrowMetrics {
  $size=[double]$controls.FontSlider.Value
  foreach($name in @('NarrowText','PreviousSubtitle','OutgoingSubtitle')){if($controls[$name]){$controls[$name].FontSize=$size}}
@@ -57,7 +66,7 @@ function Push-Subtitle([string]$line,[bool]$animate=$true){
   $view.BeginAnimation([Windows.UIElement]::OpacityProperty,$null);$view.RenderTransform=New-Object Windows.Media.TranslateTransform
   if($index -lt 0){$view.Text='';$view.Tag=$null;continue}
   Set-HighlightedText $view $script:subtitleRows[$index]
-  $view.Width=[Math]::Max(120,$controls.NarrowCanvas.ActualWidth);$view.TextAlignment='Center'
+  $view.Width=(Get-NarrowWidth);$view.TextAlignment='Center'
   [Windows.Controls.Canvas]::SetTop($view,($i-1)*$height);[Windows.Controls.Canvas]::SetLeft($view,0)
   $view.Opacity=if($i -eq 0){0}else{1}
   if($animate -and !$SelfTest){
@@ -88,7 +97,7 @@ function Prepare-PlaybackLayout([bool]$resume=$false){
  }
  if($resume -or !$script:subtitleMode -or $script:renderedSubtitleMode -ne $script:subtitleMode){Clear-PlaybackRows}
  $script:renderedSubtitleMode=$script:subtitleMode;$script:playbackLayoutDirty=$false
- $width=[Math]::Max(120,$controls.NarrowCanvas.ActualWidth)
+ $width=(Get-NarrowWidth)
  if($script:subtitleMode){
   $script:subtitleLines=@(Split-Subtitle $remaining $width);$script:subtitleIndex=0
   if($script:subtitleLines.Count){Push-Subtitle $script:subtitleLines[0]}
@@ -150,7 +159,7 @@ function Playback-Tick {
  if(!$script:activePlayback){
   if($script:awaitingPlayback -and !$script:collapsed){
    Clear-PlaybackRows
-   $controls.NarrowText.Width=[Math]::Max(120,$controls.NarrowCanvas.ActualWidth);$controls.NarrowText.TextAlignment='Center'
+   $controls.NarrowText.Width=(Get-NarrowWidth);$controls.NarrowText.TextAlignment='Center'
    [Windows.Controls.Canvas]::SetTop($controls.NarrowText,0);[Windows.Controls.Canvas]::SetLeft($controls.NarrowText,0)
    $controls.NarrowText.Text='等待新的对局建议…';$modeClock.Stop();return
   }

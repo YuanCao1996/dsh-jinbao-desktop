@@ -175,6 +175,9 @@ $script:windowHandle=[IntPtr]::Zero
 $script:showInCapture=$true
 $script:source=$null
 $script:hotkeyRegistered=$false
+$script:lastRawHotkey=$null
+$script:hotkeyLiveness=$null
+$script:shortcutHintAt=0
 $script:tab=$PreviewTab
 $script:collapsed=$false
 $script:snapshot=$null
@@ -201,7 +204,8 @@ if(!$SelfTest){
 function Set-PointerMode([bool]$hotzone){
  if($script:windowHandle -eq [IntPtr]::Zero){return}
  $through=!($script:interactiveMode -or $hotzone -or $script:dragging -or [Windows.Input.Mouse]::Captured)
- $focusable=$script:interactiveMode -and !$script:collapsed
+ # 悬停在窗口上时也要能接收点击：否则只能靠 Ctrl+Alt+J 进交互模式，热键一失效就彻底点不动。
+ $focusable=($script:interactiveMode -or $hotzone) -and !$script:collapsed
  if($script:lastThrough -ne $through -or $script:lastFocusable -ne $focusable){
   [JinbaoOverlayNative]::InputMode($script:windowHandle,$through,$focusable)
   $script:lastThrough=$through;$script:lastFocusable=$focusable
@@ -558,6 +562,15 @@ $controls.TeamManageButton.Add_Click({
   $uri=[Uri]$url;Start-Process ($uri.GetLeftPart([UriPartial]::Authority)+'/team-room'+$uri.Fragment)
  }catch{}
 })
+# 点一下输入框就该能打字：全局快捷键在游戏内可能被拦截，输入不能只依赖它。
+$script:focusComposer={
+  if(!$script:interactiveMode){Set-Interaction $true}
+  try{if($window.IsVisible){$window.Activate() | Out-Null}}catch{}
+  try{$controls.QuestionBox.Focus() | Out-Null;[Windows.Input.Keyboard]::Focus($controls.QuestionBox) | Out-Null}catch{}
+}
+$controls.QuestionBox.Add_PreviewMouseLeftButtonDown({param($sender,$eventArgs) & $script:focusComposer})
+if($controls.ChatPanel){$controls.ChatPanel.Add_PreviewMouseLeftButtonDown({param($sender,$eventArgs) & $script:focusComposer})}
+
 $controls.QuestionBox.Add_PreviewKeyDown({param($sender,$eventArgs)
  if($eventArgs.Key -eq [Windows.Input.Key]::Return -and ([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift) -eq 0){Send-Question;$eventArgs.Handled=$true}
 })
@@ -672,7 +685,7 @@ function Update-CaptureLease {
 }
 function Save-ShortcutDiagnostics {
  if($SelfTest){return}
- Write-CaptureReceipt (Join-Path $StateDir 'overlay-hotkeys.json') (@{pid=$PID;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();bindings=@($script:shortcutResults);lastReceived=$script:lastShortcutReceived}|ConvertTo-Json -Depth 5 -Compress) | Out-Null
+ Write-CaptureReceipt (Join-Path $StateDir 'overlay-hotkeys.json') (@{pid=$PID;at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();bindings=@($script:shortcutResults);lastRaw=$script:lastRawHotkey;liveness=$script:hotkeyLiveness;lastReceived=$script:lastShortcutReceived}|ConvertTo-Json -Depth 5 -Compress) | Out-Null
 }
 function Invoke-OverlayShortcut([int]$id){
  if($id -ge 712 -and $id -le 715){$id-=10}
@@ -691,7 +704,11 @@ function Invoke-OverlayShortcut([int]$id){
 $script:registeredShortcuts=@()
 $hook=[Windows.Interop.HwndSourceHook]{
  param($handle,$message,$wParam,$lParam,[ref]$handled)
- if($message -eq 0x0312 -and $wParam.ToInt32() -in @(701,702,703,704,705,712,713,714,715)){Invoke-OverlayShortcut $wParam.ToInt32();$handled.Value=$true}
+ if($message -eq 0x0312){
+  # 全部记下来：注册成功却一直没消息，和收到未知 id，是两种完全不同的故障。
+  $script:lastRawHotkey=@{id=$wParam.ToInt32();at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+  if($wParam.ToInt32() -in @(701,702,703,704,705,712,713,714,715)){Invoke-OverlayShortcut $wParam.ToInt32();$handled.Value=$true}
+ }
  return [IntPtr]::Zero
 }
 $window.Add_SourceInitialized({
@@ -728,7 +745,7 @@ $window.Add_Closing({param($sender,$eventArgs)
  }
  if(!$SelfTest){[IO.File]::WriteAllText((Join-Path $StateDir 'overlay-stopped'),'closed',[Text.UTF8Encoding]::new($false))}
 })
-$window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop()})
+$window.Add_Closed({$script:closing=$true;$timer.Stop();$pointerTimer.Stop();if($script:hotkeyWatch){$script:hotkeyWatch.Stop()}})
 . (Join-Path $PSScriptRoot 'confirmation-countdown.ps1')
 . (Join-Path $PSScriptRoot 'overlay-modes.ps1')
 . (Join-Path $PSScriptRoot 'overlay-ui.ps1')
@@ -803,7 +820,16 @@ try{
     $script:testResult.clickThrough=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x20) -ne 0
     Set-PointerMode $true
     $script:testResult.headerClickable=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x20) -eq 0
-    $script:testResult.headerNoActivate=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x08000000) -ne 0
+    # 悬停时窗口必须可被激活，否则点输入框拿不到键盘焦点；移开后恢复 NOACTIVATE。
+    $script:testResult.hoverActivatable=([JinbaoOverlayNative]::GetWindowLong($script:windowHandle,-20) -band 0x08000000) -eq 0
+    # 悬停在窗口上时也要能接收点击（热键失效时输入不能靠快捷键）
+    $script:testResult.hoverFocusable=$script:lastFocusable -eq $true
+    Set-PointerMode $false
+    $script:testResult.awayNotFocusable=$script:lastFocusable -eq $false
+    # 点输入框应当直接进入交互模式并聚焦
+    Set-Interaction $false
+    & $script:focusComposer
+    $script:testResult.clickEntersInteraction=($script:interactiveMode -eq $true)
     $click=New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)
     $controls.SettingsButton.RaiseEvent($click)
     $controls.CollapseButton.RaiseEvent((New-Object Windows.RoutedEventArgs([Windows.Controls.Button]::ClickEvent)))
@@ -1012,7 +1038,28 @@ try{
    $hintTimer.Add_Tick({$hintTimer.Stop();Hide-OverlayHint})
    $hintTimer.Start()
   }
-  $timer.Start();if(!$SelfTest){$pointerTimer.Start()}
+  # 快捷键活性检查：注册成功不等于收得到消息（实测有机器在游戏内一条 WM_HOTKEY 都收不到）。
+  # 每 30 秒用同一组合探一次：探针能注册成功，说明我们的注册已经丢了，立刻补注册。
+  $script:hotkeyWatch=New-Object Windows.Threading.DispatcherTimer;$script:hotkeyWatch.Interval=[TimeSpan]::FromSeconds(30)
+  $script:hotkeyWatch.Add_Tick({
+   if($SelfTest -or $script:windowHandle -eq [IntPtr]::Zero){return}
+   $probe=[JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,719,3,74)
+   if($probe){
+    [JinbaoOverlayNative]::UnregisterHotKey($script:windowHandle,719) | Out-Null
+    $script:hotkeyRegistered=[JinbaoOverlayNative]::RegisterHotKey($script:windowHandle,701,3,74)
+    $script:hotkeyLiveness=@{state='re-registered';at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();ok=$script:hotkeyRegistered}
+   }else{
+    $script:hotkeyLiveness=@{state=$(if($script:lastRawHotkey){'delivering'}else{'registered-nodelivery'});at=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+   }
+   # 注册着却一直收不到消息时，提示可以直接点窗口输入，别卡在快捷键上。
+   if(!$script:lastRawHotkey -and !$script:lastShortcutReceived){
+    if($script:shortcutHintAt -eq 0){$script:shortcutHintAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()}
+    elseif(([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()-$script:shortcutHintAt) -gt 60000)
+     {$controls.HintText.Text='快捷键未生效：点一下内容区或输入框即可直接输入 · 右下角拖动缩放'}
+   }else{$script:shortcutHintAt=0}
+   Save-ShortcutDiagnostics
+  })
+  $timer.Start();if(!$SelfTest){$pointerTimer.Start();$script:hotkeyWatch.Start()}
   $window.ShowDialog() | Out-Null
   if($SelfTest){$script:testResult | ConvertTo-Json -Compress}
   else{

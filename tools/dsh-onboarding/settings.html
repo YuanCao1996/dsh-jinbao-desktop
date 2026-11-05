@@ -26,6 +26,14 @@
 <p>每局结束会从本局日志里提炼最多 3 条教训（按胜负、阵亡模式与识别盲区），下次遇到同一英雄/强化时会作为"历史经验"提供给教练。觉得不对就点该行右侧的按钮，这条会立即降级并不再注入。</p>
 <p id="experienceEmpty">正在读取…</p>
 <div id="experienceList"></div>
+<details id="experienceEditor" style="margin-top:12px"><summary>编辑我的私有经验</summary>
+<p>这些是只属于你的经验（偏好/纠正/战绩/踩坑/风格）。改完点保存立即生效：删掉或改写的旧条目会退役并停止注入，新写的从 1 局起算。公有的社区经验不能在这里改。</p>
+<label>类别 <select id="xpKind"><option value="preference">偏好</option><option value="correction">纠正</option><option value="stats">战绩</option><option value="pitfall">踩坑</option><option value="style">风格</option></select></label>
+<button type="button" id="xpLoad">读取当前内容</button>
+<textarea id="xpText" rows="8" style="width:100%;box-sizing:border-box" placeholder="点上面的按钮读取，或直接写一行：- [0.5|1局|candidate] 你的经验结论"></textarea>
+<button type="button" id="xpSave">保存并生效</button>
+<p id="xpStatus"></p>
+</details>
 </section>
 <section id="activitySettings"><h2>直播展示</h2><label><input id="agentActivityEnabled" type="checkbox" style="width:auto;margin-right:8px">在大框战况页显示智能体过程</label><p id="agentActivityHint">显示真实执行状态、工具调用与公开回答草稿；默认关闭。不会显示原始推理内容、工具参数或登录凭据。</p></section>
 </main></div><script>
@@ -184,4 +192,32 @@ async function refreshExperience(){
  }catch{empty.hidden=false;empty.textContent='经验暂时读不到，稍后再试。';}
 }
 if(document.getElementById('experienceList'))refreshExperience();
+
+// 私有 md 编辑：读取 → 改 → 保存，保存后由服务端退役旧条目/新增新条目，立即影响注入。
+const xpKind=document.getElementById('xpKind');
+const xpText=document.getElementById('xpText');
+const xpStatus=document.getElementById('xpStatus');
+async function xpLoad(){
+ if(!xpKind||!xpText)return;
+ xpStatus.textContent='读取中…';
+ try{
+  const data=await (await fetch('/api/experience/md?kind='+encodeURIComponent(xpKind.value))).json();
+  xpText.value=data.mdText||'';
+  xpStatus.textContent=xpText.value?'已读取，可编辑后保存。':'这一类还没有经验，可以直接写一行再保存。';
+ }catch{xpStatus.textContent='读取失败，稍后再试。';}
+}
+async function xpSave(){
+ if(!xpKind||!xpText)return;
+ xpStatus.textContent='保存中…';
+ try{
+  const response=await fetch('/api/experience/md',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kind:xpKind.value,mdText:xpText.value,by:'player',reason:'设置页手动编辑'})});
+  const data=await response.json();
+  xpStatus.textContent=response.ok?('已生效：退役 '+data.retired+' 条，新增 '+data.added+' 条。'):('未生效：'+(data.error||'未知错误'));
+  if(typeof refreshExperience==='function')refreshExperience();
+ }catch{xpStatus.textContent='保存失败，稍后再试。';}
+}
+const xpLoadButton=document.getElementById('xpLoad');
+if(xpLoadButton&&typeof xpLoadButton.addEventListener==='function'){xpLoadButton.addEventListener('click',xpLoad);}
+const xpSaveButton=document.getElementById('xpSave');
+if(xpSaveButton&&typeof xpSaveButton.addEventListener==='function'){xpSaveButton.addEventListener('click',xpSave);}
 </script></body></html>

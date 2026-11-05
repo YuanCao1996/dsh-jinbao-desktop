@@ -1,3 +1,4 @@
+import { condenseAdvice } from './advice-text.mjs';
 import{appendFile,writeFile,rename}from'node:fs/promises';import{join}from'node:path';
 import{stateCoachingTrigger,buildLolCoachingPlan,createAdviceValidity,adviceIsValid}from'../dsh-coach-server/lib/lol-coaching-plan.js';
 import{createCoachScheduler}from'./coach-scheduler.mjs';
@@ -54,7 +55,7 @@ export function createCloudCoach({stateDir,view,getContext,agent,enabled=()=>tru
     const answer=await agent.ask({game:v.game,match:v.match,question:prompt,topic:'advice',automatic:true}),current=(await getContext(v.game,v.match)).current;
     if(!stillCurrent(v)||!current||!adviceIsValid(validity,current,now())){note(v,'reply_discarded','context_changed');return;}
     if(typeof answer!=='string'||!answer.trim())throw Error('Empty automatic reply');
-    await publish({at:new Date(now()).toISOString(),source:v.match,game:v.game,match:v.match,kind:'cloud-advice',key:'situation',dimension:'now',broadcast:answer,validity});await published(v,{stage:'situation'});store={signature,lastAt:now(),lastValidity:validity};return;
+    await publish({at:new Date(now()).toISOString(),source:v.match,game:v.game,match:v.match,kind:'cloud-advice',key:'situation',dimension:'now',broadcast:condenseAdvice(answer),validity});await published(v,{stage:'situation'});store={signature,lastAt:now(),lastValidity:validity};return;
    }
    const offerKey=JSON.stringify([c.augmentRounds?.at(-1)?.id,c.offers??[]]),ownedKey=JSON.stringify([c.ownedAugments??[],c.revealedAugments??[]]),selectionKey=JSON.stringify([c.phase,c.me?.champion,c.bench,c.allies]);
    const loadingKey=JSON.stringify([c.phase,c.me?.champion,c.allies,c.enemies]);

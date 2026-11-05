@@ -22,6 +22,11 @@
 <section><h2>用户偏好记忆</h2><p>保存你在聊天中明确要求记住的偏好，新对局可继续使用；按游戏分别管理，存放在当前 Windows 用户的数据目录。</p><select id="memoryGame"><option value="lol">英雄联盟</option><option value="wzry">王者荣耀</option><option value="generic">通用游戏</option></select><button id="memoryRead">查看已保存偏好</button><p id="memoryStatus"></p><div id="memoryRows"></div></section><section><h2>版本与更新</h2><p id="version"></p><h3 id="updateTitle">自动更新</h3><p id="updateStatus" role="status" aria-live="polite"></p><progress id="updateProgress" max="100" value="0" style="width:100%" hidden></progress><p id="updateDetail"></p><button id="checkUpdate">检查更新</button><button id="applyUpdate" hidden>准备安装更新</button><button id="cancelUpdate" class="secondary" hidden>取消自动安装</button><div id="applyConfirm" hidden><p>金宝将退出，下载和设置会保留。请先保存 DSH 中的工作并正常退出 DSH；关闭后金宝会自动安装并重新启动，无需再点启动脚本。</p><button id="confirmApply">确认准备安装</button><button id="dismissApply" class="secondary">暂不安装</button></div><section id="installedRelease"><h3 id="installedReleaseTitle">当前版本更新日志</h3><pre id="installedReleaseNotes"></pre><a href="https://github.com/YuanCao1996/dsh-jinbao-desktop/releases" target="_blank" rel="noopener noreferrer">查看历史版本更新日志</a></section><details id="releaseDetails" hidden><summary id="releaseSummary">新版本更新内容</summary><pre id="releaseNotes"></pre></details><p>后台下载不影响游戏，对局中暂不安装。也可以下次正常启动时自动更新。</p></section>
 <details class="panel"><summary>维护与诊断</summary><p>日常操作均可在此完成。修复会等待你正常退出 DSH，不会强制结束工作。</p><button id="check" class="secondary">刷新检测</button><button id="repair" class="secondary">修复扩展</button><button id="exit" class="secondary">退出金宝</button><p id="maintenance"></p><p id="teamCacheStatus" hidden></p><p id="teamUsageStatus" hidden></p><pre id="diagnostics"></pre><div id="testDiagnostics" hidden><p id="recordingStatus"></p><p>诊断只存本机，不含聊天正文、玩家名、凭据或截图。发现问题时先标记，测试后导出。导出包含最近三次启动的诊断记录，重启后也可导出。</p><select id="diagnosticKind"><option value="battle">战况不更新</option><option value="chat">聊天问题</option><option value="augments">海克斯识别</option><option value="overlay">窗口闪烁或消失</option><option value="shortcuts">快捷键问题</option><option value="other">其他问题</option></select><button id="markIssue" class="secondary">标记问题时间</button><button id="exportDiagnostics" class="secondary">导出诊断记录</button><p id="diagnosticFeedback" role="status" aria-live="polite"></p></div></details>
 <section id="speechSettings"><h2>角色与语音</h2><p>与 App 相同的四个角色和 CosyVoice 音色。角色影响战况与聊天的表达；语音开关不影响文字建议。</p><label for="speechRole">当前角色</label><select id="speechRole"></select><label><input id="speechEnabled" type="checkbox" style="width:auto">语音播报战况建议</label><label><input id="speechChat" type="checkbox" style="width:auto">同时朗读聊天回答</label><label for="speechSource">语音服务</label><select id="speechSource"><option value="official">金宝官方语音（使用电脑登录）</option><option value="byok">自有 DashScope 语音 Key（本机直连）</option></select><div id="speechOwnKey" hidden><label for="speechKey">DashScope 语音 Key</label><input id="speechKey" type="password" autocomplete="new-password" placeholder="留空保持已保存的密钥"><p id="speechKeyHint"></p><button id="saveSpeechKey" class="secondary">保存语音 Key</button></div><button id="previewSpeech" class="secondary">试听角色介绍</button><p id="speechStatus" role="status" aria-live="polite"></p><p>低频短播报：每条最多60字，正常播报结束后至少安静45秒。自动建议不排队；聊天只留最新一条待播，20秒过期。自动分析请求结束后至少间隔60秒，播报忙时不发请求。文字内容仍完整保留。</p></section>
+<section id="experienceSettings"><h2>经验积累</h2>
+<p>每局结束会从本局日志里提炼最多 3 条教训（按胜负、阵亡模式与识别盲区），下次遇到同一英雄/强化时会作为"历史经验"提供给教练。觉得不对就点该行右侧的按钮，这条会立即降级并不再注入。</p>
+<p id="experienceEmpty">正在读取…</p>
+<div id="experienceList"></div>
+</section>
 <section id="activitySettings"><h2>直播展示</h2><label><input id="agentActivityEnabled" type="checkbox" style="width:auto;margin-right:8px">在大框战况页显示智能体过程</label><p id="agentActivityHint">显示真实执行状态、工具调用与公开回答草稿；默认关闭。不会显示原始推理内容、工具参数或登录凭据。</p></section>
 </main></div><script>
 const incomingNonce=location.hash.slice(1);let nonce=incomingNonce;
@@ -152,4 +157,31 @@ if(typeof document.createElement==='function'&&typeof document.querySelector==='
   if(!opened){welcomeLink.textContent='新手引导 · 首次使用建议先看一遍';welcomeLink.style.fontWeight='600';}
  },250);
 }
+
+// 经验面板：列出会被注入的教训，并允许玩家一句话否决（调 /api/experience/correct）。
+async function refreshExperience(){
+ const list=document.getElementById('experienceList');if(!list)return;
+ const empty=document.getElementById('experienceEmpty');
+ try{
+  const data=await (await fetch('/api/experience')).json();
+  const rows=(data&&data.rows)||[];
+  list.textContent='';
+  if(!rows.length){empty.textContent='还没有经验：打完一局会自动生成。';empty.hidden=false;return;}
+  empty.hidden=true;
+  for(const row of rows){
+   const line=document.createElement('div');line.className='experienceRow';
+   const badge=(row.private?'私有':'公有')+' · '+(row.status==='stale'?'已否决':'生效中')+' · '+(row.evidence&&row.evidence.hits!=null?row.evidence.hits+'/'+row.evidence.games+'局':'');
+   const text=document.createElement('span');text.textContent=row.claim+'  ['+badge+']';
+   const veto=document.createElement('button');veto.type='button';veto.textContent='这条不对';
+   veto.disabled=row.status==='stale';
+   veto.addEventListener('click',async()=>{
+    const reason=window.prompt('哪里不对？（可留空）','')||'';
+    await fetch('/api/experience/correct',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:row.id,reason})});
+    await refreshExperience();
+   });
+   line.appendChild(text);line.appendChild(veto);list.appendChild(line);
+  }
+ }catch{empty.hidden=false;empty.textContent='经验暂时读不到，稍后再试。';}
+}
+if(document.getElementById('experienceList'))refreshExperience();
 </script></body></html>

@@ -46,7 +46,8 @@ function confidenceOf(record) {
   const hits = Math.max(0, Number(record.evidence?.hits) || 0);
   const counter = Math.max(0, Number(record.evidence?.counter) || 0);
   // Laplace smoothed hit rate, penalised per refutation: one counter stays visible instead of
-  // being averaged away, which is what makes "learn from mistake" different from "self praise".
+  // being averaged away, which is what makes learning from mistakes different from flattery.
+// Note: the packager walks import-like text, so comments must never quote a module specifier.
   return clamp((hits + 1) / (games + 2) - 0.15 * counter, 0.05, 0.99);
 }
 

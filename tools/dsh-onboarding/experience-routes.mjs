@@ -38,3 +38,42 @@ export function correctRequest(value) {
   if (!id) return { ok: false, reason: 'missing-id' };
   return { ok: true, id, reason: String(value?.reason ?? '').slice(0, 200) };
 }
+
+// 公有经验库（社区共享）：同一套纯函数思路，先能单测再做 HTTP。
+const PATH_PUBLIC = '/api/public/experience';
+
+export function publicLibraryRoute(method, url) {
+  const path = String(url ?? '').split('?')[0];
+  const verb = String(method ?? '').toUpperCase();
+  if (path !== PATH_PUBLIC) return { action: 'none' };
+  if (verb === 'GET') return { action: 'query' };
+  if (verb === 'POST') return { action: 'upsert' };
+  return { action: 'method-not-allowed' };
+}
+
+// 查询参数一律夹紧：limit 最多 100 条，避免一次把整库拖走；minGames 不能是负数。
+export function publicQueryParams(url) {
+  let params;
+  try { params = new URL(String(url ?? ''), 'http://127.0.0.1').searchParams; } catch { params = new URLSearchParams(); }
+  const number = (name, fallback, low, high) => {
+    const text = params.get(name);
+    // Missing is not zero: Number(null) would silently turn "no filter" into "minGames=0".
+    if (text === null || text.trim() === '') return fallback;
+    const value = Number(text);
+    if (!Number.isFinite(value)) return fallback;
+    return Math.min(high, Math.max(low, Math.trunc(value)));
+  };
+  return {
+    game: params.get('game') || 'lol',
+    patch: params.get('patch') || null,
+    kind: params.get('kind') || null,
+    limit: number('limit', 50, 1, 100),
+    minGames: number('minGames', 1, 0, 10000),
+  };
+}
+
+// 上传批次也夹紧：一次最多 100 条，防止误把整库推上来。
+export function publicUpsertBody(value) {
+  const lessons = Array.isArray(value?.lessons) ? value.lessons.slice(0, 100) : [];
+  return { lessons };
+}

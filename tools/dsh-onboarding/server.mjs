@@ -1,5 +1,6 @@
 import http from 'node:http';
-import { experienceRoute, experienceListPayload, correctRequest } from "./experience-routes.mjs";
+import { experienceRoute, experienceListPayload, correctRequest, publicLibraryRoute, publicQueryParams, publicUpsertBody } from "./experience-routes.mjs";
+import { createPublicLibrary } from "../dsh-coach-server/lib/public-library.mjs";
 import { createExperienceStore } from "../dsh-coach-server/lib/experience-store.js";
 import { createExperienceRuntime } from "../dsh-coach-server/lib/experience-runtime.mjs";
 import { randomBytes,timingSafeEqual,randomUUID } from 'node:crypto';
@@ -158,6 +159,7 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  }
  // 经验库：每局结束自动沉淀（JINBAO_EXPERIENCE=off 可关闭）。目录跟状态目录走，不新增配置。
 const experienceStore=createExperienceStore({dir:join(stateDir,'experience')});
+const publicLibrary=createPublicLibrary({dir:join(stateDir,'experience','community')});
 const experienceRuntime=createExperienceRuntime({store:experienceStore,enabled:String(process.env.JINBAO_EXPERIENCE??'on').toLowerCase()!=='off'});
 const overlay=await createOverlayService({stateDir,activity,canAutoRequest,experience:experienceRuntime,
   agentChat:async request=>{
@@ -300,6 +302,14 @@ const overlay=await createOverlayService({stateDir,activity,canAutoRequest,exper
    const value=correctRequest(await body(req,1024));
    const result=value.ok&&experienceStore?await experienceStore.correct(value.id,value.reason):value;
    send(res,200,result);return;
+  }
+  // 公有经验库：匿名化后的共享知识，任何人都能读，写入必须过闸门。
+  if(publicLibraryRoute(req.method,req.url).action==='query'){
+   send(res,200,{lessons:await publicLibrary.query(publicQueryParams(req.url))});return;
+  }
+  if(publicLibraryRoute(req.method,req.url).action==='upsert'){
+   const payload=publicUpsertBody(await body(req,65536));
+   send(res,200,await publicLibrary.upsert(payload.lessons));return;
   }
   if(req.url==='/api/diagnostics'&&req.method==='GET'){send(res,200,diagnostics?.status()??{recording:false,supported:false});return;}
    if(req.url==='/api/diagnostics/mark'&&req.method==='POST'&&diagnostics){const value=await body(req,1024);send(res,200,diagnostics.mark(value.kind));return;}

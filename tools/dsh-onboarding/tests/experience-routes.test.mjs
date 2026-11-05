@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { experienceRoute, experienceListPayload, correctRequest } from '../experience-routes.mjs';
+import { experienceRoute, experienceListPayload, correctRequest, publicLibraryRoute, publicQueryParams, publicUpsertBody } from '../experience-routes.mjs';
 
 test('each method and path reaches exactly one handler', () => {
   assert.equal(experienceRoute('GET', '/api/experience').action, 'list');
@@ -29,4 +29,19 @@ test('a veto without an id is refused rather than reported as success', () => {
   assert.deepEqual(correctRequest({ id: '   ' }), { ok: false, reason: 'missing-id' });
   assert.equal(correctRequest({ id: 'xp-1', reason: '不对' }).id, 'xp-1');
   assert.equal(correctRequest({ id: 'xp-1', reason: 'x'.repeat(500) }).reason.length, 200, 'reasons are bounded');
+});
+
+test('the community library has one read and one write route', () => {
+  assert.equal(publicLibraryRoute('GET', '/api/public/experience').action, 'query');
+  assert.equal(publicLibraryRoute('POST', '/api/public/experience').action, 'upsert');
+  assert.equal(publicLibraryRoute('DELETE', '/api/public/experience').action, 'method-not-allowed');
+  assert.equal(publicLibraryRoute('GET', '/api/experience').action, 'none');
+});
+
+test('query parameters are clamped so one client cannot pull or push the whole library', () => {
+  assert.deepEqual(publicQueryParams('/api/public/experience?game=lol&patch=14.21&limit=9999'), { game: 'lol', patch: '14.21', kind: null, limit: 100, minGames: 1 });
+  assert.equal(publicQueryParams('/api/public/experience?limit=-5').limit, 1);
+  assert.equal(publicQueryParams('/api/public/experience').game, 'lol');
+  assert.equal(publicUpsertBody({ lessons: new Array(150).fill({ claim: 'x' }) }).lessons.length, 100);
+  assert.deepEqual(publicUpsertBody({}), { lessons: [] });
 });

@@ -159,7 +159,9 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
    activeGame:snapshot.game,activeMatch:snapshot.match,matchActive:!!snapshot.match&&snapshot.gameTime!=='等待对局'&&!snapshot.ended&&Date.now()-snapshot.updatedAt<30000,updateBlocked:!!snapshot.match&&!snapshot.ended&&(snapshot.gameTime!=='等待对局'||snapshot.phase==='ChampSelect')&&Date.now()-snapshot.updatedAt<30000};
  }
  // 经验库：每局结束自动沉淀（JINBAO_EXPERIENCE=off 可关闭）。目录跟状态目录走，不新增配置。
-const experienceStore=createExperienceStore({dir:join(stateDir,'experience')});
+const experienceStore=createExperienceStore({dir:join(stateDir,'experience'),
+ // 学到的东西直接进悬浮窗的智能体动态，让玩家看见系统刚学到了什么（失败绝不影响入库）。
+ onLearn:(event)=>{try{if(activity&&activity.isEnabled&&activity.isEnabled()&&activity.note)activity.note({task:'learn',topic:'learn',label:event.text,clock:''});}catch{}}});
 // 私有经验的归属：默认本机单人；将来接账号时换成账号标识。
 const PLAYER_ID=String(process.env.JINBAO_PLAYER_ID||'local');
 const publicLibrary=createPublicLibrary({dir:join(stateDir,'experience','community')});

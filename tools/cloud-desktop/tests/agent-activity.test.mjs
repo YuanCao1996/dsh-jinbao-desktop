@@ -30,3 +30,17 @@ test('router emits lifecycle IDs and cancellation when manual chat preempts coac
 const sse=data=>'data: '+(typeof data==='string'?data:JSON.stringify(data))+'\r\n\r\n';
 test('SSE publishes public text before finish and assembles fragmented tool calls without leaking reasoning',async()=>{let feed;const response=new Response(new ReadableStream({start(c){feed=c;}}),{headers:{'content-type':'text/event-stream'}});const seen=[];const result=readChatCompletion(response,{onText:t=>seen.push(t)});const write=v=>feed.enqueue(new TextEncoder().encode(sse(v)));write({choices:[{index:0,delta:{reasoning_content:'PRIVATE',content:'先查资料。'}}]});await new Promise(r=>setTimeout(r,0));assert.deepEqual(seen,['先查资料。']);write({choices:[{index:0,delta:{tool_calls:[{index:0,id:'call-1',function:{name:'get_current_',arguments:'{"a":'}}]}}]});write({choices:[{index:0,delta:{tool_calls:[{index:0,function:{name:'match_state',arguments:'1}'}}]},finish_reason:'tool_calls'}]});write('[DONE]');feed.close();const data=await result;assert.equal(data.choices[0].message.tool_calls[0].function.name,'get_current_match_state');assert.equal(data.choices[0].message.reasoning_content,'PRIVATE');assert.ok(!seen.join('').includes('PRIVATE'));});
 test('SSE rejects incomplete tool calls, truncated streams, excess bytes; JSON fallback works',async()=>{const response=v=>new Response(v,{headers:{'content-type':'text/event-stream'}});await assert.rejects(readChatCompletion(response(sse({choices:[{delta:{content:'未完成'}}]}))));await assert.rejects(readChatCompletion(response(sse({choices:[{delta:{tool_calls:[{index:0,id:'x',function:{name:'tool',arguments:'{'}}]},finish_reason:'tool_calls'}]})+sse('[DONE]'))));await assert.rejects(readChatCompletion(response('x'.repeat(100)),{maxBytes:50}));assert.equal((await readChatCompletion(Response.json({choices:[{message:{content:'完整回答'},finish_reason:'stop'}]}))).choices[0].message.content,'完整回答');});
+
+test('a learning note becomes its own activity row', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jinbao-activity-note-'));
+  try {
+    const activity = await createAgentActivity({ stateDir: dir });
+    await activity.setEnabled(true);
+    assert.equal(activity.note({ label: '记下一条经验：对面双坦先补重伤 · 已验证 3/3 局' }), true);
+    const snap = activity.snapshot({ game: 'lol', match: 'm1' });
+    assert.equal(snap.rows.length, 1);
+    assert.equal(snap.rows[0].topic, '经验学习');
+    assert.match(snap.rows[0].label, /对面双坦先补重伤/);
+    assert.equal(activity.note({ label: '   ' }), false, 'empty notes never create blank rows');
+  } finally { await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }); }
+});

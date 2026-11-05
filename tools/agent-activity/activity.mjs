@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {setTimeout as sleep} from 'node:timers/promises';
 
 const tools={get_current_match_state:'读取当前对局',get_lineup_context:'读取双方阵容',get_recent_match_events:'读取关键事件',query_match_events:'检索本局日志',query_current_match_events:'检索本局日志',search_local_knowledge:'检索游戏资料',site_query:'检索游戏资料',search_game_guides:'搜索游戏攻略',web_search:'搜索游戏攻略',web_fetch:'读取攻略正文',inspect_latest_screen:'观察游戏画面',get_user_memory:'读取游戏偏好',manage_user_memory:'管理明确偏好',set_observation_plan:'调整画面观察'};
-const topics={chat:'聊天',equipment:'出装分析',advice:'自动教练'};
+const topics={chat:'聊天',equipment:'出装分析',advice:'自动教练',learn:'经验学习'};
 const clock=value=>Number.isFinite(value)?String(Math.floor(value/60)).padStart(2,'0')+':'+String(Math.floor(value%60)).padStart(2,'0'):'等待对局';
 const safeId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,80}$/.test(value);
 export function sanitizeActivityText(value,sensitive=[]){
@@ -30,6 +30,14 @@ export async function createAgentActivity({stateDir,getView=()=>null,now=Date.no
  }
  const allowed=request=>{const view=getView();return !view||((view.game||'lol')===request.game&&(view.match||'waiting')===request.match);};
  const api={
+  // 经验学习等一次性事件：直接写一行，不参与任务生命周期。
+  note({task='learn',label='',clock='',topic='learn'}={}){
+   if(closed)return false;
+   const text=sanitizeActivityText(label);
+   if(!String(text).trim())return false;
+   row('note-'+randomUUID(),{id:task,topic,clock},text,'done');
+   return true;
+  },
   isEnabled:()=>enabled&&!closed,
   status:()=>({supported:true,enabled}),
   async setEnabled(value){

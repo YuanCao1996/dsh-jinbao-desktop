@@ -77,3 +77,28 @@ export function publicUpsertBody(value) {
   const lessons = Array.isArray(value?.lessons) ? value.lessons.slice(0, 100) : [];
   return { lessons };
 }
+
+// 私有经验 md 的读写（编辑后立刻生效）。
+const PATH_MD = '/api/experience/md';
+const KINDS = new Set(['recognition','knowledge','retrieval-web','retrieval-local','strategy','build','dispute','tool-failure','preference','correction','stats','pitfall','style']);
+
+export function mdEditRoute(method, url) {
+  const path = String(url ?? '').split('?')[0];
+  if (path !== PATH_MD) return { action: 'none' };
+  const verb = String(method ?? '').toUpperCase();
+  if (verb === 'GET') return { action: 'read' };
+  if (verb === 'POST') return { action: 'write' };
+  return { action: 'method-not-allowed' };
+}
+
+// 只允许编辑私有类别；公有经验不能从本机改（要走服务端纠正流程）。
+const PRIVATE_ONLY = new Set(['preference','correction','stats','pitfall','style']);
+export function mdEditBody(value) {
+  const kind = String(value?.kind ?? '').trim();
+  if (!KINDS.has(kind)) return { ok: false, reason: 'unknown-kind' };
+  if (!PRIVATE_ONLY.has(kind)) return { ok: false, reason: 'private-only' };
+  const mdText = typeof value?.mdText === 'string' ? value.mdText.slice(0, 8000) : '';
+  if (!mdText.trim()) return { ok: false, reason: 'empty' };
+  const by = value?.by === 'agent' ? 'agent' : 'player';
+  return { ok: true, kind, mdText, by, reason: String(value?.reason ?? '').slice(0, 160) };
+}

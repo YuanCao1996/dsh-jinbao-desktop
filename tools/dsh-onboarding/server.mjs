@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { experienceRoute, experienceListPayload, correctRequest, publicLibraryRoute, publicQueryParams, publicUpsertBody } from "./experience-routes.mjs";
+import { experienceRoute, experienceListPayload, correctRequest, publicLibraryRoute, publicQueryParams, publicUpsertBody, mdEditRoute, mdEditBody } from "./experience-routes.mjs";
 import { createPublicLibrary } from "../dsh-coach-server/lib/public-library.mjs";
 import { createExperienceStore } from "../dsh-coach-server/lib/experience-store.js";
 import { createExperienceRuntime } from "../dsh-coach-server/lib/experience-runtime.mjs";
@@ -160,6 +160,8 @@ export async function createSetupServer({credentials,stateDir,port=3084,coachPor
  }
  // 经验库：每局结束自动沉淀（JINBAO_EXPERIENCE=off 可关闭）。目录跟状态目录走，不新增配置。
 const experienceStore=createExperienceStore({dir:join(stateDir,'experience')});
+// 私有经验的归属：默认本机单人；将来接账号时换成账号标识。
+const PLAYER_ID=String(process.env.JINBAO_PLAYER_ID||'local');
 const publicLibrary=createPublicLibrary({dir:join(stateDir,'experience','community')});
 const experienceRuntime=createExperienceRuntime({store:experienceStore,enabled:String(process.env.JINBAO_EXPERIENCE??'on').toLowerCase()!=='off'});
 // 社区经验同步：只有配置了地址才启动；默认完全静默，离线也不影响任何本地功能。
@@ -319,6 +321,19 @@ const overlay=await createOverlayService({stateDir,activity,canAutoRequest,exper
   if(publicLibraryRoute(req.method,req.url).action==='upsert'){
    const payload=publicUpsertBody(await body(req,65536));
    send(res,200,await publicLibrary.upsert(payload.lessons));return;
+  }
+  // 私有经验 md：读出来给编辑器，写回去立刻生效（改 md 会退役旧条目、新增新条目）。
+  if(mdEditRoute(req.method,req.url).action==='read'){
+   const url=new URL(req.url,'http://127.0.0.1');const kind=String(url.searchParams.get('kind')??'');
+   const file=join(stateDir,'experience','private',PLAYER_ID,kind+'.md');
+   const text=await readFile(file,'utf8').catch(()=>'');
+   send(res,200,{kind,mdText:text});return;
+  }
+  if(mdEditRoute(req.method,req.url).action==='write'){
+   const parsed=mdEditBody(await body(req,16384));
+   if(!parsed.ok){send(res,400,{error:parsed.reason});return;}
+   const result=await experienceStore.applyMdEdit({kind:parsed.kind,player:PLAYER_ID,mdText:parsed.mdText,by:parsed.by,reason:parsed.reason});
+   send(res,200,result);return;
   }
   if(req.url==='/api/diagnostics'&&req.method==='GET'){send(res,200,diagnostics?.status()??{recording:false,supported:false});return;}
    if(req.url==='/api/diagnostics/mark'&&req.method==='POST'&&diagnostics){const value=await body(req,1024);send(res,200,diagnostics.mark(value.kind));return;}

@@ -90,53 +90,10 @@ function Get-OverlayCategoryColor {
  }
  return $script:overlayCategoryColor
 }
-function Get-OverlayCategory($row){
- $stages=@{purchase='出装';enemyChange='威胁';augment='符文';postAugment='符文';death='阵亡';ultimate='技能';ace='团战';turret='进攻';inhib='进攻';objective='进攻';opening='开局';situation='局势'}
- $stage=[string]$row.stage
- $label=''
- if($stage -and $stages.ContainsKey($stage)){$label=$stages[$stage]}
- elseif($row.kind -eq 'praise'){$label='夸奖'}
- elseif($row.dimension){$dims=@{build='出装';risk='威胁';augment='符文';map='地图';now='局势';plan='局势'};$dim=[string]$row.dimension;if($dims.ContainsKey($dim)){$label=$dims[$dim]}}
- # 玩家自己的消息统一标"提问"，关键词归类只用于教练的播报。
- if($row.role -eq 'user'){$label='提问'}
- if(!$label){
-  $text=[string]$row.text
-  $rules=@(
-   @('出装','出装|装备|成装|出什么|补一件|法穿鞋|虚空之杖|大件'),
-   @('团战','开团|团战|打团|接团|集火|先手'),
-   @('符文','海克斯|强化|质变'),
-   @('撤退','撤退|先退|回城|后撤|别追'),
-   @('进攻','推塔|压线|越塔|推进|进攻'),
-   @('阵容','阵容|对线|换线'),
-   @('技能','技能|大招|连招|闪现|控制'),
-   @('胜率','胜率|强度|T0|T1')
-  )
-  foreach($rule in $rules){if($text -match $rule[1]){$label=$rule[0];break}}
- }
- if(!$label){$label=if($row.role -eq 'user'){'提问'}else{'回答'}}
+# 标签判定已抽到 overlay-categories.ps1（与语法高亮同源、按词长与位置打分）。
+function Get-OverlayCategory($row){ return Get-OverlayTagCategory $row }
 
- $colors=Get-OverlayCategoryColor
- # 一个标签不够时补第二个（例如"出装 + 符文"），最多两个。
- $labels=@($label)
- if($row.role -ne 'user' -and $label -ne '回答' -and $label -ne '夸奖'){
-  $text=[string]$row.text
-  foreach($rule in @(
-   @('出装','出装|装备|成装|出什么|补一件|法穿鞋|虚空之杖|大件'),
-   @('团战','开团|团战|打团|接团|集火|先手'),
-   @('符文','海克斯|强化|质变'),
-   @('撤退','撤退|先退|回城|后撤|别追'),
-   @('进攻','推塔|压线|越塔|推进|进攻'),
-   @('阵容','阵容|对线|换线'),
-   @('技能','技能|大招|连招|闪现|控制'),
-   @('胜率','胜率|强度|T0|T1')
-  )){
-   if($labels.Count -ge 2){break}
-   if($labels -notcontains $rule[0] -and $text -match $rule[1]){$labels+=$rule[0]}
-  }
- }
- $tags=@($labels|ForEach-Object {[pscustomobject]@{label=$_;color=$colors[$_]}})
- [pscustomobject]@{label=$labels[0];labels=$labels;tags=$tags;color=$colors[$labels[0]]}
-}
+. (Join-Path $PSScriptRoot 'overlay-categories.ps1')
 function Update-ChatJump {
  if(!$controls.LatestMessageButton){return}
  $scroll=$controls.PageScroll

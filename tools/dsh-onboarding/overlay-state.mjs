@@ -1,4 +1,5 @@
 import { condenseAdvice } from '../cloud-desktop/advice-text.mjs';
+import { hextechLeaderboardPage, heroLeaderboardPage, topRuneId } from './leaderboard-pages.mjs';
 import { mkdir, readdir, stat, open, readFile, writeFile, rename, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WZRY_ADAPTER } from '../dsh-coach-server/lib/adapters/wzry.js';
@@ -437,12 +438,28 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   try{const saved=JSON.parse(await readFile(join(stateDir,'overlay-chat.json'),'utf8'));if(saved&&Array.isArray(saved.chat))restoredChat=saved;}catch{}
   if(restoredChat&&!restoredChat.game&&!restoredChat.match){state.chat=restoredChat.chat.slice(-50);restoredChat=null;}
   let knowledge = {}, knowledgeKey = '', refreshTask = null, refreshQueued = false, scanning = false, closed = false, busy = false;
+  // 等待态总榜（performRefresh 里写入，视图直接读，避免被 knowledge 覆盖丢掉）
+  let leaderboardData = null;
   let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
   let retryKnowledgeAt=Infinity;
   let lastForcedKnowledgeAt=0;
   const contextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+state.me.champion+':'+JSON.stringify([offerNames(state.offers).sort(),[...state.ownedAugments].sort(),rosterChampions(state).sort()]);
   const baseContextKey = () => state.game+':'+state.match+':'+state.matchStartedAt+':'+(state.phase==='ChampSelect'?'selection':state.me.champion);
-  const view=()=>({...overlayView(state,knowledge),agentActivity:activity?.snapshot(state)??{supported:false,enabled:false,revision:0,rows:[]}});
+  // 等待态（大厅空闲、没有当前英雄也没有备选席）用总榜填满两页，避免空着；
+  // 有英雄或进入对局后立即回到原本的本局数据。
+  const idleLeaderboard=()=>{
+    const book=knowledge.leaderboard??leaderboardData;
+    if(state.game!=='lol'||state.me.champion||rosterChampions(state).length||!book)return null;
+    const hex=Array.isArray(book.hextech)?book.hextech:[];
+    const heroes=Array.isArray(book.heroes)?book.heroes:[];
+    if(!hex.length&&!heroes.length)return null;
+    const names=new Map((knowledge.rows??[]).filter(row=>Number.isInteger(Number(row?.id))).map(row=>[Number(row.id),row.name]));
+    const out={};
+    if(hex.length)out.augments=hextechLeaderboardPage(hex);
+    if(heroes.length)out.players=heroLeaderboardPage(heroes,{topRune:row=>{const id=topRuneId(row);return id===null?'':(names.get(id)??'');}});
+    return out;
+  };
+  const view=()=>({...overlayView(state,knowledge),...(idleLeaderboard()??{}),agentActivity:activity?.snapshot(state)??{supported:false,enabled:false,revision:0,rows:[]}});
   async function save() {
     if (closed) return;
     // 局结束时把这一局交给经验库（同一局只会提炼一次；未成交给胜负事实，因此只沉淀与胜负无关的教训）。
@@ -533,7 +550,7 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
         ]);
         const pick=res=>res.status==='fulfilled'?(res.value.results??[]).map(item=>item.data):[];
         const hexRows=pick(hexRes),heroRows=pick(heroRes);
-        if(hexRows.length||heroRows.length){cache.leaderboard={hextech:hexRows,heroes:heroRows};cache.leaderboardAt=Date.now();}
+        if(hexRows.length||heroRows.length){leaderboardData={hextech:hexRows,heroes:heroRows};cache.leaderboardAt=Date.now();}
         if(hexRes.status==='rejected')failed(hexRes.reason);
         if(heroRes.status==='rejected')failed(heroRes.reason);
       }

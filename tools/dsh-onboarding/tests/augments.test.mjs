@@ -335,3 +335,21 @@ test('the experience pack reaches the shared context the coach already receives'
   assert.ok(text.length<600,'the pack stays small enough for the overlay');
  }finally{await service.close();await rm(dir,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
 });
+
+test('a finished match is distilled into the store by the service itself', async () => {
+ const dir=await mkdtemp(join(tmpdir(),'jinbao-xp-end-'));
+ await mkdir(join(dir,'logs'));
+ const log=join(dir,'logs/live.jsonl');
+ await writeFile(log,JSON.stringify({game:'lol',kind:'game_start',t:Date.now(),me:{champion:'安妮',items:[]},allies:[],enemies:[]})+'\n');
+ const store=createExperienceStore({dir:join(dir,'experience')});
+ const runtime=createExperienceRuntime({store,player:'local'});
+ const service=await createOverlayService({stateDir:dir,pollMs:10,search:async()=>({results:[]}),experience:runtime});
+ try{
+  for(let frame=0;frame<9;frame+=1)await appendFile(log,JSON.stringify({game:'lol',kind:'augment_capture_blind',t:Date.now()})+'\n');
+  await appendFile(log,JSON.stringify({game:'lol',kind:'phase',phase:'EndOfGame',t:Date.now()})+'\n');
+  let rows=[];
+  for(let i=0;i<100&&!rows.length;i+=1){await new Promise(r=>setTimeout(r,20));rows=store.snapshot();}
+  assert.ok(rows.length>=1,'the finished match must reach the store without a manual command');
+  assert.equal(rows.some(r=>r.kind==='recognition'),true,'blind frames become a shared recognition lesson');
+ }finally{await service.close();await rm(dir,{recursive:true,force:true,maxRetries:3,retryDelay:100});}
+});

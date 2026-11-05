@@ -440,6 +440,7 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   let knowledge = {}, knowledgeKey = '', refreshTask = null, refreshQueued = false, scanning = false, closed = false, busy = false;
   // 等待态总榜（performRefresh 里写入，视图直接读，避免被 knowledge 覆盖丢掉）
   let leaderboardData = null;
+  let lastIdleLeaderboardAt = 0;
   let forceRefresh = false, cached = { key: '', rows: [], candidates: new Map(), heroes: new Map() };
   let retryKnowledgeAt=Infinity;
   let lastForcedKnowledgeAt=0;
@@ -621,6 +622,23 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
   async function scan() {
     if (scanning || closed) return;
     scanning = true;
+    // 空闲态（无对局/无英雄）也要取一次总榜：这是唯一在空闲时仍会执行的循环，只靠 performRefresh 内部的看门狗永远不会触发。
+    // 空闲态直接取两份总榜（不经过 refresh：那条链路在无英雄时会被多处条件挡住，
+    // 实测断点式排查代价太高）。取到后写回状态文件，两页即可显示总榜。
+    if (state.game === 'lol' && !state.me.champion && !rosterChampions(state).length && !leaderboardData && Date.now() - lastIdleLeaderboardAt > 60000) {
+      lastIdleLeaderboardAt = Date.now();
+      void (async () => {
+        try {
+          const [hexRes, heroRes] = await Promise.allSettled([
+            search({game:'lol',query:'大乱斗',dataset:'leaderboard',board:'hextech',limit:10}),
+            search({game:'lol',query:'大乱斗',dataset:'leaderboard',board:'heroes',limit:10}),
+          ]);
+          const pick = res => res.status === 'fulfilled' ? (res.value.results ?? []).map(item => item.data) : [];
+          const hex = pick(hexRes), heroes = pick(heroRes);
+          if (hex.length || heroes.length) { leaderboardData = {hextech: hex, heroes}; flush(); }
+        } catch {}
+      })();
+    }
     try {
       const pending = [];
       for (const file of (await readdir(logs)).filter(f => f.endsWith('.jsonl') && !f.includes('overlay-chat'))) {
@@ -687,6 +705,12 @@ export async function createOverlayService({ stateDir, agentChat, agentImage, se
       // changed. If a champion is known and the lookup still has no rows, force one attempt
       // instead of waiting for a change that may never come.
       if(!closed&&!refreshTask&&!state.ended&&state.me.champion&&!(knowledge.rows??[]).length&&Date.now()-state.at<30000&&Date.now()>=lastForcedKnowledgeAt+30000){
+ // 空闲态（没有当前英雄、没有备选席）也需要取一次总榜，否则两页永远是空文案：
+ // 上面那条看门狗要求 state.me.champion，空闲时永远不会触发。
+ if(!closed&&!refreshTask&&!state.ended&&state.game==='lol'&&!state.me.champion&&!rosterChampions(state).length
+    &&!leaderboardData&&Date.now()-state.at<120000&&Date.now()>=lastForcedKnowledgeAt+30000){
+  lastForcedKnowledgeAt=Date.now();void refresh(true).catch(()=>{});
+ }
        lastForcedKnowledgeAt=Date.now();void refresh(true).catch(()=>{});
       }
       settlePraise(state, Date.now(), { role: await currentPraiseRole() });
